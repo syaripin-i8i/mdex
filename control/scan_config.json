@@ -1,0 +1,18 @@
+{
+  "scan_roots": [],
+  "exclude_patterns": [
+    ".git/**",
+    "node_modules/**",
+    "*.min.md"
+  ],
+  "node_type_map": {
+    "decision": ["decision", "decisions", "adr"],
+    "task": ["task", "tasks", "todo"],
+    "design": ["design", "designs", "architecture"],
+    "log": ["log", "logs", "diary"],
+    "spec": ["spec", "specs", "requirements"],
+    "reference": ["reference", "ref", "refs", "notes"]
+  },
+  "summary_max_sentences": 3,
+  "output_file": "mdex_index.json"
+}

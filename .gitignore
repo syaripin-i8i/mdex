@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+mdex_index.json
+mdex_index_*.json
+*.log
+.venv/
+venv/
