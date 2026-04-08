@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -13,6 +12,21 @@ H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 H2_PLUS_RE = re.compile(r"^(#{2,6})\s+(.+?)\s*$")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 MD_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+METADATA_LINE_RE = re.compile(r"^\*\*([^*]+)\*\*:\s*(.+?)\s*$")
+TASK_ID_RE = re.compile(r"\bT\d{14}\b")
+
+METADATA_KEY_MAP = {
+    "id": "id",
+    "project": "project",
+    "status": "status",
+    "type": "type",
+    "updated": "updated",
+    "tags": "tags",
+    "depends_on": "depends_on",
+    "relates_to": "relates_to",
+}
 
 
 def _normalize_updated(value: Any) -> str:
@@ -48,6 +62,59 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     if not isinstance(loaded, dict):
         loaded = {}
     return loaded, body
+
+
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen = set()
+    ordered: list[str] = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+def _strip_code_literals(text: str) -> str:
+    without_fences = FENCED_CODE_RE.sub("", text)
+    return INLINE_CODE_RE.sub("", without_fences)
+
+
+def _extract_inline_metadata(body: str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("## "):
+            break
+
+        match = METADATA_LINE_RE.match(stripped)
+        if not match:
+            continue
+
+        raw_key = match.group(1).strip().lower().replace(" ", "_")
+        mapped_key = METADATA_KEY_MAP.get(raw_key)
+        if not mapped_key:
+            continue
+
+        raw_value = match.group(2).strip()
+        if not raw_value:
+            continue
+
+        if mapped_key in {"tags", "depends_on", "relates_to"}:
+            values = [item.strip() for item in re.split(r"[,、]", raw_value) if item.strip()]
+            metadata[mapped_key] = values
+        else:
+            metadata[mapped_key] = raw_value
+    return metadata
+
+
+def _merge_frontmatter(frontmatter: dict[str, Any], inline_metadata: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(frontmatter)
+    for key, value in inline_metadata.items():
+        if key not in merged or merged.get(key) in (None, "", []):
+            merged[key] = value
+    return merged
 
 
 def _extract_wikilinks(text: str) -> list[str]:
@@ -101,6 +168,8 @@ def _extract_summary(body: str, max_sentences: int = 3, max_chars: int = 200) ->
             continue
         if lines[0].startswith("#"):
             continue
+        if all(METADATA_LINE_RE.match(line) for line in lines):
+            continue
         text = " ".join(lines)
         sentences = _split_sentences(text)
         if not sentences:
@@ -120,32 +189,42 @@ def _normalize_tags(value: Any) -> list[str]:
     return []
 
 
+def _extract_task_refs(text: str) -> list[str]:
+    return _dedupe_keep_order(TASK_ID_RE.findall(text))
+
+
 def parse_file(path: str) -> dict[str, Any]:
     source_path = Path(path)
     raw_text = source_path.read_text(encoding="utf-8")
 
     frontmatter, body = _split_frontmatter(raw_text)
+    inline_metadata = _extract_inline_metadata(body)
+    merged_frontmatter = _merge_frontmatter(frontmatter, inline_metadata)
+
     lines = body.splitlines()
+    link_source = _strip_code_literals(body)
 
     title = _extract_title(lines, source_path.stem)
     headings = _extract_headings(lines)
-    wikilinks = _extract_wikilinks(body)
-    md_links = _extract_md_links(body)
+    wikilinks = _extract_wikilinks(link_source)
+    md_links = _extract_md_links(link_source)
     summary = _extract_summary(body, max_sentences=3, max_chars=200)
-    tags = _normalize_tags(frontmatter.get("tags"))
+    tags = _normalize_tags(merged_frontmatter.get("tags"))
+    task_refs = _extract_task_refs(raw_text)
 
-    updated = _normalize_updated(frontmatter.get("updated"))
+    updated = _normalize_updated(merged_frontmatter.get("updated"))
     if not updated:
         mtime = source_path.stat().st_mtime
         updated = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
 
     return {
         "title": title,
-        "frontmatter": frontmatter,
+        "frontmatter": merged_frontmatter,
         "wikilinks": wikilinks,
         "md_links": md_links,
         "summary": summary,
         "headings": headings,
         "tags": tags,
         "updated": updated,
+        "task_refs": task_refs,
     }

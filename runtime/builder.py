@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,10 +55,18 @@ def _normalize_str_list(value: Any) -> list[str]:
     return []
 
 
-def _resolve_type(file_id: str, frontmatter: dict[str, Any], node_type_map: dict[str, list[str]]) -> str:
+def _resolve_type(
+    file_id: str,
+    frontmatter: dict[str, Any],
+    node_type_map: dict[str, list[str]],
+    title: str,
+) -> str:
     fm_type = frontmatter.get("type")
     if isinstance(fm_type, str) and fm_type.strip():
         return fm_type.strip().lower()
+
+    if title.strip().lower().startswith("task:"):
+        return "task"
 
     dir_parts = [part.lower() for part in Path(file_id).parts[:-1]]
     for node_type, aliases in node_type_map.items():
@@ -145,6 +152,21 @@ def _dedupe_keep_order(items: list[str]) -> list[str]:
     return ordered
 
 
+def _resolve_status(file_path: Path, frontmatter: dict[str, Any]) -> str:
+    raw_status = frontmatter.get("status")
+    status = str(raw_status).strip().lower() if raw_status is not None and str(raw_status).strip() else "unknown"
+
+    parent_names = {part.lower() for part in file_path.parts}
+    is_done_dir = "done" in parent_names
+    is_pending_dir = "pending" in parent_names
+
+    if is_done_dir and status in {"unknown", "pending"}:
+        return "done"
+    if is_pending_dir and status == "unknown":
+        return "pending"
+    return status
+
+
 def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
     root_path = Path(root).resolve()
     exclude_patterns = _normalize_str_list(config.get("exclude_patterns"))
@@ -171,12 +193,12 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             frontmatter = {}
 
         node_id = path_to_id[file_path]
-        node_type = _resolve_type(node_id, frontmatter, node_type_map)
+        title = str(parsed.get("title", ""))
+        node_type = _resolve_type(node_id, frontmatter, node_type_map, title)
 
         project = frontmatter.get("project")
-        status = frontmatter.get("status")
         project_str = str(project).strip() if project is not None and str(project).strip() else "unknown"
-        status_str = str(status).strip().lower() if status is not None and str(status).strip() else "unknown"
+        status_str = _resolve_status(file_path, frontmatter)
 
         wikilink_targets = [
             _clean_wikilink_target(str(item))
@@ -192,6 +214,7 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             [
                 _resolve_target_id(target, file_path, root_path, path_to_id, stem_to_ids)
                 for target in wikilink_targets + md_link_targets
+                if target
             ]
         )
 
@@ -208,18 +231,33 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             [
                 _resolve_target_id(target, file_path, root_path, path_to_id, stem_to_ids)
                 for target in depends_raw
+                if target
             ]
         )
         relates_resolved = _dedupe_keep_order(
             [
                 _resolve_target_id(target, file_path, root_path, path_to_id, stem_to_ids)
                 for target in relates_raw
+                if target
             ]
         )
 
+        task_ref_targets = _dedupe_keep_order(
+            [
+                _resolve_target_id(f"{str(task_id).strip()}.md", file_path, root_path, path_to_id, stem_to_ids)
+                for task_id in parsed.get("task_refs", [])
+                if str(task_id).strip()
+            ]
+        )
+        relates_resolved = _dedupe_keep_order(relates_resolved + task_ref_targets)
+
+        links_to_resolved = [target for target in links_to_resolved if target and target != node_id]
+        depends_resolved = [target for target in depends_resolved if target and target != node_id]
+        relates_resolved = [target for target in relates_resolved if target and target != node_id]
+
         node = {
             "id": node_id,
-            "title": parsed.get("title", ""),
+            "title": title,
             "type": node_type,
             "project": project_str,
             "status": status_str,
