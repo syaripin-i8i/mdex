@@ -8,8 +8,32 @@ def _to_posix(path_value: str) -> str:
     return path_value.replace("\\", "/")
 
 
+def _pattern_variants(pattern: str) -> list[str]:
+    normalized = _to_posix(pattern.strip())
+    if not normalized:
+        return []
+
+    variants = {normalized}
+    if not normalized.startswith("**/"):
+        variants.add(f"**/{normalized}")
+
+    if normalized.endswith("/**"):
+        base = normalized[: -len("/**")].rstrip("/")
+        if base:
+            variants.add(base)
+            if not base.startswith("**/"):
+                variants.add(f"**/{base}")
+
+    return sorted(variants)
+
+
 def _is_excluded(relative_path: str, exclude_patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(relative_path, pattern) for pattern in exclude_patterns)
+    path = _to_posix(relative_path)
+    for pattern in exclude_patterns:
+        for candidate in _pattern_variants(pattern):
+            if fnmatch.fnmatch(path, candidate):
+                return True
+    return False
 
 
 def list_markdown_files(root: str, exclude_patterns: list[str] | None = None) -> list[str]:

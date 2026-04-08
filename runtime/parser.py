@@ -16,6 +16,8 @@ FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 METADATA_LINE_RE = re.compile(r"^\*\*([^*]+)\*\*:\s*(.+?)\s*$")
 TASK_ID_RE = re.compile(r"\bT\d{14}\b")
+INLINE_MD_PATH_RE = re.compile(r"`([^`\n]*?\.md(?:#[^`\n]*)?)`")
+WINDOWS_ABS_MD_RE = re.compile(r"(?i)\b[a-z]:[\\/][^\s`\"'<>|]+?\.md\b")
 
 METADATA_KEY_MAP = {
     "id": "id",
@@ -193,6 +195,34 @@ def _extract_task_refs(text: str) -> list[str]:
     return _dedupe_keep_order(TASK_ID_RE.findall(text))
 
 
+def _clean_path_reference(raw: str) -> str:
+    value = raw.strip().strip("`\"'[]()<>")
+    value = value.rstrip(".,;:")
+    value = value.split("#", 1)[0].split("?", 1)[0].strip()
+    if not value:
+        return ""
+    if not value.lower().endswith(".md"):
+        return ""
+    return value
+
+
+def _extract_path_refs(body: str) -> list[str]:
+    source = FENCED_CODE_RE.sub("", body)
+    refs: list[str] = []
+
+    for match in INLINE_MD_PATH_RE.findall(source):
+        clean = _clean_path_reference(match)
+        if clean:
+            refs.append(clean)
+
+    for match in WINDOWS_ABS_MD_RE.findall(source):
+        clean = _clean_path_reference(match)
+        if clean:
+            refs.append(clean)
+
+    return _dedupe_keep_order(refs)
+
+
 def parse_file(path: str) -> dict[str, Any]:
     source_path = Path(path)
     raw_text = source_path.read_text(encoding="utf-8")
@@ -211,6 +241,7 @@ def parse_file(path: str) -> dict[str, Any]:
     summary = _extract_summary(body, max_sentences=3, max_chars=200)
     tags = _normalize_tags(merged_frontmatter.get("tags"))
     task_refs = _extract_task_refs(raw_text)
+    path_refs = _extract_path_refs(body)
 
     updated = _normalize_updated(merged_frontmatter.get("updated"))
     if not updated:
@@ -227,4 +258,5 @@ def parse_file(path: str) -> dict[str, Any]:
         "tags": tags,
         "updated": updated,
         "task_refs": task_refs,
+        "path_refs": path_refs,
     }

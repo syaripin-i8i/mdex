@@ -67,8 +67,18 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
+    root = args.root
+    if args.index:
+        try:
+            index = _load_json(args.index)
+            scan_root = index.get("scan_root")
+            if isinstance(scan_root, str) and scan_root.strip():
+                root = scan_root.strip()
+        except Exception:
+            pass
+
     try:
-        text = read_node_text(args.root, args.node)
+        text = read_node_text(root, args.node)
     except FileNotFoundError:
         print(f"[mdex] node file not found: {args.node}", file=sys.stderr)
         return 2
@@ -167,6 +177,10 @@ def _build_parser() -> argparse.ArgumentParser:
     open_parser = subparsers.add_parser("open", help="Print markdown source for a node id")
     open_parser.add_argument("node", help="Node id, for example docs/proposal.md")
     open_parser.add_argument("--root", default=".", help="Root directory used to resolve node path")
+    open_parser.add_argument(
+        "--index",
+        help="Optional index JSON path. When set, scan_root in index is used as root",
+    )
     open_parser.set_defaults(func=_cmd_open)
 
     # Backward compatible command kept for existing local workflows.
