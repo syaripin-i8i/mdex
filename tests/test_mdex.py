@@ -9,6 +9,7 @@ from runtime.builder import build_index
 from runtime.indexer import write_sqlite
 from runtime.parser import parse_file
 from runtime.resolver import prerequisite_order, related_nodes
+from runtime.store import update_node_summary
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -266,6 +267,134 @@ def test_first_prerequisite_order_and_cycle_safety(
     cycle_ids = [item["id"] for item in cycle_result]
     assert "docs/cycle_x.md" not in cycle_ids
     assert len(cycle_ids) <= 1
+
+
+def test_scan_outputs_json_summary(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:
+    config_path = tmp_path / "scan_config.json"
+    config_path.write_text(json.dumps(build_config), encoding="utf-8")
+    output_json = tmp_path / "scan_out.json"
+    output_db = tmp_path / "scan_out.db"
+
+    result = _run_cli(
+        "scan",
+        "--root",
+        str(fixture_repo),
+        "--config",
+        str(config_path),
+        "--output",
+        str(output_json),
+        "--db",
+        str(output_db),
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert isinstance(payload.get("nodes"), int)
+    assert payload["edges"]["total"] >= payload["edges"]["resolved"]
+    assert payload["output"]["json"] == str(output_json)
+    assert payload["output"]["db"] == str(output_db)
+    assert result.stderr.strip() == ""
+
+
+def test_context_include_content(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_context.db"
+    write_sqlite(index, str(db_path))
+
+    slim = _run_cli("context", "source core", "--db", str(db_path), "--limit", "3")
+    assert slim.returncode == 0
+    slim_payload = json.loads(slim.stdout)
+    assert slim_payload["nodes"]
+    assert "content" not in slim_payload["nodes"][0]
+    assert set(["id", "priority", "score", "estimated_tokens"]).issubset(slim_payload["nodes"][0].keys())
+
+    full = _run_cli(
+        "context",
+        "source core",
+        "--db",
+        str(db_path),
+        "--limit",
+        "3",
+        "--include-content",
+    )
+    assert full.returncode == 0
+    full_payload = json.loads(full.stdout)
+    assert full_payload["nodes"]
+    assert "content" in full_payload["nodes"][0]
+    assert isinstance(full_payload["nodes"][0]["content"], str)
+
+
+def test_context_respects_soft_budget(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_context_budget.db"
+    write_sqlite(index, str(db_path))
+
+    result = _run_cli("context", "source core", "--db", str(db_path), "--limit", "10", "--budget", "100")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["total_tokens"] <= 120
+
+
+def test_enrich_path_reverse_lookup_without_api_key(
+    build_config: dict[str, object],
+    fixture_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_enrich.db"
+    write_sqlite(index, str(db_path))
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    absolute_path = str((fixture_repo / "docs" / "source.md").resolve())
+
+    ok = _run_cli("enrich", "--path", absolute_path, "--db", str(db_path))
+    assert ok.returncode == 0
+    payload = json.loads(ok.stdout)
+    assert payload["status"] == "skipped"
+    assert payload["node_id"] == "docs/source.md"
+
+    bad = _run_cli("enrich", "--path", str((tmp_path / "no_such.md").resolve()), "--db", str(db_path))
+    assert bad.returncode == 2
+    error_payload = json.loads(bad.stderr)
+    assert error_payload["error"] == "node not found"
+    assert "path" in error_payload
+
+
+def test_enrich_respects_summary_protection_and_force(
+    build_config: dict[str, object],
+    fixture_repo: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_enrich_force.db"
+    write_sqlite(index, str(db_path))
+    update_node_summary(
+        str(db_path),
+        "docs/source.md",
+        "This is a long existing summary that should be treated as sufficiently detailed and protected from overwrite by default.",
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    protected = _run_cli("enrich", "docs/source.md", "--db", str(db_path))
+    assert protected.returncode == 0
+    protected_payload = json.loads(protected.stdout)
+    assert protected_payload["status"] == "skipped"
+    assert protected_payload["reason"] == "summary already sufficient"
+
+    forced = _run_cli("enrich", "docs/source.md", "--db", str(db_path), "--force")
+    assert forced.returncode == 0
+    forced_payload = json.loads(forced.stdout)
+    assert forced_payload["status"] == "skipped"
+    assert forced_payload["reason"] == "missing ANTHROPIC_API_KEY"
+
+
+def test_index_option_removed_from_help() -> None:
+    commands = ["list", "query", "open", "related"]
+    for command in commands:
+        result = _run_cli(command, "--help")
+        assert result.returncode == 0
+        assert "--index" not in result.stdout
 
 
 def test_error_output_is_json(

@@ -35,6 +35,24 @@ runtime/
   cli.py        ← コマンド入口
 ```
 
+## エージェントの作業サイクル
+
+mdex は「書く → 索引化 → 読む → 改善」のサイクルで使います。
+
+```
+書く        mdex new（将来）/ 規約に沿って Markdown を作成
+  ↓
+索引化      mdex scan
+  ↓
+読む        mdex context → 最小必要ファイルを特定
+            mdex open / related / first → 詳細探索
+  ↓
+改善        mdex enrich → summary を AI 消費向けに更新
+            mdex scan   → 索引に反映
+```
+
+書き方の規約は `docs/convention.md` を参照。
+
 ## フェーズ
 
 ### Phase 1（索引化）: 完了
@@ -52,7 +70,16 @@ runtime/
 
 ### Phase 3（AI 補助）
 
-- 未着手
+- `context`: 問いに対する優先読解ノード集合を返す入口
+- `enrich`: 読後に summary を改善して索引品質を上げる更新器
+
+### Phase 4（記録支援）: 未着手
+
+- `new`: 規約に沿った Markdown テンプレートを生成
+- `stamp`: frontmatter の `updated` を現在日時に更新
+
+AI 実運用ではコンテクストを3層で扱う。  
+入力コンテクスト（ユーザーの依頼文）、推論対象コンテクスト（今回読むべき文書）、運用コンテクスト（過去判断や運用制約）を分離し、`mdex` は主に推論対象コンテクストの圧縮と選別を担う。
 
 ## スキーマ
 
@@ -130,6 +157,19 @@ runtime/
 
 `first` と `related` は責務を分離する。`first` は「理解前に読む前提列」、`related` は「理解後に広げる連想近傍」を返す。
 
+## context / enrich 仕様
+
+- `context`:
+  - 入力クエリからキーワード抽出（非AI）
+  - `title` / `summary` / `tags` の一致とグラフ近傍で候補を選別
+  - `--budget` をソフト上限として返却集合を制御
+  - デフォルトは軽量メタのみ、`--include-content` で本文を同梱
+- `enrich`:
+  - ノード本文を読み、外部モデルで 2〜3文 summary を生成
+  - DB の `nodes.summary` を更新
+  - APIキー未設定時はスキップ（失敗扱いにしない）
+  - `--path` で絶対パスから node-id を逆引き可能
+
 ## CLI
 
 ```bash
@@ -141,6 +181,9 @@ mdex find <query> --db <sqlite> [--limit <n>]
 mdex orphans --db <sqlite>
 mdex related <node-id> --db <sqlite> [--limit <n>]
 mdex first <node-id> --db <sqlite> [--limit <n>]
+mdex context "<query>" --db <sqlite> [--budget <n>] [--limit <n>] [--include-content]
+mdex enrich <node-id> --db <sqlite> [--force]
+mdex enrich --path <absolute-path> --db <sqlite> [--force]
 ```
 
-`--index` は JSON 互換経路としてのみ保持する。
+成功時は stdout JSON、エラー時は stderr JSON を返す。

@@ -46,7 +46,8 @@ runtime/
 
 ### Phase 3（AI 補助）
 
-- 未着手（Phase 2 安定後に設計）
+- `context` / `enrich` を実装済み
+- `context` は作業前に必要ノードを絞る入口、`enrich` は読後に summary を更新して探索精度を上げる
 
 ## Schemas
 
@@ -101,16 +102,19 @@ mdex find <query> --db <sqlite> [--limit <n>]
 mdex orphans --db <sqlite>
 mdex related <node-id> --db <sqlite> [--limit <n>]
 mdex first <node-id> --db <sqlite> [--limit <n>]
+mdex context "<query>" --db <sqlite> [--budget <n>] [--limit <n>] [--include-content]
+mdex enrich <node-id> --db <sqlite> [--force]
+mdex enrich --path <absolute-path> --db <sqlite> [--force]
 ```
-
-`--index` は後方互換の JSON フォールバックです。
 
 ## Verification
 
 1. `python -m py_compile runtime/*.py`
 2. `mdex scan --root docs --output mdex_index.json --db mdex_index.db`
-3. `mdex list --db mdex_index.db`
+3. `mdex list --db mdex_index.db --format json`
 4. `mdex find design --db mdex_index.db`
-5. `mdex query --db mdex_index.db --node design.md`
-6. `mdex first design.md --db mdex_index.db`
-7. `mdex related design.md --db mdex_index.db`
+5. `mdex context "design decision" --db mdex_index.db --limit 5`
+6. `mdex query --db mdex_index.db --node design.md`
+7. `mdex first design.md --db mdex_index.db`
+8. `mdex related design.md --db mdex_index.db`
+9. ファイルを読んだ後: `mdex enrich <node-id> --db mdex_index.db`

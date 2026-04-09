@@ -149,7 +149,27 @@ runtime/
 
 ---
 
+## 作業サイクル
+
+mdex は「書く → 索引化 → 読む → 改善」のサイクルで機能します。
+
+```
+書く    規約に沿って Markdown を残す  →  docs/convention.md
+  ↓
+索引化  mdex scan
+  ↓
+読む    mdex context → 必要なファイルを特定して読む
+  ↓
+改善    mdex enrich → summary を更新して次のエージェントに繋ぐ
+        mdex scan   → 索引に反映
+```
+
+索引を作っただけでは半分です。**エージェントが何をどう残すか**が索引の品質を決めます。
+
+---
+
 ## 設計ドキュメント
 
 - 詳細設計・フェーズ状況: `docs/design.md`
+- **記録規約（エージェント必読）**: `docs/convention.md`
 - エージェント向け運用ルール: `AGENT.md`
