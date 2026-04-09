@@ -49,6 +49,18 @@ GRAPH_BOOST_BY_EDGE_TYPE = {
     "relates_to": 0.2,
 }
 
+# Fallback boost for unknown edge types. Keep it small to avoid overfitting.
+GRAPH_DEFAULT_BOOST = 0.15
+
+# search_nodes limit multipliers used to gather candidates before graph expansion.
+PRIMARY_KEYWORD_SEARCH_MULTIPLIER = 5
+SECONDARY_KEYWORD_SEARCH_MULTIPLIER = 2
+PRIMARY_KEYWORD_SEARCH_FLOOR = 20
+SECONDARY_KEYWORD_SEARCH_FLOOR = 10
+
+# Context selection allows a soft overrun to avoid returning an empty set too often.
+SOFT_BUDGET_MULTIPLIER = 1.2
+
 
 def _coerce_positive_int(value: Any, default: int) -> int:
     try:
@@ -112,27 +124,42 @@ def _recency_score(value: str) -> float:
     return 0.0
 
 
-def _keyword_match_score(node: dict[str, Any], keywords: list[str]) -> float:
+def _keyword_match_breakdown(node: dict[str, Any], keywords: list[str]) -> dict[str, float]:
     title = str(node.get("title", "")).lower()
     summary = str(node.get("summary", "")).lower()
     tags = {str(item).strip().lower() for item in node.get("tags", []) if str(item).strip()}
 
-    score = 0.0
+    title_score = 0.0
+    summary_score = 0.0
+    tags_score = 0.0
     for keyword in keywords:
         if keyword in title:
-            score += KEYWORD_TITLE_WEIGHT
+            title_score += KEYWORD_TITLE_WEIGHT
         if keyword in summary:
-            score += KEYWORD_SUMMARY_WEIGHT
+            summary_score += KEYWORD_SUMMARY_WEIGHT
         if keyword in tags:
-            score += KEYWORD_TAG_WEIGHT
-    return score
+            tags_score += KEYWORD_TAG_WEIGHT
+
+    total = title_score + summary_score + tags_score
+    return {
+        "title": round(title_score, 3),
+        "summary": round(summary_score, 3),
+        "tags": round(tags_score, 3),
+        "total": round(total, 3),
+    }
 
 
-def _type_status_score(node: dict[str, Any]) -> float:
+def _type_status_breakdown(node: dict[str, Any]) -> dict[str, float]:
     node_type = str(node.get("type", "")).strip().lower()
     status = str(node.get("status", "")).strip().lower()
-
-    return TYPE_BONUS.get(node_type, 0.0) + STATUS_BONUS.get(status, 0.0)
+    type_bonus = TYPE_BONUS.get(node_type, 0.0)
+    status_bonus = STATUS_BONUS.get(status, 0.0)
+    total = type_bonus + status_bonus
+    return {
+        "type_bonus": round(type_bonus, 3),
+        "status_bonus": round(status_bonus, 3),
+        "total": round(total, 3),
+    }
 
 
 def _estimated_tokens_for_node(node: dict[str, Any], scan_root: str) -> tuple[int, str]:
@@ -161,9 +188,12 @@ def select_context(
 
     candidate_map: dict[str, dict[str, Any]] = {}
     for index, keyword in enumerate(keywords):
-        search_limit = max(20, safe_limit * 5)
+        search_limit = max(PRIMARY_KEYWORD_SEARCH_FLOOR, safe_limit * PRIMARY_KEYWORD_SEARCH_MULTIPLIER)
         if index > 0:
-            search_limit = max(10, safe_limit * 2)
+            search_limit = max(
+                SECONDARY_KEYWORD_SEARCH_FLOOR,
+                safe_limit * SECONDARY_KEYWORD_SEARCH_MULTIPLIER,
+            )
         for node in search_nodes(db_path, keyword, limit=search_limit):
             node_id = str(node.get("id", "")).strip()
             if node_id:
@@ -181,7 +211,7 @@ def select_context(
         src = str(edge.get("from", "")).strip()
         dst = str(edge.get("to", "")).strip()
         edge_type = str(edge.get("type", "")).strip() or "links_to"
-        boost = GRAPH_BOOST_BY_EDGE_TYPE.get(edge_type, 0.15)
+        boost = GRAPH_BOOST_BY_EDGE_TYPE.get(edge_type, GRAPH_DEFAULT_BOOST)
         if not src or not dst:
             continue
         if src in seed_ids and dst not in seed_ids:
@@ -195,23 +225,35 @@ def select_context(
         if linked_id in node_map:
             candidate_map[linked_id] = node_map[linked_id]
 
-    scored_rows: list[tuple[float, str, dict[str, Any]]] = []
+    scored_rows: list[tuple[float, str, dict[str, Any], dict[str, Any]]] = []
     for node_id, node in candidate_map.items():
-        score = 0.0
-        score += _keyword_match_score(node, keywords)
-        score += _type_status_score(node)
-        score += _recency_score(str(node.get("updated", "")))
-        score += graph_boost.get(node_id, 0.0)
-        scored_rows.append((score, node_id, node))
+        keyword_breakdown = _keyword_match_breakdown(node, keywords)
+        type_status_breakdown = _type_status_breakdown(node)
+        recency = _recency_score(str(node.get("updated", "")))
+        graph = graph_boost.get(node_id, 0.0)
+        total_score = (
+            float(keyword_breakdown["total"])
+            + float(type_status_breakdown["total"])
+            + recency
+            + graph
+        )
+        score_breakdown = {
+            "keyword": keyword_breakdown,
+            "type_status": type_status_breakdown,
+            "recency": round(recency, 3),
+            "graph_boost": round(graph, 3),
+            "total": round(total_score, 3),
+        }
+        scored_rows.append((total_score, node_id, node, score_breakdown))
 
     scored_rows.sort(key=lambda row: (-row[0], row[1]))
 
     scan_root = get_scan_root(db_path, default=".")
     selected_nodes: list[dict[str, Any]] = []
     total_tokens = 0
-    soft_cap = int(safe_budget * 1.2)
+    soft_cap = int(safe_budget * SOFT_BUDGET_MULTIPLIER)
 
-    for score, node_id, node in scored_rows:
+    for score, node_id, node, score_breakdown in scored_rows:
         if len(selected_nodes) >= safe_limit:
             break
 
@@ -225,6 +267,13 @@ def select_context(
             "id": node_id,
             "priority": len(selected_nodes) + 1,
             "score": round(score, 3),
+            "score_breakdown": {
+                **score_breakdown,
+                "token_cost": {
+                    "estimated_tokens": estimated_tokens,
+                    "soft_cap": soft_cap,
+                },
+            },
             "estimated_tokens": estimated_tokens,
         }
         if include_content:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import deque
 from typing import Any
 
@@ -20,6 +21,26 @@ INCOMING_WEIGHTS = {
 
 TAG_MATCH_WEIGHT = 1.75
 TYPE_MATCH_WEIGHT = 0.85
+SUMMARY_MATCH_WEIGHT = 0.45
+
+FIRST_DISTANCE_WEIGHT = 2.0
+FIRST_SUMMARY_MATCH_WEIGHT = 0.4
+SUMMARY_TOKEN_RE = re.compile(r"[A-Za-z0-9_]{3,}")
+SUMMARY_STOPWORDS = {
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "only",
+    "summary",
+    "document",
+    "note",
+    "notes",
+    "checks",
+}
 
 
 def _weight_for(edge_type: str, outgoing: bool) -> float:
@@ -48,6 +69,21 @@ def _append_reason(reasons_by_id: dict[str, list[str]], candidate_id: str, reaso
         reasons_by_id[candidate_id].append(reason)
 
 
+def _summary_terms(node: dict[str, Any]) -> set[str]:
+    summary = str(node.get("summary", "")).lower()
+    if not summary:
+        return set()
+    terms: set[str] = set()
+    for token in SUMMARY_TOKEN_RE.findall(summary):
+        clean = token.strip().lower()
+        if len(clean) < 4:
+            continue
+        if clean in SUMMARY_STOPWORDS:
+            continue
+        terms.add(clean)
+    return terms
+
+
 def _node_payload(node: dict[str, Any], node_id: str) -> dict[str, Any]:
     return {
         "id": node_id,
@@ -68,6 +104,7 @@ def related_nodes(node_id: str, db_path: str, limit: int = 10) -> list[dict[str,
     edge_rows = list_edges(db_path)
     source_tags = _normalize_tags(source_node)
     source_type = _normalize_type(source_node)
+    source_summary_terms = _summary_terms(source_node)
 
     score_by_id: dict[str, float] = {}
     reasons_by_id: dict[str, list[str]] = {}
@@ -113,6 +150,14 @@ def related_nodes(node_id: str, db_path: str, limit: int = 10) -> list[dict[str,
             score_by_id[candidate_id] = score_by_id.get(candidate_id, 0.0) + TYPE_MATCH_WEIGHT
             _append_reason(reasons_by_id, candidate_id, "same_type")
 
+        shared_summary_terms = sorted(source_summary_terms.intersection(_summary_terms(candidate)))
+        if shared_summary_terms:
+            score_by_id[candidate_id] = score_by_id.get(candidate_id, 0.0) + (
+                SUMMARY_MATCH_WEIGHT * len(shared_summary_terms)
+            )
+            preview = ",".join(shared_summary_terms[:4])
+            _append_reason(reasons_by_id, candidate_id, f"shared_summary_terms:{preview}")
+
     ranked_ids = sorted(
         score_by_id.keys(),
         key=lambda candidate: (-score_by_id[candidate], candidate),
@@ -143,6 +188,7 @@ def prerequisite_order(node_id: str, db_path: str, limit: int = 10) -> list[dict
 
     node_rows = list_nodes(db_path)
     node_map = {str(node.get("id", "")): node for node in node_rows if str(node.get("id", ""))}
+    source_summary_terms = _summary_terms(source_node)
     dependency_edges = list_edges(db_path, edge_type="depends_on", resolved=True)
 
     adjacency: dict[str, set[str]] = {}
@@ -192,17 +238,36 @@ def prerequisite_order(node_id: str, db_path: str, limit: int = 10) -> list[dict
             seen_for_distance.add(dependency)
             queue.append((dependency, next_depth))
 
+    scored_dependencies: list[tuple[int, float, str]] = []
+    for dependency_id in ordered_ids:
+        dependency_node = node_map.get(dependency_id, {"id": dependency_id})
+        distance = int(distance_map.get(dependency_id, 1))
+        shared_summary_terms = source_summary_terms.intersection(_summary_terms(dependency_node))
+        score = (distance * FIRST_DISTANCE_WEIGHT) + (
+            len(shared_summary_terms) * FIRST_SUMMARY_MATCH_WEIGHT
+        )
+        scored_dependencies.append((distance, score, dependency_id))
+
+    scored_dependencies.sort(
+        key=lambda row: (
+            -row[0],  # root-first order: farther prerequisite first
+            -row[1],  # tie-break by summary similarity score
+            row[2],
+        )
+    )
+
     safe_limit = max(0, int(limit))
     if safe_limit == 0:
         return []
 
     prerequisites: list[dict[str, Any]] = []
-    for index, dependency_id in enumerate(ordered_ids[:safe_limit], start=1):
+    for index, (_, score, dependency_id) in enumerate(scored_dependencies[:safe_limit], start=1):
         dependency_node = node_map.get(dependency_id, {"id": dependency_id})
         payload = _node_payload(dependency_node, dependency_id)
         payload["order"] = index
         distance = int(distance_map.get(dependency_id, 1))
         payload["distance"] = distance
+        payload["score"] = round(score, 3)
         if distance <= 1:
             payload["reason"] = "direct depends_on"
         else:

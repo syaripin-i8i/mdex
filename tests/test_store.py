@@ -75,3 +75,26 @@ def test_list_nodes_prefers_agent_override_after_rescan(
     assert node_map["design/root.md"]["summary_source"] == "agent"
     assert node_map["design/root.md"]["summary"] == agent_summary
     assert node_map["decision/a.md"]["summary_source"] == "seed"
+
+
+def test_search_nodes_uses_override_summary(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_store_search_override.db"
+    _build_quality_db(quality_repo, quality_config, db_path)
+
+    before = search_nodes(str(db_path), "override-needle-xyz", limit=10)
+    assert before == []
+
+    enriched = enrich_node(
+        "spec/b.md",
+        str(db_path),
+        "Override needle xyz appears only in agent summary.",
+        force=False,
+    )
+    assert enriched["status"] == "enriched"
+
+    after = search_nodes(str(db_path), "override-needle-xyz", limit=10)
+    assert any(row["id"] == "spec/b.md" for row in after)

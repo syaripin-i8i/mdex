@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -17,6 +18,13 @@ OVERRIDE_SELECT_SQL = (
     "SELECT id, summary, summary_source, summary_updated "
     "FROM node_overrides"
 )
+
+SEARCH_TOKEN_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"'\-]+")
+WORD_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+SEARCH_TITLE_WEIGHT = 3.0
+SEARCH_SUMMARY_WEIGHT = 2.0
+SEARCH_TAG_WEIGHT = 2.5
+SEARCH_ID_WEIGHT = 1.0
 
 
 def _as_json_list(value: Any) -> list[str]:
@@ -133,6 +141,58 @@ def _coerce_positive_int(value: Any, default: int) -> int:
     return parsed
 
 
+def _search_terms(query: str) -> list[str]:
+    lowered = query.strip().lower()
+    if not lowered:
+        return []
+    terms: list[str] = [lowered]
+    seen = {lowered}
+    for token in SEARCH_TOKEN_SPLIT_RE.split(lowered):
+        clean = token.strip()
+        if len(clean) < 3 or clean in seen:
+            continue
+        seen.add(clean)
+        terms.append(clean)
+    return terms
+
+
+def _search_score(node: dict[str, Any], terms: list[str]) -> float:
+    title = str(node.get("title", "")).lower()
+    summary = str(node.get("summary", "")).lower()
+    node_id = str(node.get("id", "")).lower()
+    tags = {str(item).strip().lower() for item in node.get("tags", []) if str(item).strip()}
+    title_words = set(WORD_TOKEN_RE.findall(title))
+    summary_words = set(WORD_TOKEN_RE.findall(summary))
+    id_words = set(WORD_TOKEN_RE.findall(node_id))
+    tag_words = set()
+    for tag in tags:
+        tag_words.update(WORD_TOKEN_RE.findall(tag))
+
+    score = 0.0
+    for term in terms:
+        is_phrase = bool(re.search(r"[\s\-_/]", term))
+        if is_phrase:
+            if term in title:
+                score += SEARCH_TITLE_WEIGHT
+            if term in summary:
+                score += SEARCH_SUMMARY_WEIGHT
+            if any(term in tag for tag in tags):
+                score += SEARCH_TAG_WEIGHT
+            if term in node_id:
+                score += SEARCH_ID_WEIGHT
+            continue
+
+        if term in title_words:
+            score += SEARCH_TITLE_WEIGHT
+        if term in summary_words:
+            score += SEARCH_SUMMARY_WEIGHT
+        if term in tag_words:
+            score += SEARCH_TAG_WEIGHT
+        if term in id_words:
+            score += SEARCH_ID_WEIGHT
+    return score
+
+
 def _row_to_node(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": str(row["id"] or ""),
@@ -195,23 +255,24 @@ def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
 
 
 def search_nodes(db_path: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
-    normalized_query = query.strip().lower()
-    if not normalized_query:
+    terms = _search_terms(query)
+    if not terms:
         return []
-
-    sql = (
-        f"{NODE_SELECT_SQL} WHERE "
-        "LOWER(title) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(tags_json) LIKE ? "
-        "ORDER BY id LIMIT ?"
-    )
-    pattern = f"%{normalized_query}%"
     safe_limit = _coerce_positive_int(limit, 20)
+    nodes = list_nodes(db_path)
 
-    with _connect(db_path) as conn:
-        rows = conn.execute(sql, (pattern, pattern, pattern, safe_limit)).fetchall()
-        nodes = [_row_to_node(row) for row in rows]
-        overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
-    return [_apply_override(node, overrides) for node in nodes]
+    scored: list[tuple[float, str, dict[str, Any]]] = []
+    for node in nodes:
+        node_id = str(node.get("id", "")).strip()
+        if not node_id:
+            continue
+        score = _search_score(node, terms)
+        if score <= 0:
+            continue
+        scored.append((score, node_id, node))
+
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [row[2] for row in scored[:safe_limit]]
 
 
 def list_orphan_nodes(db_path: str) -> list[dict[str, Any]]:

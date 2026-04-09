@@ -106,6 +106,51 @@ mdex enrich --path "<repo-root>/yura/docs/foo.md" --db mdex_index.db --summary-f
 mdex scan --root <dir> --db mdex_index.db --config control/scan_config.json
 ```
 
+## 再現サンプル（fixtures/quality_repo）
+
+`tests/fixtures/quality_repo` を使うと、scan → first → related → enrich をそのまま再現できます。
+
+```bash
+mdex scan --root tests/fixtures/quality_repo --db .tmp_quality.db
+mdex first design/root.md --db .tmp_quality.db --limit 2
+mdex related design/root.md --db .tmp_quality.db --limit 3
+mdex enrich design/root.md --db .tmp_quality.db --summary "Root Design の要点を短く更新した summary"
+```
+
+期待される出力（簡略）:
+
+```json
+{
+  "prerequisites": [
+    { "id": "spec/b.md", "distance": 2, "reason": "transitive depends_on (depth 2)" },
+    { "id": "decision/a.md", "distance": 1, "reason": "direct depends_on" }
+  ]
+}
+```
+
+```json
+{
+  "related": [
+    { "id": "decision/a.md" },
+    { "id": "spec/b.md" },
+    { "id": "tasks/pending/T20260101000001.md" }
+  ]
+}
+```
+
+```json
+{
+  "status": "enriched",
+  "node_id": "design/root.md",
+  "summary_source": "agent",
+  "skipped": false
+}
+```
+
+注記:
+- `enrich` は experimental（Phase 3 / 評価中）です。
+- `context` も experimental で、`score_breakdown` は調整対象の設計情報を含みます。
+
 ---
 
 ## 全出力は JSON
