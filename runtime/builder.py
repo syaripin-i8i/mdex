@@ -6,12 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-try:
-    from .parser import parse_file
-    from .scanner import list_markdown_files
-except ImportError:
-    from parser import parse_file  # type: ignore
-    from scanner import list_markdown_files  # type: ignore
+from runtime.parser import parse_file
+from runtime.scanner import list_markdown_files
 
 
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://")

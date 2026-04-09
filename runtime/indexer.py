@@ -5,16 +5,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-try:
-    from .builder import build_index as _build_index_impl
-except ImportError:
-    from builder import build_index as _build_index_impl  # type: ignore
-
-
-def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
-    return _build_index_impl(root, config)
-
-
 def write_json(index: dict[str, Any], output_path: str) -> None:
     output = Path(output_path)
     output.write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

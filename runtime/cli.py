@@ -6,16 +6,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    from .indexer import build_index, write_json, write_sqlite
-    from .reader import read_node_text
-    from .resolver import related_nodes
-    from .store import get_node, get_scan_root, list_edges, list_nodes
-except ImportError:
-    from indexer import build_index, write_json, write_sqlite  # type: ignore
-    from reader import read_node_text  # type: ignore
-    from resolver import related_nodes  # type: ignore
-    from store import get_node, get_scan_root, list_edges, list_nodes  # type: ignore
+from runtime.builder import build_index
+from runtime.indexer import write_json, write_sqlite
+from runtime.reader import read_node_text
+from runtime.resolver import prerequisite_order, related_nodes
+from runtime.store import (
+    get_node,
+    get_scan_root,
+    list_edges,
+    list_nodes,
+    list_orphan_nodes,
+    search_nodes,
+)
 
 
 def _load_json(path: str) -> dict[str, Any]:
@@ -131,13 +133,27 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print(f"[mdex] failed to load nodes: {exc}", file=sys.stderr)
         return 2
 
-    for node in sorted(nodes, key=lambda item: str(item.get("id", ""))):
+    sorted_nodes = sorted(nodes, key=lambda item: str(item.get("id", "")))
+    if args.format == "json":
+        print(json.dumps(sorted_nodes, ensure_ascii=False, indent=2))
+        return 0
+
+    for node in sorted_nodes:
         node_id = str(node.get("id", ""))
         title = str(node.get("title", ""))
         node_type = str(node.get("type", "")).strip().lower() or "unknown"
         status = str(node.get("status", "")).strip().lower() or "unknown"
         print(f"{node_id}\t{title}\t{node_type}\t{status}")
     return 0
+
+
+def _print_node_table(nodes: list[dict[str, Any]]) -> None:
+    for node in sorted(nodes, key=lambda item: str(item.get("id", ""))):
+        node_id = str(node.get("id", ""))
+        title = str(node.get("title", ""))
+        node_type = str(node.get("type", "")).strip().lower() or "unknown"
+        status = str(node.get("status", "")).strip().lower() or "unknown"
+        print(f"{node_id}\t{title}\t{node_type}\t{status}")
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
@@ -289,6 +305,48 @@ def _cmd_related(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_find(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"[mdex] SQLite DB not found: {args.db}", file=sys.stderr)
+        return 2
+
+    matched = search_nodes(str(db_path), args.query, limit=int(args.limit))
+    _print_node_table(matched)
+    return 0
+
+
+def _cmd_orphans(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"[mdex] SQLite DB not found: {args.db}", file=sys.stderr)
+        return 2
+
+    orphans = list_orphan_nodes(str(db_path))
+    _print_node_table(orphans)
+    return 0
+
+
+def _cmd_first(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"[mdex] SQLite DB not found: {args.db}", file=sys.stderr)
+        return 2
+
+    node = get_node(str(db_path), args.node)
+    if node is None:
+        print(f"[mdex] node not found: {args.node}", file=sys.stderr)
+        return 2
+
+    prerequisites = prerequisite_order(args.node, str(db_path), limit=int(args.limit))
+    output = {
+        "node": node,
+        "prerequisites": prerequisites,
+    }
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="mdex CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -310,6 +368,7 @@ def _build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--type", help="Filter by type")
     list_parser.add_argument("--project", help="Filter by project")
     list_parser.add_argument("--status", help="Filter by status")
+    list_parser.add_argument("--format", choices=["table", "json"], default="table")
     list_parser.set_defaults(func=_cmd_list)
 
     open_parser = subparsers.add_parser("open", help="Print markdown source for a node id")
@@ -333,6 +392,22 @@ def _build_parser() -> argparse.ArgumentParser:
     related_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
     related_parser.add_argument("--limit", type=int, default=10, help="Maximum number of results")
     related_parser.set_defaults(func=_cmd_related)
+
+    find_parser = subparsers.add_parser("find", help="Find nodes by keyword")
+    find_parser.add_argument("query", help="Search query")
+    find_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    find_parser.add_argument("--limit", type=int, default=20, help="Maximum number of results")
+    find_parser.set_defaults(func=_cmd_find)
+
+    orphan_parser = subparsers.add_parser("orphans", help="List nodes with no resolved edges")
+    orphan_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    orphan_parser.set_defaults(func=_cmd_orphans)
+
+    first_parser = subparsers.add_parser("first", help="Return prerequisite nodes to read first")
+    first_parser.add_argument("node", help="Node id")
+    first_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    first_parser.add_argument("--limit", type=int, default=10, help="Maximum number of results")
+    first_parser.set_defaults(func=_cmd_first)
 
     return parser
 

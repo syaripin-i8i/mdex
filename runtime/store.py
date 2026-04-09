@@ -5,6 +5,12 @@ import sqlite3
 from collections.abc import Iterable
 from typing import Any
 
+NODE_SELECT_SQL = (
+    "SELECT id, title, type, project, status, summary, tags_json, updated, "
+    "links_to_json, depends_on_json, relates_to_json "
+    "FROM nodes"
+)
+
 
 def _as_json_list(value: Any) -> list[str]:
     if value is None:
@@ -51,6 +57,32 @@ def _normalize_filter(value: str | None) -> str | None:
     return normalized or None
 
 
+def _coerce_positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _row_to_node(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": str(row["id"] or ""),
+        "title": str(row["title"] or ""),
+        "type": str(row["type"] or ""),
+        "project": str(row["project"] or ""),
+        "status": str(row["status"] or ""),
+        "summary": str(row["summary"] or ""),
+        "tags": _as_json_list(row["tags_json"]),
+        "updated": str(row["updated"] or ""),
+        "links_to": _as_json_list(row["links_to_json"]),
+        "depends_on": _as_json_list(row["depends_on_json"]),
+        "relates_to": _as_json_list(row["relates_to_json"]),
+    }
+
+
 def list_nodes(
     db_path: str,
     *,
@@ -65,33 +97,12 @@ def list_nodes(
     }
     where_sql, params = _build_where_clauses(filters)
 
-    query = (
-        "SELECT id, title, type, project, status, summary, tags_json, updated, "
-        "links_to_json, depends_on_json, relates_to_json "
-        f"FROM nodes{where_sql} ORDER BY id"
-    )
+    query = f"{NODE_SELECT_SQL}{where_sql} ORDER BY id"
 
     with _connect(db_path) as conn:
         rows = conn.execute(query, params).fetchall()
 
-    nodes: list[dict[str, Any]] = []
-    for row in rows:
-        nodes.append(
-            {
-                "id": str(row["id"] or ""),
-                "title": str(row["title"] or ""),
-                "type": str(row["type"] or ""),
-                "project": str(row["project"] or ""),
-                "status": str(row["status"] or ""),
-                "summary": str(row["summary"] or ""),
-                "tags": _as_json_list(row["tags_json"]),
-                "updated": str(row["updated"] or ""),
-                "links_to": _as_json_list(row["links_to_json"]),
-                "depends_on": _as_json_list(row["depends_on_json"]),
-                "relates_to": _as_json_list(row["relates_to_json"]),
-            }
-        )
-    return nodes
+    return [_row_to_node(row) for row in rows]
 
 
 def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
@@ -109,19 +120,38 @@ def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
     if row is None:
         return None
 
-    return {
-        "id": str(row["id"] or ""),
-        "title": str(row["title"] or ""),
-        "type": str(row["type"] or ""),
-        "project": str(row["project"] or ""),
-        "status": str(row["status"] or ""),
-        "summary": str(row["summary"] or ""),
-        "tags": _as_json_list(row["tags_json"]),
-        "updated": str(row["updated"] or ""),
-        "links_to": _as_json_list(row["links_to_json"]),
-        "depends_on": _as_json_list(row["depends_on_json"]),
-        "relates_to": _as_json_list(row["relates_to_json"]),
-    }
+    return _row_to_node(row)
+
+
+def search_nodes(db_path: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    normalized_query = query.strip().lower()
+    if not normalized_query:
+        return []
+
+    sql = (
+        f"{NODE_SELECT_SQL} WHERE "
+        "LOWER(title) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(tags_json) LIKE ? "
+        "ORDER BY id LIMIT ?"
+    )
+    pattern = f"%{normalized_query}%"
+    safe_limit = _coerce_positive_int(limit, 20)
+
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql, (pattern, pattern, pattern, safe_limit)).fetchall()
+    return [_row_to_node(row) for row in rows]
+
+
+def list_orphan_nodes(db_path: str) -> list[dict[str, Any]]:
+    sql = (
+        f"{NODE_SELECT_SQL} AS n WHERE NOT EXISTS ("
+        "SELECT 1 FROM edges e "
+        "WHERE e.resolved = 1 AND (e.src = n.id OR e.dst = n.id)"
+        ") ORDER BY n.id"
+    )
+
+    with _connect(db_path) as conn:
+        rows = conn.execute(sql).fetchall()
+    return [_row_to_node(row) for row in rows]
 
 
 def list_edges(

@@ -34,10 +34,10 @@ runtime/
 - `edges` は `resolved` を保持
 - `list` / `query` は SQLite ベース
 
-### Phase 2（探索）: 一部着手
+### Phase 2（探索）: 完了
 
-- `related` を実装済み（ルールベース）
-- `find` / `first` は未着手
+- `find` / `related` / `first` / `orphans` を実装済み
+- `first` は前提列（depends_on 系）を返し、`related` は連想的な近傍候補を返す
 
 ### Phase 3（AI 補助）
 
@@ -89,10 +89,13 @@ runtime/
 
 ```bash
 mdex scan --root <dir> [--output <json>] [--db <sqlite>] [--config <json>]
-mdex list --db <sqlite> [--type <type>] [--project <project>] [--status <status>]
+mdex list --db <sqlite> [--type <type>] [--project <project>] [--status <status>] [--format <table|json>]
 mdex open <node-id> --db <sqlite>
 mdex query --db <sqlite> --node <node-id>
+mdex find <query> --db <sqlite> [--limit <n>]
+mdex orphans --db <sqlite>
 mdex related <node-id> --db <sqlite> [--limit <n>]
+mdex first <node-id> --db <sqlite> [--limit <n>]
 ```
 
 `--index` は後方互換の JSON フォールバックです。
@@ -102,5 +105,7 @@ mdex related <node-id> --db <sqlite> [--limit <n>]
 1. `python -m py_compile runtime/*.py`
 2. `mdex scan --root docs --output mdex_index.json --db mdex_index.db`
 3. `mdex list --db mdex_index.db`
-4. `mdex query --db mdex_index.db --node design.md`
-5. `mdex related design.md --db mdex_index.db`
+4. `mdex find design --db mdex_index.db`
+5. `mdex query --db mdex_index.db --node design.md`
+6. `mdex first design.md --db mdex_index.db`
+7. `mdex related design.md --db mdex_index.db`

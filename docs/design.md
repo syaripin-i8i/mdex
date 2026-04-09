@@ -43,10 +43,12 @@ runtime/
 - edge に `resolved` を保持
 - `list` / `query` は SQLite 参照
 
-### Phase 2（探索）: 部分実装
+### Phase 2（探索）: 完了
 
-- `related` 実装済み（ルールベース）
-- `find` / `first` は未実装
+- `find`: title/summary/tags 検索の入口
+- `orphans`: resolved edge 観点の孤立ノード検出
+- `related`: 連想的な近傍候補（関連探索）
+- `first`: depends_on を基にした前提読み順（prerequisite reader）
 
 ### Phase 3（AI 補助）
 
@@ -124,15 +126,21 @@ runtime/
 - `links_to`（outgoing）を中優先
 - `relates_to` を補助
 - incoming も小さく加点
+- タグ一致・type 一致も補助加点
+
+`first` と `related` は責務を分離する。`first` は「理解前に読む前提列」、`related` は「理解後に広げる連想近傍」を返す。
 
 ## CLI
 
 ```bash
 mdex scan --root <dir> [--output <json>] [--db <sqlite>] [--config <json>]
-mdex list --db <sqlite> [--type <type>] [--project <project>] [--status <status>]
+mdex list --db <sqlite> [--type <type>] [--project <project>] [--status <status>] [--format <table|json>]
 mdex open <node-id> --db <sqlite>
 mdex query --db <sqlite> --node <node-id>
+mdex find <query> --db <sqlite> [--limit <n>]
+mdex orphans --db <sqlite>
 mdex related <node-id> --db <sqlite> [--limit <n>]
+mdex first <node-id> --db <sqlite> [--limit <n>]
 ```
 
 `--index` は JSON 互換経路としてのみ保持する。
