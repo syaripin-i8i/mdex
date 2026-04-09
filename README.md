@@ -121,6 +121,18 @@ mdex enrich design/root.md --db .tmp_quality.db --summary "Root Design の要点
 
 ```json
 {
+  "nodes": 6,
+  "edges": {
+    "total": 8,
+    "resolved": 6,
+    "unresolved": 2,
+    "resolution_rate": 75.0
+  }
+}
+```
+
+```json
+{
   "prerequisites": [
     { "id": "spec/b.md", "distance": 2, "reason": "transitive depends_on (depth 2)" },
     { "id": "decision/a.md", "distance": 1, "reason": "direct depends_on" }
@@ -146,6 +158,14 @@ mdex enrich design/root.md --db .tmp_quality.db --summary "Root Design の要点
   "skipped": false
 }
 ```
+
+### 公開前の最小メトリクス（quality_repo）
+
+前提は `tests/fixtures/quality_repo` と `control/scan_config.json` です（コマンドは上の再現サンプルを使用）。
+
+1. `scan` 後の edge 品質は `total=8` / `resolved=6` / `unresolved=2` / `resolution_rate=75.0`。
+2. `first design/root.md --limit 2` の前提順は `spec/b.md` → `decision/a.md`。
+3. `enrich design/root.md ...` の後に再度 `scan` しても、`design/root.md` の `summary_source` は `agent` のまま保持される。
 
 注記:
 - `enrich` は experimental（Phase 3 / 評価中）です。
