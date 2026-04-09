@@ -1,65 +1,155 @@
 # mdex
 
-`mdex` は、Markdown ファイル群を対象にした軽量インデクサ兼探索器です。  
-全文検索ではなく「次に何を読むべきか」を支援する用途を重視しています。
+**このツールは AI エージェント（Claude Code・Codex など）のために作られています。人間向けではありません。**
 
-## できること
+---
 
-- Markdown 走査（`.md` 列挙、除外パターン対応）
-- frontmatter / 見出し / 要約 / タグ抽出
-- `[[wikilink]]` / `[text](file.md)` / task ID 参照のエッジ化
-- JSON（デバッグ） + SQLite（正本）インデックス出力
-- `query` で方向付きの入出力関係を表示（`incoming/outgoing`）
-- `related` で次に読む候補をルールベース推薦
+## 何を解くツールか
+
+AI エージェントが作業するとき、コンテクストは3層に分かれます。
+
+| 層 | 定義 |
+|----|------|
+| **入力コンテクスト** | モデル呼び出し時に実際に渡される情報量 |
+| **推論対象コンテクスト** | 今回のタスクに本来必要な情報の範囲。入力より小さいのが理想 |
+| **運用コンテクスト** | 設計判断・過去の作業記録・制約・注意事項など、コード外に保持される継続的知識 |
+
+問題は、**運用コンテクストをどれだけ書き残しても、索引がなければ必要な時に引き出せない**ことです。  
+エージェントはファイルを全部読むか、重要な情報を見落とすかの二択に迫られます。
+
+mdex はこの問題を解きます。
+
+```
+Markdown として外部化された運用コンテクスト
+    ↓  mdex scan でグラフ + SQLite に索引化
+    ↓  mdex context でタスクに必要な最小セットを選別
+推論対象コンテクスト（読むべきファイルと順序）
+    ↓  エージェントが本文を読んで作業
+入力コンテクストを必要最小限に保つ
+```
+
+作業の質が上がり、見落としが減り、手戻りが減ります。トークンコストの削減はその結果です。
+
+---
+
+## なぜ「AI の中だけで完結」させてはいけないか
+
+設計判断・作業記録・制約をAI の会話履歴だけに置くと：
+
+- セッションをまたいで消える
+- 別のエージェントが参照できない
+- 累積されず、毎回ゼロから始まる
+
+Markdown として外部化し、mdex で索引化することで、AI の作業が**継続・累積・共有**可能になります。
+
+---
+
+## エージェントの使い方
+
+### タスク着手前
+
+```bash
+# 何を読むべきかを問い合わせる
+mdex context "感情モデルのバグを直したい" --db mdex_index.db --budget 4000
+```
+
+```json
+{
+  "query": "感情モデルのバグを直したい",
+  "nodes": [
+    { "id": "runtime/emotion.md", "priority": 1, "reason": "直接対象", "estimated_tokens": 820 },
+    { "id": "AGENT.md",           "priority": 2, "reason": "制約・注意事項", "estimated_tokens": 430 }
+  ],
+  "total_tokens": 1250,
+  "budget": 4000
+}
+```
+
+本文も一括取得したい場合：
+
+```bash
+mdex context "..." --db mdex_index.db --include-content
+```
+
+### ファイルを読んだ後
+
+```bash
+# summary を改善して DB に蓄積（使うほど context の精度が上がる）
+mdex enrich runtime/emotion.md --db mdex_index.db
+mdex enrich --path "<repo-root>/yura/runtime/emotion.py" --db mdex_index.db
+```
+
+### その他の探索
+
+```bash
+# 構造検索
+mdex find "感情"         --db mdex_index.db   # キーワード検索
+mdex related foo.md      --db mdex_index.db   # 横方向の関連ノード
+mdex first foo.md        --db mdex_index.db   # 縦方向の前提ノード列（depends_on 逆辿り）
+mdex orphans             --db mdex_index.db   # 孤立ノード（索引品質確認）
+mdex query --node foo.md --db mdex_index.db   # 入出力エッジの方向付き表示
+```
+
+### 索引の構築・更新
+
+```bash
+mdex scan --root <dir> --db mdex_index.db --config control/scan_config.json
+```
+
+---
+
+## 全出力は JSON
+
+すべてのコマンドは JSON を返します。エラーも JSON です。
+
+```json
+{ "error": "node not found", "node_id": "missing.md" }
+```
+
+人間が読みやすいテキスト形式が必要な場合のみ `--format table` を使ってください。
+
+---
+
+## related と first の違い
+
+| コマンド | 方向 | 根拠 | 用途 |
+|---------|------|------|------|
+| `related` | 横（近傍） | エッジ重みスコア + タグ/型一致 | 関連して読むべきものを探す |
+| `first`   | 縦（前提） | `depends_on` 逆辿り | このノードを理解する前に読むべきものを得る |
+
+---
 
 ## セットアップ
 
-- Python 3.10+
-- `PyYAML`
-
 ```bash
 python -m pip install -e .
+python -m pip install -e ".[dev]"   # テスト込み
 ```
 
-開発用テスト込み:
+依存: Python 3.10+, PyYAML, anthropic（enrich コマンドのみ）
 
-```bash
-python -m pip install -e ".[dev]"
+---
+
+## モジュール構成
+
+```
+runtime/
+  scanner.py   .md 列挙
+  parser.py    frontmatter / metadata / link / summary 抽出
+  builder.py   ノード・エッジ生成（参照解決・resolved 判定）
+  indexer.py   JSON / SQLite 書き出し
+  store.py     SQLite 読み出し API
+  resolver.py  related / first ロジック
+  context.py   context コマンドのコア（キーワード + グラフ選別）
+  enrich.py    summary 改善（Claude API 呼び出し）
+  tokens.py    トークン見積もり
+  reader.py    node-id から本文取得
+  cli.py       コマンド入口
 ```
 
-## クイックスタート
-
-```bash
-mdex scan --root docs/ --output mdex_index.json --db mdex_index.db
-mdex list --db mdex_index.db
-mdex query --db mdex_index.db --node design.md
-mdex related design.md --db mdex_index.db
-mdex open design.md --db mdex_index.db
-```
-
-## 主なコマンド
-
-- `scan --root <dir> [--output <json>] [--db <sqlite>] [--config <json>]`
-- `list --db <sqlite> [--type <type>] [--project <name>] [--status <status>]`
-- `open <node-id> --db <sqlite>`
-- `query --db <sqlite> --node <node-id>`
-- `related <node-id> --db <sqlite> [--limit <n>]`
-
-`list` / `query` / `related` は SQLite を主経路に使います。  
-`--index` は JSON フォールバック（後方互換）です。
-
-## 実装モジュール責務
-
-- `runtime/scanner.py`: `.md` 列挙
-- `runtime/parser.py`: frontmatter/metadata/link/summary 抽出
-- `runtime/builder.py`: ノード・エッジ生成（参照解決、resolved 判定）
-- `runtime/indexer.py`: JSON/SQLite 書き出し
-- `runtime/store.py`: SQLite 読み出し API
-- `runtime/resolver.py`: 探索ロジック（`related`）
-- `runtime/reader.py`: node-id から本文取得
-- `runtime/cli.py`: コマンド入口
+---
 
 ## 設計ドキュメント
 
-- 詳細設計: `docs/design.md`
-- エージェント運用: `AGENT.md`
+- 詳細設計・フェーズ状況: `docs/design.md`
+- エージェント向け運用ルール: `AGENT.md`

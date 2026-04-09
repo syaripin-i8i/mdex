@@ -40,7 +40,7 @@ def _run_cli(*args: str, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProces
         cwd=cwd,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         stdin=subprocess.DEVNULL,
     )
 
@@ -139,6 +139,7 @@ def test_query_direction_preserved(build_config: dict[str, object], fixture_repo
     write_sqlite(index, str(db_path))
 
     result = _run_cli("query", "--db", str(db_path), "--node", "docs/source.md")
+    assert result.returncode == 0
     payload = json.loads(result.stdout)
 
     outgoing_depends_ids = [item["id"] for item in payload["outgoing"]["depends_on"]]
@@ -179,14 +180,24 @@ def test_find_matches_title_summary_and_tags(
     write_sqlite(index, str(db_path))
 
     title_match = _run_cli("find", "source", "--db", str(db_path), "--limit", "20")
-    assert "docs/source.md" in title_match.stdout
+    assert title_match.returncode == 0
+    title_payload = json.loads(title_match.stdout)
+    assert any(item["id"] == "docs/source.md" for item in title_payload)
 
     tag_match = _run_cli("find", "core", "--db", str(db_path), "--limit", "20")
-    assert "docs/source.md" in tag_match.stdout
-    assert "docs/tag_peer.md" in tag_match.stdout
+    assert tag_match.returncode == 0
+    tag_payload = json.loads(tag_match.stdout)
+    tag_ids = [item["id"] for item in tag_payload]
+    assert "docs/source.md" in tag_ids
+    assert "docs/tag_peer.md" in tag_ids
 
     no_match = _run_cli("find", "no-such-keyword", "--db", str(db_path), "--limit", "20")
-    assert no_match.stdout.strip() == ""
+    assert no_match.returncode == 0
+    assert json.loads(no_match.stdout) == []
+
+    table_match = _run_cli("find", "source", "--db", str(db_path), "--format", "table", "--limit", "20")
+    assert table_match.returncode == 0
+    assert "docs/source.md\tSource Doc\tdesign\tactive" in table_match.stdout
 
 
 def test_orphans_lists_nodes_without_resolved_edges(
@@ -199,11 +210,16 @@ def test_orphans_lists_nodes_without_resolved_edges(
     write_sqlite(index, str(db_path))
 
     result = _run_cli("orphans", "--db", str(db_path))
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
-    orphan_ids = [line.split("\t", 1)[0] for line in lines]
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    orphan_ids = [item["id"] for item in payload]
 
     assert "docs/no_frontmatter.md" in orphan_ids
     assert "docs/source.md" not in orphan_ids
+
+    table_output = _run_cli("orphans", "--db", str(db_path), "--format", "table")
+    assert table_output.returncode == 0
+    assert "docs/no_frontmatter.md\tPlain Note\tunknown\tunknown" in table_output.stdout
 
 
 def test_list_json_format(
@@ -215,11 +231,16 @@ def test_list_json_format(
     db_path = tmp_path / "mdex_list_json.db"
     write_sqlite(index, str(db_path))
 
-    result = _run_cli("list", "--db", str(db_path), "--format", "json")
+    result = _run_cli("list", "--db", str(db_path))
+    assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert isinstance(payload, list)
     assert any(item.get("id") == "docs/source.md" for item in payload)
     assert any("title" in item for item in payload)
+
+    table_result = _run_cli("list", "--db", str(db_path), "--format", "table")
+    assert table_result.returncode == 0
+    assert "docs/source.md\tSource Doc\tdesign\tactive" in table_result.stdout
 
 
 def test_first_prerequisite_order_and_cycle_safety(
@@ -236,6 +257,7 @@ def test_first_prerequisite_order_and_cycle_safety(
     assert prereq_ids == ["docs/first_c.md", "docs/first_b.md"]
 
     first_output = _run_cli("first", "docs/first_a.md", "--db", str(db_path), "--limit", "10")
+    assert first_output.returncode == 0
     payload = json.loads(first_output.stdout)
     cli_ids = [item["id"] for item in payload["prerequisites"]]
     assert cli_ids == ["docs/first_c.md", "docs/first_b.md"]
@@ -244,3 +266,19 @@ def test_first_prerequisite_order_and_cycle_safety(
     cycle_ids = [item["id"] for item in cycle_result]
     assert "docs/cycle_x.md" not in cycle_ids
     assert len(cycle_ids) <= 1
+
+
+def test_error_output_is_json(
+    build_config: dict[str, object],
+    fixture_repo: Path,
+    tmp_path: Path,
+) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_error.db"
+    write_sqlite(index, str(db_path))
+
+    result = _run_cli("query", "--db", str(db_path), "--node", "docs/no_such_node.md")
+    assert result.returncode == 2
+    payload = json.loads(result.stderr)
+    assert payload["error"] == "node not found"
+    assert payload["node_id"] == "docs/no_such_node.md"
