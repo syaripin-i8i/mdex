@@ -209,8 +209,8 @@ updated: <today>
 # 1. 作業記録を残す（上記テンプレートを使う）
 
 # 2. 参照した・更新したファイルの summary を改善する
-mdex enrich <node-id> --db <db>
-mdex enrich --path <絶対パス> --db <db>
+mdex enrich <node-id> --db <db> --summary "<2〜3文の要約>"
+mdex enrich --path <絶対パス> --db <db> --summary-file <要約テキストファイル>
 
 # 3. 索引を更新する
 mdex scan --root <dir> --db <db> --config control/scan_config.json

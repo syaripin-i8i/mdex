@@ -35,6 +35,8 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
                 project TEXT,
                 status TEXT,
                 summary TEXT,
+                summary_source TEXT,
+                summary_updated TEXT,
                 tags_json TEXT,
                 updated TEXT,
                 links_to_json TEXT,
@@ -69,9 +71,9 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
             cur.execute(
                 """
                 INSERT OR REPLACE INTO nodes (
-                    id, title, type, project, status, summary, tags_json, updated,
-                    links_to_json, depends_on_json, relates_to_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, title, type, project, status, summary, summary_source, summary_updated,
+                    tags_json, updated, links_to_json, depends_on_json, relates_to_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(node.get("id", "")),
@@ -80,6 +82,8 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
                     str(node.get("project", "")),
                     str(node.get("status", "")),
                     str(node.get("summary", "")),
+                    "seed",
+                    str(node.get("updated", "")),
                     json.dumps(node.get("tags", []), ensure_ascii=False),
                     str(node.get("updated", "")),
                     json.dumps(node.get("links_to", []), ensure_ascii=False),

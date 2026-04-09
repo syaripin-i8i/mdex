@@ -10,20 +10,43 @@ from runtime.tokens import estimate_tokens
 
 KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"']+")
 
+# Title is strongest lexical signal because it usually expresses scope succinctly.
+KEYWORD_TITLE_WEIGHT = 3.0
+# Summary is curated but shorter than body; keep medium importance.
+KEYWORD_SUMMARY_WEIGHT = 1.5
+# Tags are explicit intent markers; weight slightly above summary.
+KEYWORD_TAG_WEIGHT = 2.2
+
+# Design/decision documents usually contain constraints and rationale needed before editing.
 TYPE_BONUS = {
     "design": 1.2,
     "decision": 1.2,
+    # Reference/spec often explain interfaces and invariants.
     "reference": 0.9,
     "spec": 0.9,
+    # Task nodes are useful but often procedural rather than foundational.
     "task": 0.4,
 }
 
+# Active/draft work is more likely to influence current tasks.
 STATUS_BONUS = {
     "active": 0.8,
     "draft": 0.4,
     "pending": 0.2,
+    # Done items remain useful but should not dominate current context selection.
     "done": -0.1,
+    # Archived content should be de-prioritized by default.
     "archived": -0.6,
+}
+
+# Graph proximity is useful, but weaker than direct lexical match.
+GRAPH_BOOST_BY_EDGE_TYPE = {
+    # dependencies are strongest because they imply prerequisites.
+    "depends_on": 0.6,
+    # links_to is informative but looser than explicit dependency.
+    "links_to": 0.35,
+    # relates_to is broad and should only provide small assistance.
+    "relates_to": 0.2,
 }
 
 
@@ -97,23 +120,19 @@ def _keyword_match_score(node: dict[str, Any], keywords: list[str]) -> float:
     score = 0.0
     for keyword in keywords:
         if keyword in title:
-            score += 3.0
+            score += KEYWORD_TITLE_WEIGHT
         if keyword in summary:
-            score += 1.5
+            score += KEYWORD_SUMMARY_WEIGHT
         if keyword in tags:
-            score += 2.2
+            score += KEYWORD_TAG_WEIGHT
     return score
 
 
 def _type_status_score(node: dict[str, Any]) -> float:
-    node_id = str(node.get("id", ""))
     node_type = str(node.get("type", "")).strip().lower()
     status = str(node.get("status", "")).strip().lower()
 
-    score = TYPE_BONUS.get(node_type, 0.0) + STATUS_BONUS.get(status, 0.0)
-    if node_id.endswith("AGENT.md"):
-        score += 2.0
-    return score
+    return TYPE_BONUS.get(node_type, 0.0) + STATUS_BONUS.get(status, 0.0)
 
 
 def _estimated_tokens_for_node(node: dict[str, Any], scan_root: str) -> tuple[int, str]:
@@ -161,13 +180,15 @@ def select_context(
     for edge in list_edges_for_nodes(db_path, seed_ids, resolved_only=True):
         src = str(edge.get("from", "")).strip()
         dst = str(edge.get("to", "")).strip()
+        edge_type = str(edge.get("type", "")).strip() or "links_to"
+        boost = GRAPH_BOOST_BY_EDGE_TYPE.get(edge_type, 0.15)
         if not src or not dst:
             continue
         if src in seed_ids and dst not in seed_ids:
-            graph_boost[dst] = graph_boost.get(dst, 0.0) + 0.9
+            graph_boost[dst] = graph_boost.get(dst, 0.0) + boost
             linked_ids.add(dst)
         if dst in seed_ids and src not in seed_ids:
-            graph_boost[src] = graph_boost.get(src, 0.0) + 0.9
+            graph_boost[src] = graph_boost.get(src, 0.0) + boost
             linked_ids.add(src)
 
     for linked_id in linked_ids:
@@ -181,8 +202,6 @@ def select_context(
         score += _type_status_score(node)
         score += _recency_score(str(node.get("updated", "")))
         score += graph_boost.get(node_id, 0.0)
-        if node_id in seed_ids:
-            score += 0.8
         scored_rows.append((score, node_id, node))
 
     scored_rows.sort(key=lambda row: (-row[0], row[1]))

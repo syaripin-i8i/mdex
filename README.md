@@ -74,12 +74,12 @@ mdex context "..." --db mdex_index.db --include-content
 ### ファイルを読んだ後
 
 ```bash
-# summary を改善して DB に蓄積（使うほど context の精度が上がる）
-mdex enrich runtime/emotion.md --db mdex_index.db
-mdex enrich --path "<repo-root>/yura/runtime/emotion.py" --db mdex_index.db
+# 作業 AI / 人間が作った summary を DB に反映する（要約生成は外部で行う）
+mdex enrich runtime/emotion.md --db mdex_index.db --summary "この文書が何を決め、いつ参照すべきかの要約..."
+mdex enrich --path "<repo-root>/yura/runtime/emotion.py" --db mdex_index.db --summary-file ./summary.txt
 ```
 
-### その他の探索
+### 本流コマンド（Phase 2 / 安定化中）
 
 ```bash
 # 構造検索
@@ -88,6 +88,14 @@ mdex related foo.md      --db mdex_index.db   # 横方向の関連ノード
 mdex first foo.md        --db mdex_index.db   # 縦方向の前提ノード列（depends_on 逆辿り）
 mdex orphans             --db mdex_index.db   # 孤立ノード（索引品質確認）
 mdex query --node foo.md --db mdex_index.db   # 入出力エッジの方向付き表示
+```
+
+### experimental（Phase 3 / 評価中）
+
+```bash
+mdex context "感情モデルのバグを直したい" --db mdex_index.db --budget 4000
+mdex enrich foo.md --db mdex_index.db --summary "この文書が何を決め、いつ参照すべきか..."
+mdex enrich --path "<repo-root>/yura/docs/foo.md" --db mdex_index.db --summary-file ./summary.txt
 ```
 
 ### 索引の構築・更新
@@ -110,12 +118,15 @@ mdex scan --root <dir> --db mdex_index.db --config control/scan_config.json
 
 ---
 
-## related と first の違い
+## コマンド責務（境界）
 
 | コマンド | 方向 | 根拠 | 用途 |
 |---------|------|------|------|
+| `find`    | 入口 | キーワード一致 | まずどこから読むかを探す |
 | `related` | 横（近傍） | エッジ重みスコア + タグ/型一致 | 関連して読むべきものを探す |
 | `first`   | 縦（前提） | `depends_on` 逆辿り | このノードを理解する前に読むべきものを得る |
+| `context` | 複合 | キーワード + グラフ + 予算 | experimental。作業用コンテキストを切り出す |
+| `enrich`  | 更新 | 明示入力された summary | experimental。summary 更新口として記録品質を上げる |
 
 ---
 
@@ -126,7 +137,7 @@ python -m pip install -e .
 python -m pip install -e ".[dev]"   # テスト込み
 ```
 
-依存: Python 3.10+, PyYAML, anthropic（enrich コマンドのみ）
+依存: Python 3.10+, PyYAML
 
 ---
 
@@ -141,7 +152,7 @@ runtime/
   store.py     SQLite 読み出し API
   resolver.py  related / first ロジック
   context.py   context コマンドのコア（キーワード + グラフ選別）
-  enrich.py    summary 改善（Claude API 呼び出し）
+  enrich.py    summary 更新口（要約生成は外部で実施）
   tokens.py    トークン見積もり
   reader.py    node-id から本文取得
   cli.py       コマンド入口
@@ -160,7 +171,7 @@ mdex は「書く → 索引化 → 読む → 改善」のサイクルで機能
   ↓
 読む    mdex context → 必要なファイルを特定して読む
   ↓
-改善    mdex enrich → summary を更新して次のエージェントに繋ぐ
+改善    mdex enrich --summary/--summary-file → summary を更新して次のエージェントに繋ぐ
         mdex scan   → 索引に反映
 ```
 

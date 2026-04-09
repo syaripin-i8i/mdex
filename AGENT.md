@@ -26,7 +26,10 @@ runtime/
   builder.py    ← ノード・エッジ生成（参照解決・resolved 判定）
   indexer.py    ← JSON / SQLite 書き出し
   store.py      ← SQLite 読み出し API
-  resolver.py   ← 探索ロジック（related 候補抽出）
+  resolver.py   ← 探索ロジック（related / first）
+  context.py    ← context 候補選別（experimental）
+  enrich.py     ← summary 更新口（experimental）
+  tokens.py     ← トークン見積もり
   reader.py     ← ノード本文取得
   cli.py        ← argparse エントリ
 ```
@@ -39,15 +42,17 @@ runtime/
 - `edges` は `resolved` を保持
 - `list` / `query` は SQLite ベース
 
-### Phase 2（探索）: 完了
+### Phase 2（探索）: 実装済みだが安定化中
 
 - `find` / `related` / `first` / `orphans` を実装済み
 - `first` は前提列（depends_on 系）を返し、`related` は連想的な近傍候補を返す
+- 探索順位の品質は継続調整中（重みと優先度は固定前）
 
-### Phase 3（AI 補助）
+### Phase 3（AI 補助）: experimental
 
 - `context` / `enrich` を実装済み
 - `context` は作業前に必要ノードを絞る入口、`enrich` は読後に summary を更新して探索精度を上げる
+- experimental 機能は出力品質を保証しない
 
 ## Schemas
 
@@ -61,6 +66,8 @@ runtime/
   "project": "...",
   "status": "active|done|draft|archived|unknown",
   "summary": "...",
+  "summary_source": "seed|agent",
+  "summary_updated": "ISO date",
   "tags": [],
   "updated": "ISO date",
   "links_to": ["resolved-target.md"],
@@ -102,9 +109,14 @@ mdex find <query> --db <sqlite> [--limit <n>]
 mdex orphans --db <sqlite>
 mdex related <node-id> --db <sqlite> [--limit <n>]
 mdex first <node-id> --db <sqlite> [--limit <n>]
+```
+
+Experimental (Phase 3):
+
+```bash
 mdex context "<query>" --db <sqlite> [--budget <n>] [--limit <n>] [--include-content]
-mdex enrich <node-id> --db <sqlite> [--force]
-mdex enrich --path <absolute-path> --db <sqlite> [--force]
+mdex enrich <node-id> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
+mdex enrich --path <absolute-path> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
 ```
 
 ## Verification
@@ -113,8 +125,10 @@ mdex enrich --path <absolute-path> --db <sqlite> [--force]
 2. `mdex scan --root docs --output mdex_index.json --db mdex_index.db`
 3. `mdex list --db mdex_index.db --format json`
 4. `mdex find design --db mdex_index.db`
-5. `mdex context "design decision" --db mdex_index.db --limit 5`
-6. `mdex query --db mdex_index.db --node design.md`
-7. `mdex first design.md --db mdex_index.db`
-8. `mdex related design.md --db mdex_index.db`
-9. ファイルを読んだ後: `mdex enrich <node-id> --db mdex_index.db`
+5. `mdex query --db mdex_index.db --node design.md`
+6. `mdex first design.md --db mdex_index.db`
+7. `mdex related design.md --db mdex_index.db`
+
+Experimental verification:
+1. `mdex context "design decision" --db mdex_index.db --limit 5`
+2. ファイルを読んだ後: `mdex enrich <node-id> --db mdex_index.db --summary "<2〜3文要約>"`

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from runtime.store import get_node, list_edges, list_nodes
@@ -175,6 +176,22 @@ def prerequisite_order(node_id: str, db_path: str, limit: int = 10) -> list[dict
 
     _walk(node_id)
 
+    distance_map: dict[str, int] = {}
+    queue: deque[tuple[str, int]] = deque([(node_id, 0)])
+    seen_for_distance: set[str] = {node_id}
+    while queue:
+        current, depth = queue.popleft()
+        for dependency in sorted(adjacency.get(current, set())):
+            if dependency == node_id:
+                continue
+            next_depth = depth + 1
+            if dependency not in distance_map or next_depth < distance_map[dependency]:
+                distance_map[dependency] = next_depth
+            if dependency in seen_for_distance:
+                continue
+            seen_for_distance.add(dependency)
+            queue.append((dependency, next_depth))
+
     safe_limit = max(0, int(limit))
     if safe_limit == 0:
         return []
@@ -184,5 +201,11 @@ def prerequisite_order(node_id: str, db_path: str, limit: int = 10) -> list[dict
         dependency_node = node_map.get(dependency_id, {"id": dependency_id})
         payload = _node_payload(dependency_node, dependency_id)
         payload["order"] = index
+        distance = int(distance_map.get(dependency_id, 1))
+        payload["distance"] = distance
+        if distance <= 1:
+            payload["reason"] = "direct depends_on"
+        else:
+            payload["reason"] = f"transitive depends_on (depth {distance})"
         prerequisites.append(payload)
     return prerequisites

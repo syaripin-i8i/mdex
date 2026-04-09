@@ -9,7 +9,6 @@ from runtime.builder import build_index
 from runtime.indexer import write_sqlite
 from runtime.parser import parse_file
 from runtime.resolver import prerequisite_order, related_nodes
-from runtime.store import update_node_summary
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +43,12 @@ def _run_cli(*args: str, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProces
         check=False,
         stdin=subprocess.DEVNULL,
     )
+
+
+def _count_resolution(entries: list[dict[str, object]]) -> tuple[int, int]:
+    resolved = sum(1 for entry in entries if bool(entry.get("resolved", False)))
+    unresolved = len(entries) - resolved
+    return resolved, unresolved
 
 
 def test_frontmatter_with_and_without_header(fixture_repo: Path) -> None:
@@ -150,6 +155,26 @@ def test_query_direction_preserved(build_config: dict[str, object], fixture_repo
     assert "docs/dep.md" in outgoing_depends_ids
     assert "docs/consumer.md" in incoming_depends_ids
     assert any(item["id"] == "missing.md" and item["resolved"] is False for item in outgoing_links)
+
+    outgoing_entries = [
+        entry
+        for entries in payload["outgoing"].values()
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
+    incoming_entries = [
+        entry
+        for entries in payload["incoming"].values()
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
+    outgoing_resolved, outgoing_unresolved = _count_resolution(outgoing_entries)
+    incoming_resolved, incoming_unresolved = _count_resolution(incoming_entries)
+
+    assert payload["stats"]["outgoing_resolved"] == outgoing_resolved
+    assert payload["stats"]["outgoing_unresolved"] == outgoing_unresolved
+    assert payload["stats"]["incoming_resolved"] == incoming_resolved
+    assert payload["stats"]["incoming_unresolved"] == incoming_unresolved
 
 
 def test_related_uses_tag_and_type_signals(
@@ -334,59 +359,120 @@ def test_context_respects_soft_budget(build_config: dict[str, object], fixture_r
     assert payload["total_tokens"] <= 120
 
 
-def test_enrich_path_reverse_lookup_without_api_key(
+def test_enrich_path_reverse_lookup_with_summary_file(
     build_config: dict[str, object],
     fixture_repo: Path,
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     index = build_index(str(fixture_repo), build_config)
     db_path = tmp_path / "mdex_enrich.db"
     write_sqlite(index, str(db_path))
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     absolute_path = str((fixture_repo / "docs" / "source.md").resolve())
+    summary_file = tmp_path / "summary.txt"
+    summary_text = "Agent-authored summary for cross-session reuse."
+    summary_file.write_text(summary_text, encoding="utf-8")
 
-    ok = _run_cli("enrich", "--path", absolute_path, "--db", str(db_path))
+    ok = _run_cli(
+        "enrich",
+        "--path",
+        absolute_path,
+        "--db",
+        str(db_path),
+        "--summary-file",
+        str(summary_file),
+    )
     assert ok.returncode == 0
     payload = json.loads(ok.stdout)
-    assert payload["status"] == "skipped"
+    assert payload["status"] == "enriched"
     assert payload["node_id"] == "docs/source.md"
+    assert payload["summary_source"] == "agent"
+    assert payload["skipped"] is False
+    assert payload["new_summary"] == summary_text
+    assert isinstance(payload["previous_summary"], str)
 
-    bad = _run_cli("enrich", "--path", str((tmp_path / "no_such.md").resolve()), "--db", str(db_path))
+    bad = _run_cli(
+        "enrich",
+        "--path",
+        str((tmp_path / "no_such.md").resolve()),
+        "--db",
+        str(db_path),
+        "--summary",
+        "fallback summary",
+    )
     assert bad.returncode == 2
     error_payload = json.loads(bad.stderr)
     assert error_payload["error"] == "node not found"
     assert "path" in error_payload
 
 
-def test_enrich_respects_summary_protection_and_force(
+def test_enrich_skip_and_force_are_source_based(
     build_config: dict[str, object],
     fixture_repo: Path,
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     index = build_index(str(fixture_repo), build_config)
     db_path = tmp_path / "mdex_enrich_force.db"
     write_sqlite(index, str(db_path))
-    update_node_summary(
-        str(db_path),
+
+    first_summary = "Agent summary v1."
+    first = _run_cli("enrich", "docs/source.md", "--db", str(db_path), "--summary", first_summary)
+    assert first.returncode == 0
+    first_payload = json.loads(first.stdout)
+    assert first_payload["status"] == "enriched"
+    assert first_payload["summary_source"] == "agent"
+    assert first_payload["skipped"] is False
+
+    skipped = _run_cli(
+        "enrich",
         "docs/source.md",
-        "This is a long existing summary that should be treated as sufficiently detailed and protected from overwrite by default.",
+        "--db",
+        str(db_path),
+        "--summary",
+        "Agent summary v2.",
     )
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert skipped.returncode == 0
+    skipped_payload = json.loads(skipped.stdout)
+    assert skipped_payload["status"] == "skipped"
+    assert skipped_payload["reason"] == "agent summary already exists"
+    assert skipped_payload["summary_source"] == "agent"
+    assert skipped_payload["skipped"] is True
+    assert skipped_payload["previous_summary"] == first_summary
+    assert skipped_payload["new_summary"] == first_summary
 
-    protected = _run_cli("enrich", "docs/source.md", "--db", str(db_path))
-    assert protected.returncode == 0
-    protected_payload = json.loads(protected.stdout)
-    assert protected_payload["status"] == "skipped"
-    assert protected_payload["reason"] == "summary already sufficient"
-
-    forced = _run_cli("enrich", "docs/source.md", "--db", str(db_path), "--force")
+    forced_summary = "Agent summary v3."
+    forced = _run_cli(
+        "enrich",
+        "docs/source.md",
+        "--db",
+        str(db_path),
+        "--summary",
+        forced_summary,
+        "--force",
+    )
     assert forced.returncode == 0
     forced_payload = json.loads(forced.stdout)
-    assert forced_payload["status"] == "skipped"
-    assert forced_payload["reason"] == "missing ANTHROPIC_API_KEY"
+    assert forced_payload["status"] == "enriched"
+    assert forced_payload["summary_source"] == "agent"
+    assert forced_payload["skipped"] is False
+    assert forced_payload["previous_summary"] == first_summary
+    assert forced_payload["new_summary"] == forced_summary
+
+
+def test_enrich_requires_summary_argument(
+    build_config: dict[str, object],
+    fixture_repo: Path,
+    tmp_path: Path,
+) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_enrich_missing_summary.db"
+    write_sqlite(index, str(db_path))
+
+    result = _run_cli("enrich", "docs/source.md", "--db", str(db_path))
+    assert result.returncode == 2
+    payload = json.loads(result.stderr)
+    assert payload["error"] == "invalid arguments"
+    assert "summary" in payload["detail"]
 
 
 def test_index_option_removed_from_help() -> None:

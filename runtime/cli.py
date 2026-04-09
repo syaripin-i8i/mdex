@@ -188,6 +188,12 @@ def _cmd_query(args: argparse.Namespace) -> int:
 
     outgoing = _empty_grouped_edges()
     incoming = _empty_grouped_edges()
+    stats = {
+        "outgoing_resolved": 0,
+        "outgoing_unresolved": 0,
+        "incoming_resolved": 0,
+        "incoming_unresolved": 0,
+    }
 
     for edge in edges:
         edge_type = str(edge.get("type", "")).strip() or "links_to"
@@ -199,8 +205,16 @@ def _cmd_query(args: argparse.Namespace) -> int:
 
         if src == start_id:
             outgoing.setdefault(edge_type, []).append(_peer_entry(dst, is_resolved, node_map))
+            if is_resolved:
+                stats["outgoing_resolved"] += 1
+            else:
+                stats["outgoing_unresolved"] += 1
         if dst == start_id:
             incoming.setdefault(edge_type, []).append(_peer_entry(src, is_resolved, node_map))
+            if is_resolved:
+                stats["incoming_resolved"] += 1
+            else:
+                stats["incoming_unresolved"] += 1
 
     for groups in (outgoing, incoming):
         for edge_type, items in list(groups.items()):
@@ -216,6 +230,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
         "node": node_map[start_id],
         "outgoing": outgoing,
         "incoming": incoming,
+        "stats": stats,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
@@ -314,6 +329,9 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
     if bool(args.node) == bool(args.path):
         _emit_error("invalid arguments", detail="specify exactly one of node or --path")
         return 2
+    if bool(args.summary) == bool(args.summary_file):
+        _emit_error("invalid arguments", detail="specify exactly one of --summary or --summary-file")
+        return 2
 
     if args.path:
         if not Path(args.path).is_absolute():
@@ -329,7 +347,20 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
             _emit_error("node not found", node_id=str(args.node))
             return 2
 
-    result = enrich_node(node_id, str(db_path), force=bool(args.force))
+    if args.summary:
+        summary_text = str(args.summary).strip()
+    else:
+        summary_file = Path(str(args.summary_file))
+        if not summary_file.exists():
+            _emit_error("summary file not found", path=str(summary_file))
+            return 2
+        try:
+            summary_text = summary_file.read_text(encoding="utf-8").strip()
+        except Exception as exc:
+            _emit_error("failed to read summary file", path=str(summary_file), detail=str(exc))
+            return 2
+
+    result = enrich_node(node_id, str(db_path), summary_text, force=bool(args.force))
     if result.get("status") == "error":
         details = {key: value for key, value in result.items() if key not in {"status", "error"}}
         _emit_error(str(result.get("error", "enrich failed")), **details)
@@ -409,11 +440,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     context_parser.set_defaults(func=_cmd_context)
 
-    enrich_parser = subparsers.add_parser("enrich", help="Improve node summary with external model")
+    enrich_parser = subparsers.add_parser("enrich", help="Update node summary from provided text")
     enrich_parser.add_argument("node", nargs="?", help="Node id to enrich")
     enrich_parser.add_argument("--path", help="Absolute markdown file path to resolve as node id")
     enrich_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
-    enrich_parser.add_argument("--force", action="store_true", help="Overwrite existing summary")
+    enrich_parser.add_argument("--summary", help="Summary text to store")
+    enrich_parser.add_argument("--summary-file", help="Path to file containing summary text")
+    enrich_parser.add_argument("--force", action="store_true", help="Overwrite existing agent summary")
     enrich_parser.set_defaults(func=_cmd_enrich)
 
     return parser

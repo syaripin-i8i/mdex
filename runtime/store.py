@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 NODE_SELECT_SQL = (
-    "SELECT id, title, type, project, status, summary, tags_json, updated, "
+    "SELECT id, title, type, project, status, summary, summary_source, summary_updated, tags_json, updated, "
     "links_to_json, depends_on_json, relates_to_json "
     "FROM nodes"
 )
@@ -76,6 +77,8 @@ def _row_to_node(row: sqlite3.Row) -> dict[str, Any]:
         "project": str(row["project"] or ""),
         "status": str(row["status"] or ""),
         "summary": str(row["summary"] or ""),
+        "summary_source": str(row["summary_source"] or ""),
+        "summary_updated": str(row["summary_updated"] or ""),
         "tags": _as_json_list(row["tags_json"]),
         "updated": str(row["updated"] or ""),
         "links_to": _as_json_list(row["links_to_json"]),
@@ -110,7 +113,7 @@ def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
     with _connect(db_path) as conn:
         row = conn.execute(
             """
-            SELECT id, title, type, project, status, summary, tags_json, updated,
+            SELECT id, title, type, project, status, summary, summary_source, summary_updated, tags_json, updated,
                    links_to_json, depends_on_json, relates_to_json
             FROM nodes
             WHERE id = ?
@@ -265,16 +268,24 @@ def get_scan_root(db_path: str, default: str = ".") -> str:
     return cleaned or default
 
 
-def update_node_summary(db_path: str, node_id: str, summary: str) -> bool:
+def update_node_summary(
+    db_path: str,
+    node_id: str,
+    summary: str,
+    *,
+    source: str = "agent",
+) -> bool:
     clean_id = node_id.strip()
     if not clean_id:
         return False
     clean_summary = summary.strip()
+    clean_source = source.strip() or "agent"
+    now = datetime.now(timezone.utc).isoformat()
 
     with _connect(db_path) as conn:
         cursor = conn.execute(
-            "UPDATE nodes SET summary = ? WHERE id = ?",
-            (clean_summary, clean_id),
+            "UPDATE nodes SET summary = ?, summary_source = ?, summary_updated = ? WHERE id = ?",
+            (clean_summary, clean_source, now, clean_id),
         )
         conn.commit()
         return int(cursor.rowcount or 0) > 0

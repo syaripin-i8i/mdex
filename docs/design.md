@@ -30,7 +30,10 @@ runtime/
   builder.py    ← ノード・エッジ生成（リンク解決、resolved 判定）
   indexer.py    ← JSON / SQLite 書き出し
   store.py      ← SQLite 読み出し API
-  resolver.py   ← related 候補生成
+  resolver.py   ← related / first 探索ロジック
+  context.py    ← context 候補選別（experimental）
+  enrich.py     ← summary 更新口（experimental）
+  tokens.py     ← トークン見積もり
   reader.py     ← node-id から本文取得
   cli.py        ← コマンド入口
 ```
@@ -47,7 +50,7 @@ mdex は「書く → 索引化 → 読む → 改善」のサイクルで使い
 読む        mdex context → 最小必要ファイルを特定
             mdex open / related / first → 詳細探索
   ↓
-改善        mdex enrich → summary を AI 消費向けに更新
+改善        mdex enrich --summary/--summary-file → 外部で作成した summary を更新
             mdex scan   → 索引に反映
 ```
 
@@ -61,14 +64,14 @@ mdex は「書く → 索引化 → 読む → 改善」のサイクルで使い
 - edge に `resolved` を保持
 - `list` / `query` は SQLite 参照
 
-### Phase 2（探索）: 完了
+### Phase 2（探索）: 実装済み・安定化中
 
 - `find`: title/summary/tags 検索の入口
 - `orphans`: resolved edge 観点の孤立ノード検出
 - `related`: 連想的な近傍候補（関連探索）
 - `first`: depends_on を基にした前提読み順（prerequisite reader）
 
-### Phase 3（AI 補助）
+### Phase 3（AI 補助）: experimental
 
 - `context`: 問いに対する優先読解ノード集合を返す入口
 - `enrich`: 読後に summary を改善して索引品質を上げる更新器
@@ -93,6 +96,8 @@ AI 実運用ではコンテクストを3層で扱う。
   "project": "...",
   "status": "active|done|draft|archived|unknown",
   "summary": "...",
+  "summary_source": "seed|agent",
+  "summary_updated": "ISO date",
   "tags": [],
   "updated": "ISO date",
   "links_to": ["resolved-target.md"],
@@ -141,6 +146,12 @@ AI 実運用ではコンテクストを3層で扱う。
     "links_to": [],
     "depends_on": [],
     "relates_to": []
+  },
+  "stats": {
+    "outgoing_resolved": 0,
+    "outgoing_unresolved": 0,
+    "incoming_resolved": 0,
+    "incoming_unresolved": 0
   }
 }
 ```
@@ -165,9 +176,9 @@ AI 実運用ではコンテクストを3層で扱う。
   - `--budget` をソフト上限として返却集合を制御
   - デフォルトは軽量メタのみ、`--include-content` で本文を同梱
 - `enrich`:
-  - ノード本文を読み、外部モデルで 2〜3文 summary を生成
-  - DB の `nodes.summary` を更新
-  - APIキー未設定時はスキップ（失敗扱いにしない）
+  - 作業 AI / 人間が作成した summary を `--summary` または `--summary-file` で受け取る
+  - DB の `nodes.summary` / `summary_source` / `summary_updated` を更新する
+  - `summary_source=agent` の既存 summary は `--force` なしでスキップ
   - `--path` で絶対パスから node-id を逆引き可能
 
 ## CLI
@@ -182,8 +193,8 @@ mdex orphans --db <sqlite>
 mdex related <node-id> --db <sqlite> [--limit <n>]
 mdex first <node-id> --db <sqlite> [--limit <n>]
 mdex context "<query>" --db <sqlite> [--budget <n>] [--limit <n>] [--include-content]
-mdex enrich <node-id> --db <sqlite> [--force]
-mdex enrich --path <absolute-path> --db <sqlite> [--force]
+mdex enrich <node-id> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
+mdex enrich --path <absolute-path> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
 ```
 
 成功時は stdout JSON、エラー時は stderr JSON を返す。
