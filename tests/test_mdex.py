@@ -140,6 +140,7 @@ def test_query_direction_preserved(build_config: dict[str, object], fixture_repo
         capture_output=True,
         text=True,
         check=True,
+        stdin=subprocess.DEVNULL,
     )
     payload = json.loads(result.stdout)
 
