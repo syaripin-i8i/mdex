@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mdex"
+version = "0.1.0"
+description = "Markdown indexer and lightweight graph-based explorer"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+mdex = "runtime.cli:main"
+
+[tool.setuptools]
+packages = ["runtime"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

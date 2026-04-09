@@ -14,5 +14,6 @@
     "reference": ["reference", "ref", "refs", "notes"]
   },
   "summary_max_sentences": 3,
+  "summary_max_chars": 200,
   "output_file": "mdex_index.json"
 }

@@ -32,9 +32,13 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
     try:
         cur = db.cursor()
 
+        cur.execute("DROP TABLE IF EXISTS nodes")
+        cur.execute("DROP TABLE IF EXISTS edges")
+        cur.execute("DROP TABLE IF EXISTS index_metadata")
+
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS nodes (
+            CREATE TABLE nodes (
                 id TEXT PRIMARY KEY,
                 title TEXT,
                 type TEXT,
@@ -51,16 +55,23 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
         )
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS edges (
+            CREATE TABLE edges (
                 src TEXT NOT NULL,
                 dst TEXT NOT NULL,
                 type TEXT NOT NULL,
+                resolved INTEGER NOT NULL,
                 PRIMARY KEY (src, dst, type)
             )
             """
         )
-        cur.execute("DELETE FROM nodes")
-        cur.execute("DELETE FROM edges")
+        cur.execute(
+            """
+            CREATE TABLE index_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
 
         for node in nodes:
             if not isinstance(node, dict):
@@ -92,18 +103,34 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
                 continue
             cur.execute(
                 """
-                INSERT OR REPLACE INTO edges (src, dst, type)
-                VALUES (?, ?, ?)
+                INSERT OR REPLACE INTO edges (src, dst, type, resolved)
+                VALUES (?, ?, ?, ?)
                 """,
                 (
                     str(edge.get("from", "")),
                     str(edge.get("to", "")),
                     str(edge.get("type", "")),
+                    1 if bool(edge.get("resolved", True)) else 0,
                 ),
+            )
+
+        metadata_rows = {
+            "generated": str(index.get("generated", "")),
+            "scan_root": str(index.get("scan_root", "")),
+        }
+        for key, value in metadata_rows.items():
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO index_metadata (key, value)
+                VALUES (?, ?)
+                """,
+                (key, value),
             )
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_edges_resolved ON edges(resolved)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status)")

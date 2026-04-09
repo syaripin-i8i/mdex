@@ -1,62 +1,61 @@
 # mdex
 
-`mdex` は、Markdown ファイル群から軽量な知識グラフ（nodes/edges）を作るためのツールです。  
-全文検索よりも「どの文書を先に読むか」を支援する用途を重視しています。
+`mdex` は、Markdown ファイル群を対象にした軽量インデクサ兼探索器です。  
+全文検索ではなく「次に何を読むべきか」を支援する用途を重視しています。
 
 ## できること
 
 - Markdown 走査（`.md` 列挙、除外パターン対応）
 - frontmatter / 見出し / 要約 / タグ抽出
-- `[[wikilink]]` / `[text](file.md)` / task内ID参照（`TYYYYMMDDHHMMSS`）のエッジ化
-- JSON + SQLite インデックス出力
-- CLI で `scan`, `list`, `open`, `query` を実行
+- `[[wikilink]]` / `[text](file.md)` / task ID 参照のエッジ化
+- JSON（デバッグ） + SQLite（正本）インデックス出力
+- `query` で方向付きの入出力関係を表示（`incoming/outgoing`）
+- `related` で次に読む候補をルールベース推薦
 
-## 必要環境
+## セットアップ
 
 - Python 3.10+
 - `PyYAML`
 
 ```bash
-python -m pip install pyyaml
+python -m pip install -e .
+```
+
+開発用テスト込み:
+
+```bash
+python -m pip install -e ".[dev]"
 ```
 
 ## クイックスタート
 
-リポジトリルート（`C:\Codex\mdex`）で実行します。
-
 ```bash
-python runtime/cli.py scan --root docs/
-python runtime/cli.py list
-python runtime/cli.py open docs/proposal.md
+mdex scan --root docs/ --output mdex_index.json --db mdex_index.db
+mdex list --db mdex_index.db
+mdex query --db mdex_index.db --node design.md
+mdex related design.md --db mdex_index.db
+mdex open design.md --db mdex_index.db
 ```
 
-`scan` 実行後に以下が生成されます。
-
-- `mdex_index.json`
-- `mdex_index.db`
-
-## C:\Codex 全量スキャン例
-
-```bash
-python runtime/cli.py scan --root <repo-root> --output <repo-root>/mdex_codex_index.json --db <repo-root>/mdex_codex_index.db
-python runtime/cli.py list --index <repo-root>/mdex_codex_index.json --project mdex
-python runtime/cli.py query --index <repo-root>/mdex_codex_index.json --node infra/tasks/done/T20260330022925.md --depth 1
-python runtime/cli.py open infra/tasks/done/T20260409035436.md --index <repo-root>/mdex_codex_index.json
-```
-
-## CLI 概要
+## 主なコマンド
 
 - `scan --root <dir> [--output <json>] [--db <sqlite>] [--config <json>]`
-- `list [--index <json>] [--type <type>] [--project <name>] [--status <status>]`
-- `open <node-id> [--root <dir>] [--index <json>]`
-- `query --node <id> [--index <json>] [--depth <n>]` （後方互換用）
+- `list --db <sqlite> [--type <type>] [--project <name>] [--status <status>]`
+- `open <node-id> --db <sqlite>`
+- `query --db <sqlite> --node <node-id>`
+- `related <node-id> --db <sqlite> [--limit <n>]`
 
-## 実装モジュール
+`list` / `query` / `related` は SQLite を主経路に使います。  
+`--index` は JSON フォールバック（後方互換）です。
+
+## 実装モジュール責務
 
 - `runtime/scanner.py`: `.md` 列挙
-- `runtime/parser.py`: frontmatter/metadata/link抽出
-- `runtime/builder.py`: ノード・エッジ生成とリンク解決
+- `runtime/parser.py`: frontmatter/metadata/link/summary 抽出
+- `runtime/builder.py`: ノード・エッジ生成（参照解決、resolved 判定）
 - `runtime/indexer.py`: JSON/SQLite 書き出し
+- `runtime/store.py`: SQLite 読み出し API
+- `runtime/resolver.py`: 探索ロジック（`related`）
 - `runtime/reader.py`: node-id から本文取得
 - `runtime/cli.py`: コマンド入口
 

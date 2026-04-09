@@ -214,16 +214,16 @@ def _resolve_target_id(
     path_to_id: dict[Path, str],
     stem_to_ids: dict[str, list[str]],
     name_to_ids: dict[str, list[str]],
-) -> str:
+) -> tuple[str, bool]:
     target = raw_target.strip().strip("`\"'")
     if not target:
-        return ""
+        return "", False
 
     target = target.split("#", 1)[0].split("?", 1)[0].strip()
     if not target:
-        return ""
+        return "", False
     if URL_SCHEME_RE.match(target):
-        return ""
+        return "", False
 
     source_dir = source_file.parent.resolve()
     target_path = Path(target)
@@ -231,26 +231,63 @@ def _resolve_target_id(
     if target_path.is_absolute():
         absolute_target = target_path.resolve()
         if absolute_target in path_to_id:
-            return path_to_id[absolute_target]
-        return _node_id_for_path(absolute_target, root_path)
+            return path_to_id[absolute_target], True
+        try:
+            return _to_posix(str(absolute_target.relative_to(root_path.resolve()))), False
+        except ValueError:
+            return _to_posix(str(target_path)), False
 
     absolute_from_source = (source_dir / target_path).resolve()
     if absolute_from_source in path_to_id:
-        return path_to_id[absolute_from_source]
+        return path_to_id[absolute_from_source], True
 
     absolute_from_root = (root_path.resolve() / target_path).resolve()
     if absolute_from_root in path_to_id:
-        return path_to_id[absolute_from_root]
+        return path_to_id[absolute_from_root], True
 
     target_name = target_path.name.lower()
     if target_name in name_to_ids:
-        return _choose_best_candidate(name_to_ids[target_name], source_node_id)
+        return _choose_best_candidate(name_to_ids[target_name], source_node_id), True
 
     stem = Path(target_name).stem.lower()
     if stem in stem_to_ids:
-        return _choose_best_candidate(stem_to_ids[stem], source_node_id)
+        return _choose_best_candidate(stem_to_ids[stem], source_node_id), True
 
-    return _to_posix(target)
+    unresolved = _to_posix(target)
+    if unresolved.startswith("./"):
+        unresolved = unresolved[2:]
+    return unresolved, False
+
+
+def _resolve_targets(
+    raw_targets: list[str],
+    source_file: Path,
+    source_node_id: str,
+    root_path: Path,
+    path_to_id: dict[Path, str],
+    stem_to_ids: dict[str, list[str]],
+    name_to_ids: dict[str, list[str]],
+) -> list[tuple[str, bool]]:
+    resolved_targets: list[tuple[str, bool]] = []
+    seen = set()
+    for target in raw_targets:
+        target_id, is_resolved = _resolve_target_id(
+            target,
+            source_file,
+            source_node_id,
+            root_path,
+            path_to_id,
+            stem_to_ids,
+            name_to_ids,
+        )
+        if not target_id or target_id == source_node_id:
+            continue
+        key = (target_id, is_resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved_targets.append((target_id, is_resolved))
+    return resolved_targets
 
 
 def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -260,17 +297,22 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(node_type_map, dict):
         node_type_map = {}
 
+    parser_options = {
+        "summary_max_sentences": config.get("summary_max_sentences", 3),
+        "summary_max_chars": config.get("summary_max_chars", 200),
+    }
+
     relative_files = list_markdown_files(str(root_path), exclude_patterns)
     markdown_files = [(root_path / relative).resolve() for relative in relative_files]
     path_to_id = {file_path: _node_id_for_path(file_path, root_path) for file_path in markdown_files}
     stem_to_ids, name_to_ids = _build_lookup_maps(path_to_id)
 
     nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, str]] = []
+    edges: list[dict[str, Any]] = []
     edge_keys = set()
 
     for file_path in markdown_files:
-        parsed = parse_file(str(file_path))
+        parsed = parse_file(str(file_path), options=parser_options)
         frontmatter = parsed.get("frontmatter", {}) or {}
         if not isinstance(frontmatter, dict):
             frontmatter = {}
@@ -298,20 +340,14 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             for item in parsed.get("path_refs", [])
             if str(item).strip()
         ]
-        links_to_resolved = _dedupe_keep_order(
-            [
-                _resolve_target_id(
-                    target,
-                    file_path,
-                    node_id,
-                    root_path,
-                    path_to_id,
-                    stem_to_ids,
-                    name_to_ids,
-                )
-                for target in wikilink_targets + md_link_targets + path_ref_targets
-                if target
-            ]
+        links_to_pairs = _resolve_targets(
+            [target for target in wikilink_targets + md_link_targets + path_ref_targets if target],
+            file_path,
+            node_id,
+            root_path,
+            path_to_id,
+            stem_to_ids,
+            name_to_ids,
         )
 
         depends_raw = [
@@ -323,57 +359,34 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             for item in _normalize_str_list(frontmatter.get("relates_to"))
         ]
 
-        depends_resolved = _dedupe_keep_order(
-            [
-                _resolve_target_id(
-                    target,
-                    file_path,
-                    node_id,
-                    root_path,
-                    path_to_id,
-                    stem_to_ids,
-                    name_to_ids,
-                )
-                for target in depends_raw
-                if target
-            ]
-        )
-        relates_resolved = _dedupe_keep_order(
-            [
-                _resolve_target_id(
-                    target,
-                    file_path,
-                    node_id,
-                    root_path,
-                    path_to_id,
-                    stem_to_ids,
-                    name_to_ids,
-                )
-                for target in relates_raw
-                if target
-            ]
+        depends_pairs = _resolve_targets(
+            [target for target in depends_raw if target],
+            file_path,
+            node_id,
+            root_path,
+            path_to_id,
+            stem_to_ids,
+            name_to_ids,
         )
 
-        task_ref_targets = _dedupe_keep_order(
-            [
-                _resolve_target_id(
-                    f"{str(task_id).strip()}.md",
-                    file_path,
-                    node_id,
-                    root_path,
-                    path_to_id,
-                    stem_to_ids,
-                    name_to_ids,
-                )
-                for task_id in parsed.get("task_refs", [])
-                if str(task_id).strip()
-            ]
+        task_ref_raw = [
+            f"{str(task_id).strip()}.md"
+            for task_id in parsed.get("task_refs", [])
+            if str(task_id).strip()
+        ]
+        relates_pairs = _resolve_targets(
+            [target for target in relates_raw + task_ref_raw if target],
+            file_path,
+            node_id,
+            root_path,
+            path_to_id,
+            stem_to_ids,
+            name_to_ids,
         )
-        relates_resolved = _dedupe_keep_order(relates_resolved + task_ref_targets)
 
-        links_to_resolved = [target for target in links_to_resolved if target and target != node_id]
-        depends_resolved = [target for target in depends_resolved if target and target != node_id]
-        relates_resolved = [target for target in relates_resolved if target and target != node_id]
+        links_to_resolved = [target for target, is_resolved in links_to_pairs if is_resolved]
+        depends_resolved = [target for target, is_resolved in depends_pairs if is_resolved]
+        relates_resolved = [target for target, is_resolved in relates_pairs if is_resolved]
 
         node = {
             "id": node_id,
@@ -390,19 +403,21 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
         }
         nodes.append(node)
 
-        for edge_type, targets in (
-            ("links_to", links_to_resolved),
-            ("depends_on", depends_resolved),
-            ("relates_to", relates_resolved),
+        for edge_type, target_pairs in (
+            ("links_to", links_to_pairs),
+            ("depends_on", depends_pairs),
+            ("relates_to", relates_pairs),
         ):
-            for target in targets:
+            for target, is_resolved in target_pairs:
                 if not target:
                     continue
-                edge_key = (node_id, target, edge_type)
+                edge_key = (node_id, target, edge_type, is_resolved)
                 if edge_key in edge_keys:
                     continue
                 edge_keys.add(edge_key)
-                edges.append({"from": node_id, "to": target, "type": edge_type})
+                edges.append(
+                    {"from": node_id, "to": target, "type": edge_type, "resolved": is_resolved}
+                )
 
     return {
         "generated": _to_iso_now(),

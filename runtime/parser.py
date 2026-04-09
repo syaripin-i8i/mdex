@@ -223,7 +223,19 @@ def _extract_path_refs(body: str) -> list[str]:
     return _dedupe_keep_order(refs)
 
 
-def parse_file(path: str) -> dict[str, Any]:
+def _get_int_option(options: dict[str, Any], key: str, default: int) -> int:
+    raw = options.get(key, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if value <= 0:
+        return default
+    return value
+
+
+def parse_file(path: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    options = options or {}
     source_path = Path(path)
     raw_text = source_path.read_text(encoding="utf-8")
 
@@ -238,7 +250,9 @@ def parse_file(path: str) -> dict[str, Any]:
     headings = _extract_headings(lines)
     wikilinks = _extract_wikilinks(link_source)
     md_links = _extract_md_links(link_source)
-    summary = _extract_summary(body, max_sentences=3, max_chars=200)
+    summary_max_sentences = _get_int_option(options, "summary_max_sentences", 3)
+    summary_max_chars = _get_int_option(options, "summary_max_chars", 200)
+    summary = _extract_summary(body, max_sentences=summary_max_sentences, max_chars=summary_max_chars)
     tags = _normalize_tags(merged_frontmatter.get("tags"))
     task_refs = _extract_task_refs(raw_text)
     path_refs = _extract_path_refs(body)
