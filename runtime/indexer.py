@@ -22,6 +22,17 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
     try:
         cur = db.cursor()
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS node_overrides (
+                id TEXT PRIMARY KEY,
+                summary TEXT NOT NULL,
+                summary_source TEXT NOT NULL,
+                summary_updated TEXT NOT NULL
+            )
+            """
+        )
+
         cur.execute("DROP TABLE IF EXISTS nodes")
         cur.execute("DROP TABLE IF EXISTS edges")
         cur.execute("DROP TABLE IF EXISTS index_metadata")

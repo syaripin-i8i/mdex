@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from runtime.builder import build_index
@@ -86,3 +87,41 @@ def test_enrich_skips_existing_agent_summary_without_force(
     assert second["summary_source"] == "agent"
     assert second["previous_summary"] == "Agent summary v1"
     assert second["new_summary"] == "Agent summary v1"
+
+
+def test_enrich_persists_across_scan_via_node_overrides(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_enrich_rescan.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    persisted_summary = "Agent summary that must survive a later scan."
+    enriched = enrich_node("design/root.md", str(db_path), persisted_summary, force=False)
+    assert enriched["status"] == "enriched"
+
+    before_rescan = get_node(str(db_path), "design/root.md")
+    assert before_rescan is not None
+    assert before_rescan["summary_source"] == "agent"
+    assert before_rescan["summary"] == persisted_summary
+
+    with sqlite3.connect(str(db_path)) as conn:
+        count_before = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+    assert count_before == 1
+
+    rescanned_index = build_index(str(quality_repo), quality_config)
+    write_sqlite(rescanned_index, str(db_path))
+
+    after_rescan = get_node(str(db_path), "design/root.md")
+    assert after_rescan is not None
+    assert after_rescan["summary_source"] == "agent"
+    assert after_rescan["summary"] == persisted_summary
+
+    untouched = get_node(str(db_path), "decision/a.md")
+    assert untouched is not None
+    assert untouched["summary_source"] == "seed"
+
+    with sqlite3.connect(str(db_path)) as conn:
+        count_after = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+    assert count_after == 1

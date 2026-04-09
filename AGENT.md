@@ -16,6 +16,7 @@
 4. SQLite を正本とし、JSON はデバッグ出力に限定する。
 5. 未解決リンクは resolved と混在させず、`resolved=false` として扱う。
 6. **`enrich` のサマリは AI 消費向けに書く。** 「別のエージェントがこのファイルを読むべきか判断するための情報」を含める。何が書かれているか・どんな制約や判断を含むか・いつ参照すべきか。
+7. scan は seed テーブル（`nodes`/`edges`/`index_metadata`）を再生成するが、`node_overrides` は保持する。
 
 ## Runtime Responsibilities
 

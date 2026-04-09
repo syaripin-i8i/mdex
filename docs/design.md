@@ -21,6 +21,21 @@ updated: 2026-04-09
 3. 未解決参照は `resolved=false` で明示し、解決済みと混ぜない。
 4. Phase 1-2 は AI 依存なし。
 
+## 永続化モデル
+
+scan ごとに再生成される seed と、scan をまたいで保持する agent override を分離する。
+
+```
+scan のたびにリセット        scan をまたいで永続
+─────────────────────        ──────────────────
+nodes          （seed）       node_overrides （agent）
+edges
+index_metadata
+```
+
+`get_node` / `list_nodes` は `nodes` を読み、同一 id の `node_overrides` があれば
+`summary` / `summary_source` / `summary_updated` を上書きして返す。
+
 ## モジュール責務
 
 ```

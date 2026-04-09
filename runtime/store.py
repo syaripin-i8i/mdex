@@ -13,6 +13,11 @@ NODE_SELECT_SQL = (
     "FROM nodes"
 )
 
+OVERRIDE_SELECT_SQL = (
+    "SELECT id, summary, summary_source, summary_updated "
+    "FROM node_overrides"
+)
+
 
 def _as_json_list(value: Any) -> list[str]:
     if value is None:
@@ -37,6 +42,65 @@ def _connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _ensure_node_overrides_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS node_overrides (
+            id TEXT PRIMARY KEY,
+            summary TEXT NOT NULL,
+            summary_source TEXT NOT NULL,
+            summary_updated TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _load_overrides(
+    conn: sqlite3.Connection,
+    node_ids: Iterable[str],
+) -> dict[str, dict[str, str]]:
+    ids = sorted({str(node_id).strip() for node_id in node_ids if str(node_id).strip()})
+    if not ids:
+        return {}
+    if not _table_exists(conn, "node_overrides"):
+        return {}
+
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"{OVERRIDE_SELECT_SQL} WHERE id IN ({placeholders})",
+        ids,
+    ).fetchall()
+
+    overrides: dict[str, dict[str, str]] = {}
+    for row in rows:
+        node_id = str(row["id"] or "").strip()
+        if not node_id:
+            continue
+        overrides[node_id] = {
+            "summary": str(row["summary"] or ""),
+            "summary_source": str(row["summary_source"] or ""),
+            "summary_updated": str(row["summary_updated"] or ""),
+        }
+    return overrides
+
+
+def _apply_override(node: dict[str, Any], overrides: dict[str, dict[str, str]]) -> dict[str, Any]:
+    node_id = str(node.get("id", "")).strip()
+    if not node_id or node_id not in overrides:
+        return node
+    merged = dict(node)
+    merged.update(overrides[node_id])
+    return merged
 
 
 def _build_where_clauses(filters: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -105,8 +169,10 @@ def list_nodes(
 
     with _connect(db_path) as conn:
         rows = conn.execute(query, params).fetchall()
+        nodes = [_row_to_node(row) for row in rows]
+        overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
 
-    return [_row_to_node(row) for row in rows]
+    return [_apply_override(node, overrides) for node in nodes]
 
 
 def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
@@ -120,11 +186,12 @@ def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
             """,
             (node_id,),
         ).fetchone()
+        overrides = _load_overrides(conn, [node_id])
 
     if row is None:
         return None
 
-    return _row_to_node(row)
+    return _apply_override(_row_to_node(row), overrides)
 
 
 def search_nodes(db_path: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -142,7 +209,9 @@ def search_nodes(db_path: str, query: str, limit: int = 20) -> list[dict[str, An
 
     with _connect(db_path) as conn:
         rows = conn.execute(sql, (pattern, pattern, pattern, safe_limit)).fetchall()
-    return [_row_to_node(row) for row in rows]
+        nodes = [_row_to_node(row) for row in rows]
+        overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
+    return [_apply_override(node, overrides) for node in nodes]
 
 
 def list_orphan_nodes(db_path: str) -> list[dict[str, Any]]:
@@ -155,7 +224,9 @@ def list_orphan_nodes(db_path: str) -> list[dict[str, Any]]:
 
     with _connect(db_path) as conn:
         rows = conn.execute(sql).fetchall()
-    return [_row_to_node(row) for row in rows]
+        nodes = [_row_to_node(row) for row in rows]
+        overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
+    return [_apply_override(node, overrides) for node in nodes]
 
 
 def list_edges(
@@ -279,13 +350,28 @@ def update_node_summary(
     if not clean_id:
         return False
     clean_summary = summary.strip()
-    clean_source = source.strip() or "agent"
+    clean_source = "agent"
     now = datetime.now(timezone.utc).isoformat()
 
     with _connect(db_path) as conn:
+        node_exists = conn.execute(
+            "SELECT 1 FROM nodes WHERE id = ?",
+            (clean_id,),
+        ).fetchone()
+        if node_exists is None:
+            return False
+
+        _ensure_node_overrides_table(conn)
         cursor = conn.execute(
-            "UPDATE nodes SET summary = ?, summary_source = ?, summary_updated = ? WHERE id = ?",
-            (clean_summary, clean_source, now, clean_id),
+            """
+            INSERT INTO node_overrides (id, summary, summary_source, summary_updated)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                summary = excluded.summary,
+                summary_source = excluded.summary_source,
+                summary_updated = excluded.summary_updated
+            """,
+            (clean_id, clean_summary, clean_source, now),
         )
         conn.commit()
         return int(cursor.rowcount or 0) > 0
