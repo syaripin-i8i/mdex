@@ -110,6 +110,21 @@ mdex enrich foo.md --db C:\Codex\mdex\mdex_codex_index.db --summary "..." --forc
 
 `enrich` の更新は `node_overrides` に即時反映されるため、`find` / `first` / `related` / `context` で再利用するだけなら再 `scan` は不要です。索引対象ファイルを更新したときだけ `scan` で seed index を再構築してください。
 
+## JSON メモリ例（Yura）
+
+構造化された会話メモリや session summary のような JSON / JSONL も、そのまま索引対象にできます。
+
+```bash
+mdex scan --root C:\Codex\yura\memory --db yura_memory_index.db --config C:\Codex\yura\control\mdex_memory_scan_config.json
+mdex find "smalltalk greeting" --db yura_memory_index.db --limit 10
+mdex context "public question general_question" --db yura_memory_index.db --limit 8
+mdex enrich raw_logs/default__03bcf827cec6.json --db yura_memory_index.db --summary "ローカル chat の受信失敗気味な1ターン生ログ。smalltalk / neutral の挙動確認に使う。"
+```
+
+補足:
+- `enrich` は元の JSON を書き換えず、SQLite の `node_overrides` に summary を保存する
+- 運用側で自動更新したい場合は `C:\Codex\yura\runtime\mdex_memory.py` のような薄いラッパーを置くと扱いやすい
+
 ## 再現サンプル（fixtures/quality_repo）
 
 `tests/fixtures/quality_repo` を使うと、scan → first → related → enrich をそのまま再現できます。
