@@ -1,9 +1,17 @@
 {
-  "scan_roots": [],
+  "scan_roots": ["<repo-root>"],
   "exclude_patterns": [
     ".git/**",
     "node_modules/**",
-    "*.min.md"
+    "*.min.md",
+    "mdex/**",
+    "workspace/**",
+    "infra/logs/**",
+    "infra/tasks/**",
+    "**/*.tmp.md",
+    "**/.tmp/**",
+    "**/.pytest_cache/**",
+    "**/outputs/**"
   ],
   "node_type_map": {
     "decision": ["decision", "decisions", "adr"],
