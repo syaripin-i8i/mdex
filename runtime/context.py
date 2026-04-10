@@ -34,9 +34,9 @@ STATUS_BONUS = {
     "draft": 0.4,
     "pending": 0.2,
     # Done items remain useful but should not dominate current context selection.
-    "done": -0.1,
+    "done": -0.5,
     # Archived content should be de-prioritized by default.
-    "archived": -0.6,
+    "archived": -0.7,
 }
 
 # Graph proximity is useful, but weaker than direct lexical match.

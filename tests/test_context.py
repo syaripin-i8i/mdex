@@ -58,3 +58,47 @@ def test_select_context_includes_score_breakdown(
     assert "token_cost" in breakdown
     assert "total" in breakdown
     assert abs(float(breakdown["total"]) - float(top["score"])) < 1e-6
+
+
+def test_select_context_penalizes_done_more_than_active(tmp_path: Path) -> None:
+    repo = tmp_path / "context_status_repo"
+    repo.mkdir()
+    config = {
+        "exclude_patterns": [],
+        "node_type_map": {"design": ["design"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+
+    (repo / "active_doc.md").write_text(
+        """---
+type: design
+status: active
+updated: 2025-01-01
+---
+# Active Doc
+
+shared ranking term for context selection
+""",
+        encoding="utf-8",
+    )
+    (repo / "done_doc.md").write_text(
+        """---
+type: design
+status: done
+updated: 2025-01-01
+---
+# Done Doc
+
+shared ranking term for context selection
+""",
+        encoding="utf-8",
+    )
+
+    db_path = tmp_path / "quality_context_status.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("shared ranking term", str(db_path), budget=4000, limit=2)
+    ids = [row["id"] for row in result["nodes"]]
+    assert ids[0] == "active_doc.md"
+    assert "done_doc.md" in ids

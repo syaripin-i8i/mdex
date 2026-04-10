@@ -64,6 +64,7 @@ mdex query --node foo.md --db mdex_index.db
 
 # 品質確認（任意）
 mdex orphans             --db mdex_index.db
+mdex stale               --db mdex_index.db --days 30
 ```
 
 ### 補助コマンド（experimental / Phase 3 / 評価中）
@@ -170,6 +171,7 @@ mdex enrich design/root.md --db .tmp_quality.db --summary "Root Design の要点
 | `find`    | 入口 | キーワード一致 | まずどこから読むかを探す |
 | `related` | 横（近傍） | エッジ重みスコア + タグ/型一致 | 関連して読むべきものを探す |
 | `first`   | 縦（前提） | `depends_on` 逆辿り | このノードを理解する前に読むべきものを得る |
+| `stale`   | 品質監視 | `summary_source=seed` かつ更新経過日数 | enrich 候補を見つける |
 | `context` | 複合 | キーワード + グラフ + 予算 | experimental。作業用コンテキストを切り出す |
 | `enrich`  | 更新 | 明示入力された summary | experimental。summary 更新口として記録品質を上げる |
 

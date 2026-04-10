@@ -4,7 +4,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ OVERRIDE_SELECT_SQL = (
 
 SEARCH_TOKEN_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"'\-]+")
 WORD_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]")
 SEARCH_TITLE_WEIGHT = 3.0
 SEARCH_SUMMARY_WEIGHT = 2.0
 SEARCH_TAG_WEIGHT = 2.5
@@ -141,6 +142,25 @@ def _coerce_positive_int(value: Any, default: int) -> int:
     return parsed
 
 
+def _contains_cjk(text: str) -> bool:
+    return bool(CJK_RE.search(text))
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _search_terms(query: str) -> list[str]:
     lowered = query.strip().lower()
     if not lowered:
@@ -149,7 +169,12 @@ def _search_terms(query: str) -> list[str]:
     seen = {lowered}
     for token in SEARCH_TOKEN_SPLIT_RE.split(lowered):
         clean = token.strip()
-        if len(clean) < 3 or clean in seen:
+        if not clean or clean in seen:
+            continue
+        if _contains_cjk(clean):
+            if len(clean) < 2:
+                continue
+        elif len(clean) < 3:
             continue
         seen.add(clean)
         terms.append(clean)
@@ -170,6 +195,17 @@ def _search_score(node: dict[str, Any], terms: list[str]) -> float:
 
     score = 0.0
     for term in terms:
+        if _contains_cjk(term):
+            if term in title:
+                score += SEARCH_TITLE_WEIGHT
+            if term in summary:
+                score += SEARCH_SUMMARY_WEIGHT
+            if any(term in tag for tag in tags):
+                score += SEARCH_TAG_WEIGHT
+            if term in node_id:
+                score += SEARCH_ID_WEIGHT
+            continue
+
         is_phrase = bool(re.search(r"[\s\-_/]", term))
         if is_phrase:
             if term in title:
@@ -288,6 +324,47 @@ def list_orphan_nodes(db_path: str) -> list[dict[str, Any]]:
         nodes = [_row_to_node(row) for row in rows]
         overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
     return [_apply_override(node, overrides) for node in nodes]
+
+
+def list_stale_nodes(db_path: str, days: int = 30) -> list[dict[str, Any]]:
+    safe_days = _coerce_positive_int(days, 30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=safe_days)
+    nodes = list_nodes(db_path)
+
+    stale_rows: list[tuple[datetime | None, dict[str, Any]]] = []
+    for node in nodes:
+        summary_source = str(node.get("summary_source", "")).strip().lower()
+        if summary_source == "agent":
+            continue
+
+        updated = str(node.get("updated", "")).strip()
+        parsed_updated = _parse_timestamp(updated)
+        if parsed_updated is not None and parsed_updated > cutoff:
+            continue
+
+        stale_rows.append(
+            (
+                parsed_updated,
+                {
+                    "id": str(node.get("id", "")),
+                    "title": str(node.get("title", "")),
+                    "type": str(node.get("type", "")),
+                    "status": str(node.get("status", "")),
+                    "summary_source": str(node.get("summary_source", "")),
+                    "updated": updated,
+                },
+            )
+        )
+
+    max_dt = datetime.max.replace(tzinfo=timezone.utc)
+    stale_rows.sort(
+        key=lambda row: (
+            1 if row[0] is None else 0,
+            row[0] if row[0] is not None else max_dt,
+            row[1]["id"],
+        )
+    )
+    return [row[1] for row in stale_rows]
 
 
 def list_edges(

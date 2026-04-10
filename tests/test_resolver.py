@@ -143,6 +143,44 @@ def test_related_nodes_use_override_summary_for_scoring(
     )
 
 
+def test_related_nodes_supports_cjk_summary_terms(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_resolver_related_cjk.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    before = related_nodes("design/root.md", str(db_path), limit=20)
+    before_map = {row["id"]: row for row in before}
+    before_score = float(before_map.get("notes/orphan.md", {}).get("score", 0.0))
+
+    root_enriched = enrich_node(
+        "design/root.md",
+        str(db_path),
+        "設計方針と依存関係を整理する中核ドキュメントです。",
+        force=False,
+    )
+    assert root_enriched["status"] == "enriched"
+
+    orphan_enriched = enrich_node(
+        "notes/orphan.md",
+        str(db_path),
+        "設計方針の確認メモ。依存関係の見直し項目をまとめる。",
+        force=False,
+    )
+    assert orphan_enriched["status"] == "enriched"
+
+    after = related_nodes("design/root.md", str(db_path), limit=20)
+    after_map = {row["id"]: row for row in after}
+    assert "notes/orphan.md" in after_map
+    assert float(after_map["notes/orphan.md"]["score"]) > before_score
+    assert any(
+        reason.startswith("shared_summary_terms:")
+        for reason in after_map["notes/orphan.md"]["reasons"]
+    )
+
+
 def test_first_uses_override_summary_for_tie_breaking(
     quality_repo: Path,
     quality_config: dict[str, object],

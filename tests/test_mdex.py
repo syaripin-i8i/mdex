@@ -475,8 +475,78 @@ def test_enrich_requires_summary_argument(
     assert "summary" in payload["detail"]
 
 
+def test_stale_lists_seed_nodes_by_age(tmp_path: Path) -> None:
+    repo = tmp_path / "stale_cli_repo"
+    repo.mkdir()
+    config = {
+        "exclude_patterns": [],
+        "node_type_map": {"design": ["design"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "mdex_stale.db"
+
+    (repo / "stale.md").write_text(
+        """---
+type: design
+status: active
+updated: 2000-01-01
+---
+# Stale Seed
+
+seed summary text
+""",
+        encoding="utf-8",
+    )
+    (repo / "fresh.md").write_text(
+        """---
+type: design
+status: active
+updated: 2100-01-01
+---
+# Fresh Seed
+
+fresh summary text
+""",
+        encoding="utf-8",
+    )
+    (repo / "agent.md").write_text(
+        """---
+type: design
+status: active
+updated: 2000-01-01
+---
+# Agent Seed
+
+agent candidate
+""",
+        encoding="utf-8",
+    )
+
+    index = build_index(str(repo), config)
+    write_sqlite(index, str(db_path))
+
+    enriched = _run_cli("enrich", "agent.md", "--db", str(db_path), "--summary", "agent override")
+    assert enriched.returncode == 0
+
+    stale = _run_cli("stale", "--db", str(db_path), "--days", "30")
+    assert stale.returncode == 0
+    payload = json.loads(stale.stdout)
+    stale_ids = [item["id"] for item in payload]
+    assert "stale.md" in stale_ids
+    assert "fresh.md" not in stale_ids
+    assert "agent.md" not in stale_ids
+    assert payload[0]["summary_source"] == "seed"
+    assert "updated" in payload[0]
+
+    table = _run_cli("stale", "--db", str(db_path), "--days", "30", "--format", "table")
+    assert table.returncode == 0
+    assert "stale.md\tStale Seed\tdesign\tactive\tseed\t" in table.stdout
+    assert "agent.md\t" not in table.stdout
+
+
 def test_index_option_removed_from_help() -> None:
-    commands = ["list", "query", "open", "related"]
+    commands = ["list", "query", "open", "related", "stale"]
     for command in commands:
         result = _run_cli(command, "--help")
         assert result.returncode == 0

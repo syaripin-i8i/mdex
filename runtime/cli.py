@@ -18,6 +18,7 @@ from runtime.store import (
     list_edges,
     list_nodes,
     list_orphan_nodes,
+    list_stale_nodes,
     search_nodes,
 )
 
@@ -298,6 +299,41 @@ def _cmd_orphans(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_stale_table(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        print(
+            "\t".join(
+                [
+                    str(row.get("id", "")),
+                    str(row.get("title", "")),
+                    str(row.get("type", "")).strip().lower() or "unknown",
+                    str(row.get("status", "")).strip().lower() or "unknown",
+                    str(row.get("summary_source", "")),
+                    str(row.get("updated", "")),
+                ]
+            )
+        )
+
+
+def _cmd_stale(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    if not db_path.exists():
+        _emit_error("db not found", db_path=str(args.db))
+        return 2
+
+    try:
+        rows = list_stale_nodes(str(db_path), days=int(args.days))
+    except Exception as exc:
+        _emit_error("failed to load stale nodes", detail=str(exc))
+        return 2
+
+    if args.format == "table":
+        _print_stale_table(rows)
+    else:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _cmd_context(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
     if not db_path.exists():
@@ -415,6 +451,12 @@ def _build_parser() -> argparse.ArgumentParser:
     orphan_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
     orphan_parser.add_argument("--format", choices=["table", "json"], default="json")
     orphan_parser.set_defaults(func=_cmd_orphans)
+
+    stale_parser = subparsers.add_parser("stale", help="List stale seed summaries for enrich planning")
+    stale_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    stale_parser.add_argument("--days", type=int, default=30, help="Minimum age in days")
+    stale_parser.add_argument("--format", choices=["table", "json"], default="json")
+    stale_parser.set_defaults(func=_cmd_stale)
 
     related_parser = subparsers.add_parser("related", help="Recommend related nodes to read next")
     related_parser.add_argument("node", help="Node id")

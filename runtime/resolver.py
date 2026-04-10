@@ -25,7 +25,8 @@ SUMMARY_MATCH_WEIGHT = 0.45
 
 FIRST_DISTANCE_WEIGHT = 2.0
 FIRST_SUMMARY_MATCH_WEIGHT = 0.4
-SUMMARY_TOKEN_RE = re.compile(r"[A-Za-z0-9_]{3,}")
+SUMMARY_LATIN_TOKEN_RE = re.compile(r"[A-Za-z0-9_]{3,}")
+SUMMARY_CJK_RUN_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]{2,}")
 SUMMARY_STOPWORDS = {
     "and",
     "for",
@@ -74,13 +75,23 @@ def _summary_terms(node: dict[str, Any]) -> set[str]:
     if not summary:
         return set()
     terms: set[str] = set()
-    for token in SUMMARY_TOKEN_RE.findall(summary):
+    for token in SUMMARY_LATIN_TOKEN_RE.findall(summary):
         clean = token.strip().lower()
         if len(clean) < 4:
             continue
         if clean in SUMMARY_STOPWORDS:
             continue
         terms.add(clean)
+
+    for run in SUMMARY_CJK_RUN_RE.findall(summary):
+        clean_run = run.strip()
+        if len(clean_run) < 2:
+            continue
+        terms.add(clean_run)
+        for idx in range(0, len(clean_run) - 1):
+            terms.add(clean_run[idx : idx + 2])
+        for idx in range(0, len(clean_run) - 2):
+            terms.add(clean_run[idx : idx + 3])
     return terms
 
 
