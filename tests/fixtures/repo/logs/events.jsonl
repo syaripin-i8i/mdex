@@ -1,0 +1,2 @@
+{"timestamp":"2026-01-03T10:00:00Z","message":"Started follow-up review for docs/source.md","links_to":["docs/source.md"]}
+{"timestamp":"2026-01-03T10:01:00Z","message":"Cross-check with docs/consumer.md before next step","relates_to":["docs/consumer.md"]}

@@ -410,7 +410,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="mdex CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    scan_parser = subparsers.add_parser("scan", help="Scan markdown files and build an index")
+    scan_parser = subparsers.add_parser("scan", help="Scan indexable files and build an index")
     scan_parser.add_argument("--root", required=True, help="Directory to scan")
     scan_parser.add_argument("--output", default="mdex_index.json", help="Output JSON file path")
     scan_parser.add_argument("--db", default="mdex_index.db", help="Output SQLite file path")
@@ -429,7 +429,7 @@ def _build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--format", choices=["table", "json"], default="json")
     list_parser.set_defaults(func=_cmd_list)
 
-    open_parser = subparsers.add_parser("open", help="Print markdown source for a node id")
+    open_parser = subparsers.add_parser("open", help="Print source file content for a node id")
     open_parser.add_argument("node", help="Node id, for example docs/proposal.md")
     open_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
     open_parser.add_argument("--root", default=".", help="Fallback root when metadata is absent")
@@ -484,7 +484,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     enrich_parser = subparsers.add_parser("enrich", help="Update node summary from provided text")
     enrich_parser.add_argument("node", nargs="?", help="Node id to enrich")
-    enrich_parser.add_argument("--path", help="Absolute markdown file path to resolve as node id")
+    enrich_parser.add_argument("--path", help="Absolute indexed file path to resolve as node id")
     enrich_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
     enrich_parser.add_argument("--summary", help="Summary text to store")
     enrich_parser.add_argument("--summary-file", help="Path to file containing summary text")

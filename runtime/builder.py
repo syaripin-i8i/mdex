@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from runtime.parser import parse_file
-from runtime.scanner import list_markdown_files
+from runtime.scanner import DEFAULT_INDEX_EXTENSIONS, list_indexable_files
 
 
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://")
+DEFAULT_MARKDOWN_EXTENSION = ".md"
 
 
 def _to_posix(path_value: str) -> str:
@@ -39,6 +40,37 @@ def _normalize_str_list(value: Any) -> list[str]:
     return []
 
 
+def _normalize_extensions(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        candidates = re.split(r"[\s,]+", value)
+    elif isinstance(value, (list, tuple, set)):
+        candidates = [str(item) for item in value]
+    else:
+        candidates = list(DEFAULT_INDEX_EXTENSIONS)
+
+    normalized: list[str] = []
+    seen = set()
+    for candidate in candidates:
+        extension = str(candidate).strip().lower()
+        if not extension:
+            continue
+        if not extension.startswith("."):
+            extension = f".{extension}"
+        if extension in seen:
+            continue
+        seen.add(extension)
+        normalized.append(extension)
+
+    if not normalized:
+        return DEFAULT_INDEX_EXTENSIONS
+    return tuple(normalized)
+
+
+def _has_allowed_extension(value: str, allowed_extensions: tuple[str, ...]) -> bool:
+    lowered = value.lower()
+    return any(lowered.endswith(extension) for extension in allowed_extensions)
+
+
 def _resolve_type(
     file_id: str,
     frontmatter: dict[str, Any],
@@ -57,6 +89,9 @@ def _resolve_type(
         alias_set = {alias.lower() for alias in aliases}
         if any(part in alias_set for part in dir_parts):
             return node_type
+
+    if Path(file_id).suffix.lower() == ".jsonl":
+        return "log"
     return "unknown"
 
 
@@ -79,38 +114,42 @@ def _is_noise_target(value: str) -> bool:
     return False
 
 
-def _clean_wikilink_target(raw: str) -> str:
+def _clean_wikilink_target(raw: str, allowed_extensions: tuple[str, ...]) -> str:
     clean = raw.split("|", 1)[0].split("#", 1)[0].strip()
     if not clean:
         return ""
-    if not clean.lower().endswith(".md"):
-        clean = f"{clean}.md"
     clean = _to_posix(clean)
+    if _has_allowed_extension(clean, allowed_extensions):
+        pass
+    elif Path(clean).suffix:
+        return ""
+    else:
+        clean = f"{clean}{DEFAULT_MARKDOWN_EXTENSION}"
     if _is_noise_target(clean):
         return ""
     return clean
 
 
-def _clean_frontmatter_target(raw: str) -> str:
+def _clean_frontmatter_target(raw: str, allowed_extensions: tuple[str, ...]) -> str:
     clean = raw.strip()
     if clean.startswith("[[") and clean.endswith("]]"):
         clean = clean[2:-2]
     clean = clean.split("|", 1)[0].split("#", 1)[0].strip()
-    if clean and not clean.lower().endswith(".md"):
-        clean = f"{clean}.md"
     clean = _to_posix(clean)
+    if Path(clean).suffix and not _has_allowed_extension(clean, allowed_extensions):
+        return ""
     if _is_noise_target(clean):
         return ""
     return clean
 
 
-def _clean_md_link_target(raw: str) -> str:
+def _clean_md_link_target(raw: str, allowed_extensions: tuple[str, ...]) -> str:
     clean = raw.split("#", 1)[0].split("?", 1)[0].strip()
     if not clean:
         return ""
     if URL_SCHEME_RE.match(clean):
         return ""
-    if clean.lower().endswith(".md"):
+    if _has_allowed_extension(clean, allowed_extensions):
         clean = _to_posix(clean)
         if _is_noise_target(clean):
             return ""
@@ -118,14 +157,14 @@ def _clean_md_link_target(raw: str) -> str:
     return ""
 
 
-def _clean_path_reference_target(raw: str) -> str:
+def _clean_path_reference_target(raw: str, allowed_extensions: tuple[str, ...]) -> str:
     clean = raw.strip().strip("`\"'[]()<>").rstrip(".,;:")
     clean = clean.split("#", 1)[0].split("?", 1)[0].strip()
     if not clean:
         return ""
     if URL_SCHEME_RE.match(clean):
         return ""
-    if clean.lower().endswith(".md"):
+    if _has_allowed_extension(clean, allowed_extensions):
         clean = _to_posix(clean)
         if _is_noise_target(clean):
             return ""
@@ -210,6 +249,7 @@ def _resolve_target_id(
     path_to_id: dict[Path, str],
     stem_to_ids: dict[str, list[str]],
     name_to_ids: dict[str, list[str]],
+    allowed_extensions: tuple[str, ...],
 ) -> tuple[str, bool]:
     target = raw_target.strip().strip("`\"'")
     if not target:
@@ -241,6 +281,16 @@ def _resolve_target_id(
     if absolute_from_root in path_to_id:
         return path_to_id[absolute_from_root], True
 
+    if not target_path.suffix:
+        for extension in allowed_extensions:
+            source_candidate = (source_dir / f"{target}{extension}").resolve()
+            if source_candidate in path_to_id:
+                return path_to_id[source_candidate], True
+
+            root_candidate = (root_path.resolve() / f"{target}{extension}").resolve()
+            if root_candidate in path_to_id:
+                return path_to_id[root_candidate], True
+
     target_name = target_path.name.lower()
     if target_name in name_to_ids:
         return _choose_best_candidate(name_to_ids[target_name], source_node_id), True
@@ -263,6 +313,7 @@ def _resolve_targets(
     path_to_id: dict[Path, str],
     stem_to_ids: dict[str, list[str]],
     name_to_ids: dict[str, list[str]],
+    allowed_extensions: tuple[str, ...],
 ) -> list[tuple[str, bool]]:
     resolved_targets: list[tuple[str, bool]] = []
     seen = set()
@@ -275,6 +326,7 @@ def _resolve_targets(
             path_to_id,
             stem_to_ids,
             name_to_ids,
+            allowed_extensions,
         )
         if not target_id or target_id == source_node_id:
             continue
@@ -289,6 +341,7 @@ def _resolve_targets(
 def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
     root_path = Path(root).resolve()
     exclude_patterns = _normalize_str_list(config.get("exclude_patterns"))
+    include_extensions = _normalize_extensions(config.get("include_extensions"))
     node_type_map = config.get("node_type_map") or {}
     if not isinstance(node_type_map, dict):
         node_type_map = {}
@@ -296,18 +349,19 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
     parser_options = {
         "summary_max_sentences": config.get("summary_max_sentences", 3),
         "summary_max_chars": config.get("summary_max_chars", 200),
+        "linkable_extensions": list(include_extensions),
     }
 
-    relative_files = list_markdown_files(str(root_path), exclude_patterns)
-    markdown_files = [(root_path / relative).resolve() for relative in relative_files]
-    path_to_id = {file_path: _node_id_for_path(file_path, root_path) for file_path in markdown_files}
+    relative_files = list_indexable_files(str(root_path), include_extensions, exclude_patterns)
+    indexed_files = [(root_path / relative).resolve() for relative in relative_files]
+    path_to_id = {file_path: _node_id_for_path(file_path, root_path) for file_path in indexed_files}
     stem_to_ids, name_to_ids = _build_lookup_maps(path_to_id)
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     edge_keys = set()
 
-    for file_path in markdown_files:
+    for file_path in indexed_files:
         parsed = parse_file(str(file_path), options=parser_options)
         frontmatter = parsed.get("frontmatter", {}) or {}
         if not isinstance(frontmatter, dict):
@@ -322,36 +376,45 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
         status_str = _resolve_status(file_path, frontmatter)
 
         wikilink_targets = [
-            _clean_wikilink_target(str(item))
+            _clean_wikilink_target(str(item), include_extensions)
             for item in parsed.get("wikilinks", [])
             if str(item).strip()
         ]
         md_link_targets = [
-            _clean_md_link_target(str(item))
+            _clean_md_link_target(str(item), include_extensions)
             for item in parsed.get("md_links", [])
             if str(item).strip()
         ]
         path_ref_targets = [
-            _clean_path_reference_target(str(item))
+            _clean_path_reference_target(str(item), include_extensions)
             for item in parsed.get("path_refs", [])
             if str(item).strip()
         ]
+        links_from_metadata_raw = [
+            _clean_frontmatter_target(item, include_extensions)
+            for item in _normalize_str_list(frontmatter.get("links_to"))
+        ]
         links_to_pairs = _resolve_targets(
-            [target for target in wikilink_targets + md_link_targets + path_ref_targets if target],
+            [
+                target
+                for target in wikilink_targets + md_link_targets + path_ref_targets + links_from_metadata_raw
+                if target
+            ],
             file_path,
             node_id,
             root_path,
             path_to_id,
             stem_to_ids,
             name_to_ids,
+            include_extensions,
         )
 
         depends_raw = [
-            _clean_frontmatter_target(item)
+            _clean_frontmatter_target(item, include_extensions)
             for item in _normalize_str_list(frontmatter.get("depends_on"))
         ]
         relates_raw = [
-            _clean_frontmatter_target(item)
+            _clean_frontmatter_target(item, include_extensions)
             for item in _normalize_str_list(frontmatter.get("relates_to"))
         ]
 
@@ -363,6 +426,7 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             path_to_id,
             stem_to_ids,
             name_to_ids,
+            include_extensions,
         )
 
         task_ref_raw = [
@@ -378,6 +442,7 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             path_to_id,
             stem_to_ids,
             name_to_ids,
+            include_extensions,
         )
 
         links_to_resolved = [target for target, is_resolved in links_to_pairs if is_resolved]
@@ -426,7 +491,7 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build markdown index.")
+    parser = argparse.ArgumentParser(description="Build an index from Markdown and JSON sources.")
     parser.add_argument("--root", required=True)
     parser.add_argument("--config", required=False)
     args = parser.parse_args()

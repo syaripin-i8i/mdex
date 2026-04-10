@@ -17,6 +17,7 @@ def fixture_repo(tmp_path: Path) -> Path:
 @pytest.fixture()
 def build_config() -> dict[str, object]:
     return {
+        "include_extensions": [".md", ".json", ".jsonl"],
         "exclude_patterns": [],
         "node_type_map": {
             "spec": ["spec", "specs"],
@@ -37,6 +38,7 @@ def quality_repo(tmp_path: Path) -> Path:
 @pytest.fixture()
 def quality_config() -> dict[str, object]:
     return {
+        "include_extensions": [".md", ".json", ".jsonl"],
         "exclude_patterns": [],
         "node_type_map": {
             "design": ["design"],

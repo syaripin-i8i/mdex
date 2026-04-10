@@ -82,6 +82,25 @@ def test_link_path_task_and_summary_extraction(fixture_repo: Path) -> None:
     assert parsed["summary"] == "First sentence.Second sentence!"
 
 
+def test_json_and_jsonl_log_parsing(fixture_repo: Path) -> None:
+    session = parse_file(str(fixture_repo / "logs" / "session.json"))
+    assert session["title"] == "Assistant Session"
+    assert session["frontmatter"]["type"] == "log"
+    assert session["frontmatter"]["project"] == "alpha"
+    assert session["frontmatter"]["links_to"] == ["docs/source.md"]
+    assert "assistant" in session["tags"]
+    assert "docs/source.md" in session["path_refs"]
+    assert "docs/dep.md" in session["path_refs"]
+    assert session["summary"]
+
+    events = parse_file(str(fixture_repo / "logs" / "events.jsonl"))
+    assert events["title"] == "events"
+    assert events["updated"].startswith("2026-01-03T10:00:00")
+    assert "docs/source.md" in events["path_refs"]
+    assert "docs/consumer.md" in events["path_refs"]
+    assert events["summary"]
+
+
 def test_type_inference(build_config: dict[str, object], fixture_repo: Path) -> None:
     index = build_index(str(fixture_repo), build_config)
     node_map = _node_map(index)
@@ -89,6 +108,30 @@ def test_type_inference(build_config: dict[str, object], fixture_repo: Path) -> 
     assert node_map["docs/source.md"]["type"] == "design"
     assert node_map["docs/inline_task.md"]["type"] == "task"
     assert node_map["specs/requirement.md"]["type"] == "spec"
+
+
+def test_json_nodes_are_indexed_and_resolved(build_config: dict[str, object], fixture_repo: Path) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    node_map = _node_map(index)
+    edges = _edges(index)
+
+    assert "logs/session.json" in node_map
+    assert "logs/events.jsonl" in node_map
+    assert node_map["logs/session.json"]["type"] == "log"
+    assert node_map["logs/session.json"]["project"] == "alpha"
+    assert any(
+        edge["from"] == "logs/session.json"
+        and edge["to"] == "docs/source.md"
+        and edge["type"] == "links_to"
+        and edge["resolved"] is True
+        for edge in edges
+    )
+    assert any(
+        edge["from"] == "logs/events.jsonl"
+        and edge["to"] == "docs/consumer.md"
+        and edge["resolved"] is True
+        for edge in edges
+    )
 
 
 def test_status_correction(build_config: dict[str, object], fixture_repo: Path) -> None:

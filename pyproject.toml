@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mdex"
 version = "0.1.0"
-description = "Markdown indexer and lightweight graph-based explorer"
+description = "Markdown/JSON indexer and lightweight graph-based explorer"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

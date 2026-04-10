@@ -1,5 +1,6 @@
 {
   "scan_roots": ["<repo-root>"],
+  "include_extensions": [".md", ".json", ".jsonl"],
   "exclude_patterns": [
     ".git/**",
     "node_modules/**",
