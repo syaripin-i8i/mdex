@@ -1,135 +1,58 @@
-# mdex — Codex Agent Instructions
+# mdex — Agent Operation Guide
 
-## What This Repo Is
+## Goal
 
-`mdex` は Markdown ファイル群の索引化と最小探索を行うツールです。  
-狙いは全文検索の代替ではなく、文書間の関係を使って「次に何を読むか」を絞ることです。
-
-**このツールは AI エージェント（Claude Code・Codex など）のために作られています。**  
-**人間向けの使いやすさは考慮しない。全ての設計判断はエージェントの使いやすさを優先する。**
-
-## Core Principles
-
-1. CLI は薄く保ち、ロジックは runtime モジュールへ閉じる。
-2. **全コマンドの出力は JSON デフォルト。** タブ区切りなど人間向け形式は `--format table` でのみ提供する。
-3. **エラーも JSON で返す。** `{"error": "...", "detail": "..."}` の形式を守る。
-4. SQLite を正本とし、JSON はデバッグ出力に限定する。
-5. 未解決リンクは resolved と混在させず、`resolved=false` として扱う。
-6. **`enrich` のサマリは AI 消費向けに書く。** 「別のエージェントがこのファイルを読むべきか判断するための情報」を含める。何が書かれているか・どんな制約や判断を含むか・いつ参照すべきか。
-7. scan は seed テーブル（`nodes`/`edges`/`index_metadata`）を再生成するが、`node_overrides` は保持する。
-
-## Runtime Responsibilities
-
-```
-runtime/
-  scanner.py    ← ディレクトリ走査・.md ファイル列挙
-  parser.py     ← frontmatter / metadata / link / summary 抽出
-  builder.py    ← ノード・エッジ生成（参照解決・resolved 判定）
-  indexer.py    ← JSON / SQLite 書き出し
-  store.py      ← SQLite 読み出し API
-  resolver.py   ← 探索ロジック（related / first）
-  context.py    ← context 候補選別（experimental）
-  enrich.py     ← summary 更新口（experimental）
-  tokens.py     ← トークン見積もり
-  reader.py     ← ノード本文取得
-  cli.py        ← argparse エントリ
-```
-
-## Phase Status
-
-### Phase 1（索引化）: 完了
-
-- `scan` で JSON + SQLite を生成
-- `edges` は `resolved` を保持
-- `list` / `query` は SQLite ベース
-
-### Phase 2（探索）: 実装済みだが安定化中
-
-- `find` / `related` / `first` / `orphans` を実装済み
-- `first` は前提列（depends_on 系）を返し、`related` は連想的な近傍候補を返す
-- 探索順位の品質は継続調整中（重みと優先度は固定前）
-
-### Phase 3（AI 補助）: experimental
-
-- `context` / `enrich` を実装済み
-- `context` は作業前に必要ノードを絞る入口、`enrich` は読後に summary を更新して探索精度を上げる
-- experimental 機能は出力品質を保証しない
-
-## Schemas
-
-### Node
-
-```json
-{
-  "id": "relative/path/to/file.md",
-  "title": "...",
-  "type": "decision|task|design|log|spec|reference|unknown",
-  "project": "...",
-  "status": "active|done|draft|archived|unknown",
-  "summary": "...",
-  "summary_source": "seed|agent",
-  "summary_updated": "ISO date",
-  "tags": [],
-  "updated": "ISO date",
-  "links_to": ["resolved-target.md"],
-  "depends_on": ["resolved-target.md"],
-  "relates_to": ["resolved-target.md"]
-}
-```
-
-### Edge
-
-```json
-{
-  "from": "a.md",
-  "to": "b.md",
-  "type": "links_to|depends_on|relates_to",
-  "resolved": true
-}
-```
-
-未解決ターゲットの場合:
-
-```json
-{
-  "from": "a.md",
-  "to": "missing.md",
-  "type": "links_to",
-  "resolved": false
-}
-```
-
-## CLI
+`mdex` は「AI が最初に何を読むか / 最後に何を更新すべきか」を決めるための CLI です。  
+迷ったら次の 3 コマンドだけ覚えてください。
 
 ```bash
-mdex scan --root <dir> [--output <json>] [--db <sqlite>] [--config <json>]
-mdex list --db <sqlite> [--type <type>] [--project <project>] [--status <status>] [--format <table|json>]
-mdex open <node-id> --db <sqlite>
-mdex query --db <sqlite> --node <node-id>
-mdex find <query> --db <sqlite> [--limit <n>]
-mdex orphans --db <sqlite>
-mdex related <node-id> --db <sqlite> [--limit <n>]
-mdex first <node-id> --db <sqlite> [--limit <n>]
+mdex scan   # 索引更新
+mdex start  # 作業開始
+mdex finish # 作業終了
 ```
 
-Experimental (Phase 3):
+## Default Flow
 
-```bash
-mdex context "<query>" --db <sqlite> [--budget <n>] [--limit <n>] [--include-content]
-mdex enrich <node-id> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
-mdex enrich --path <absolute-path> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
-```
+1. 開始前に `scan`
+2. 最初に `start`
+3. 必要に応じて `context` / `first` / `related` / `query`
+4. 最後に `finish --dry-run`
+5. summary を反映するときだけ `finish --summary-file ... --scan`
+
+## DB Resolution
+
+`--db` 省略時は以下の優先順で自動解決します。
+
+1. `--db`
+2. `MDEX_DB`
+3. `.mdex/config.json` の `db`
+4. `.mdex/mdex_index.db`
+5. `mdex_index.db`
+
+## Command Roles
+
+- `start`: 入口。読む順序と次アクションを返す
+- `context --actionable`: `start` 相当を直接確認
+- `impact`: changed files 起点の分類
+- `finish`: 出口。enrich 候補と後処理を返す
+- `enrich`: summary を直接更新（限定用途）
+- `new`: task / decision のテンプレート生成
+- `stamp`: `updated` 更新
+
+## Output Contract
+
+- すべて JSON（成功: stdout / エラー: stderr）
+- エラーにも理由を入れる
+- `finish --dry-run` は DB を更新しない
+
+## Phase Status (2026-04-13)
+
+- Phase 1: scan / list / query
+- Phase 2: find / first / related / orphans / stale
+- Phase A: dbresolve / start / finish / impact / new / stamp
 
 ## Verification
 
-1. `python -m py_compile runtime/*.py`
-2. `mdex scan --root docs --output mdex_index.json --db mdex_index.db`
-3. `mdex list --db mdex_index.db --format json`
-4. `mdex find design --db mdex_index.db`
-5. `mdex query --db mdex_index.db --node design.md`
-6. `mdex first design.md --db mdex_index.db`
-7. `mdex related design.md --db mdex_index.db`
-
-Experimental verification:
-1. `mdex context "design decision" --db mdex_index.db --limit 5`
-2. ファイルを読んだ後: `mdex enrich <node-id> --db mdex_index.db --summary "<2〜3文要約>"`
+```bash
+python -m pytest -q
+```

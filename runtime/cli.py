@@ -8,10 +8,21 @@ from typing import Any
 
 from runtime.builder import build_index
 from runtime.context import select_context
+from runtime.dbresolve import (
+    DbResolutionError,
+    load_runtime_context,
+    resolve_db_path,
+    resolve_scan_config_path,
+    resolve_scan_root,
+)
 from runtime.enrich import enrich_node, resolve_node_id
+from runtime.finish import FinishError, run_finish
+from runtime.gittools import GitError, collect_changed_files
+from runtime.impact import build_impact_report
 from runtime.indexer import write_json, write_sqlite
 from runtime.reader import read_node_text
-from runtime.resolver import prerequisite_order, related_nodes
+from runtime.scaffold import create_decision_file, create_task_file, stamp_updated
+from runtime.start import build_start_payload
 from runtime.store import (
     get_node,
     get_scan_root,
@@ -23,14 +34,25 @@ from runtime.store import (
 )
 
 
+def _emit_payload(payload: dict[str, Any], *, stderr: bool) -> None:
+    output = json.dumps(payload, ensure_ascii=False)
+    if stderr:
+        print(output, file=sys.stderr)
+    else:
+        print(output)
+
+
 def _emit_error(error: str, **details: Any) -> None:
     payload: dict[str, Any] = {"error": error}
     payload.update(details)
-    print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+    _emit_payload(payload, stderr=True)
 
 
-def _load_json(path: str) -> dict[str, Any]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+def _load_json(path: str, *, optional: bool = False) -> dict[str, Any]:
+    source = Path(path)
+    if optional and not source.exists():
+        return {}
+    data = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"JSON root must be object: {path}")
     return data
@@ -71,12 +93,35 @@ def _print_nodes(nodes: list[dict[str, Any]], output_format: str) -> None:
         print(json.dumps(sorted_nodes, ensure_ascii=False, indent=2))
 
 
-def _cmd_scan(args: argparse.Namespace) -> int:
+def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any] | None:
+    explicit = getattr(args, "db", None)
     try:
-        config = _load_json(args.config)
-        index = build_index(args.root, config)
-        write_json(index, args.output)
-        write_sqlite(index, args.db)
+        resolved = resolve_db_path(explicit, cwd=Path.cwd(), must_exist=must_exist)
+    except DbResolutionError as exc:
+        _emit_payload(exc.payload, stderr=True)
+        return None
+    except Exception as exc:
+        _emit_error("db resolution failed", detail=str(exc))
+        return None
+    return resolved
+
+
+def _cmd_scan(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=False)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
+
+    try:
+        context = load_runtime_context(Path.cwd())
+        root_path = Path(args.root).resolve() if args.root else resolve_scan_root(context)
+        config_path = Path(args.config).resolve() if args.config else resolve_scan_config_path(context)
+        output_path = Path(args.output).resolve() if args.output else (context.repo_root / "mdex_index.json").resolve()
+
+        config = _load_json(str(config_path), optional=not bool(args.config))
+        index = build_index(str(root_path), config)
+        write_json(index, str(output_path))
+        write_sqlite(index, db_path)
     except Exception as exc:
         _emit_error("scan failed", detail=str(exc))
         return 2
@@ -94,8 +139,8 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             "resolution_rate": round(rate, 2),
         },
         "output": {
-            "json": str(args.output),
-            "db": str(args.db),
+            "json": str(output_path),
+            "db": db_path,
         },
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -103,14 +148,14 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
 
     try:
         nodes = list_nodes(
-            str(db_path),
+            db_path,
             node_type=args.type,
             project=args.project,
             status=args.status,
@@ -124,12 +169,11 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
-
-    root = get_scan_root(str(db_path), default=args.root)
+    db_path = str(Path(str(db_info["path"])))
+    root = get_scan_root(db_path, default=args.root)
 
     try:
         text = read_node_text(root, args.node)
@@ -166,21 +210,21 @@ def _peer_entry(peer_id: str, is_resolved: bool, node_map: dict[str, dict[str, A
 
 
 def _cmd_query(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
 
     try:
-        node_map = _node_map_from_rows(list_nodes(str(db_path)))
-        edges = list_edges(str(db_path))
+        node_map = _node_map_from_rows(list_nodes(db_path))
+        edges = list_edges(db_path)
     except Exception as exc:
         _emit_error("failed to load graph", detail=str(exc))
         return 2
 
     start_id = args.node
     if start_id not in node_map:
-        loaded_node = get_node(str(db_path), start_id)
+        loaded_node = get_node(db_path, start_id)
         if loaded_node is not None:
             node_map[start_id] = loaded_node
         else:
@@ -238,17 +282,19 @@ def _cmd_query(args: argparse.Namespace) -> int:
 
 
 def _cmd_related(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
-        return 2
+    from runtime.resolver import related_nodes
 
-    node = get_node(str(db_path), args.node)
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
+
+    node = get_node(db_path, args.node)
     if node is None:
         _emit_error("node not found", node_id=args.node)
         return 2
 
-    results = related_nodes(args.node, str(db_path), limit=int(args.limit))
+    results = related_nodes(args.node, db_path, limit=int(args.limit))
     output = {
         "node": node,
         "related": results,
@@ -258,17 +304,19 @@ def _cmd_related(args: argparse.Namespace) -> int:
 
 
 def _cmd_first(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
-        return 2
+    from runtime.resolver import prerequisite_order
 
-    node = get_node(str(db_path), args.node)
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
+
+    node = get_node(db_path, args.node)
     if node is None:
         _emit_error("node not found", node_id=args.node)
         return 2
 
-    prerequisites = prerequisite_order(args.node, str(db_path), limit=int(args.limit))
+    prerequisites = prerequisite_order(args.node, db_path, limit=int(args.limit))
     output = {
         "node": node,
         "prerequisites": prerequisites,
@@ -278,23 +326,23 @@ def _cmd_first(args: argparse.Namespace) -> int:
 
 
 def _cmd_find(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
 
-    matched = search_nodes(str(db_path), args.query, limit=int(args.limit))
+    matched = search_nodes(db_path, args.query, limit=int(args.limit))
     _print_nodes(matched, args.format)
     return 0
 
 
 def _cmd_orphans(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
 
-    orphans = list_orphan_nodes(str(db_path))
+    orphans = list_orphan_nodes(db_path)
     _print_nodes(orphans, args.format)
     return 0
 
@@ -316,13 +364,13 @@ def _print_stale_table(rows: list[dict[str, Any]]) -> None:
 
 
 def _cmd_stale(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
 
     try:
-        rows = list_stale_nodes(str(db_path), days=int(args.days))
+        rows = list_stale_nodes(db_path, days=int(args.days))
     except Exception as exc:
         _emit_error("failed to load stale nodes", detail=str(exc))
         return 2
@@ -335,18 +383,19 @@ def _cmd_stale(args: argparse.Namespace) -> int:
 
 
 def _cmd_context(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
 
     try:
         result = select_context(
             args.query,
-            str(db_path),
+            db_path,
             budget=int(args.budget),
             limit=int(args.limit),
             include_content=bool(args.include_content),
+            actionable=bool(args.actionable),
         )
     except Exception as exc:
         _emit_error("context selection failed", detail=str(exc))
@@ -356,11 +405,34 @@ def _cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_enrich(args: argparse.Namespace) -> int:
-    db_path = Path(args.db)
-    if not db_path.exists():
-        _emit_error("db not found", db_path=str(args.db))
+def _cmd_start(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
         return 2
+    db_path = str(Path(str(db_info["path"])))
+
+    try:
+        payload = build_start_payload(
+            args.task,
+            db_path,
+            db_source=str(db_info.get("source", "unknown")),
+            budget=int(args.budget),
+            limit=int(args.limit),
+            include_content=bool(args.include_content),
+        )
+    except Exception as exc:
+        _emit_error("start failed", detail=str(exc))
+        return 2
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_enrich(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
 
     if bool(args.node) == bool(args.path):
         _emit_error("invalid arguments", detail="specify exactly one of node or --path")
@@ -373,12 +445,12 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
         if not Path(args.path).is_absolute():
             _emit_error("path must be absolute", path=args.path)
             return 2
-        node_id = resolve_node_id(args.path, str(db_path), path_mode=True)
+        node_id = resolve_node_id(args.path, db_path, path_mode=True)
         if node_id is None:
             _emit_error("node not found", path=args.path)
             return 2
     else:
-        node_id = resolve_node_id(args.node, str(db_path), path_mode=False)
+        node_id = resolve_node_id(args.node, db_path, path_mode=False)
         if node_id is None:
             _emit_error("node not found", node_id=str(args.node))
             return 2
@@ -396,7 +468,7 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
             _emit_error("failed to read summary file", path=str(summary_file), detail=str(exc))
             return 2
 
-    result = enrich_node(node_id, str(db_path), summary_text, force=bool(args.force))
+    result = enrich_node(node_id, db_path, summary_text, force=bool(args.force))
     if result.get("status") == "error":
         details = {key: value for key, value in result.items() if key not in {"status", "error"}}
         _emit_error(str(result.get("error", "enrich failed")), **details)
@@ -406,23 +478,141 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_impact(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
+
+    if bool(args.changed_files_from_git) and args.paths:
+        _emit_error("invalid arguments", detail="use either paths or --changed-files-from-git")
+        return 2
+
+    if args.changed_files_from_git:
+        try:
+            runtime_context = load_runtime_context(Path.cwd())
+            changed = collect_changed_files(runtime_context.repo_root, require_git=True)
+        except GitError:
+            _emit_error("not a git repository")
+            return 2
+        except Exception as exc:
+            _emit_error("failed to collect git changed files", detail=str(exc))
+            return 2
+    else:
+        changed = [str(path).replace("\\", "/") for path in args.paths if str(path).strip()]
+
+    if not changed:
+        _emit_error("invalid arguments", detail="specify paths or --changed-files-from-git")
+        return 2
+
+    try:
+        payload = build_impact_report(db_path, changed, limit=int(args.limit))
+    except Exception as exc:
+        _emit_error("impact failed", detail=str(exc))
+        return 2
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_finish(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
+
+    try:
+        context = load_runtime_context(Path.cwd())
+        payload = run_finish(
+            task=args.task,
+            db_path=db_path,
+            db_source=str(db_info.get("source", "unknown")),
+            context=context,
+            changed_files_from_git=bool(args.changed_files_from_git),
+            dry_run=bool(args.dry_run),
+            summary_file=args.summary_file,
+            scan=bool(args.scan),
+            limit=int(args.limit),
+        )
+    except FinishError as exc:
+        _emit_payload(exc.payload, stderr=True)
+        return 2
+    except Exception as exc:
+        _emit_error("finish failed", detail=str(exc))
+        return 2
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_new(args: argparse.Namespace) -> int:
+    try:
+        context = load_runtime_context(Path.cwd())
+    except Exception as exc:
+        _emit_error("failed to load runtime config", detail=str(exc))
+        return 2
+
+    title = str(args.title).strip()
+    if not title:
+        _emit_error("title is required")
+        return 2
+
+    try:
+        if args.kind == "task":
+            payload = create_task_file(context, title)
+        else:
+            payload = create_decision_file(context, title)
+    except Exception as exc:
+        _emit_error("new failed", detail=str(exc))
+        return 2
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _target_exists_as_path(target: str) -> bool:
+    candidate = Path(target)
+    if candidate.is_absolute():
+        return candidate.exists() and candidate.is_file()
+    return (Path.cwd() / candidate).exists()
+
+
+def _cmd_stamp(args: argparse.Namespace) -> int:
+    db_path: str | None = None
+    try:
+        db_info = resolve_db_path(args.db, cwd=Path.cwd(), must_exist=True)
+        db_path = str(Path(str(db_info["path"])))
+    except DbResolutionError as exc:
+        if not _target_exists_as_path(args.target):
+            _emit_payload(exc.payload, stderr=True)
+            return 2
+    except Exception as exc:
+        if not _target_exists_as_path(args.target):
+            _emit_error("db resolution failed", detail=str(exc))
+            return 2
+
+    result = stamp_updated(args.target, db_path=db_path)
+    if result.get("status") == "error":
+        details = {key: value for key, value in result.items() if key not in {"status", "error"}}
+        _emit_error(str(result.get("error", "stamp failed")), **details)
+        return 2
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="mdex CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     scan_parser = subparsers.add_parser("scan", help="Scan indexable files and build an index")
-    scan_parser.add_argument("--root", required=True, help="Directory to scan")
-    scan_parser.add_argument("--output", default="mdex_index.json", help="Output JSON file path")
-    scan_parser.add_argument("--db", default="mdex_index.db", help="Output SQLite file path")
-    scan_parser.add_argument(
-        "--config",
-        default="control/scan_config.json",
-        help="Path to scan config JSON",
-    )
+    scan_parser.add_argument("--root", help="Directory to scan")
+    scan_parser.add_argument("--output", help="Output JSON file path")
+    scan_parser.add_argument("--db", help="Output SQLite file path")
+    scan_parser.add_argument("--config", help="Path to scan config JSON")
     scan_parser.set_defaults(func=_cmd_scan)
 
     list_parser = subparsers.add_parser("list", help="List nodes with optional filters")
-    list_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    list_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     list_parser.add_argument("--type", help="Filter by type")
     list_parser.add_argument("--project", help="Filter by project")
     list_parser.add_argument("--status", help="Filter by status")
@@ -431,50 +621,51 @@ def _build_parser() -> argparse.ArgumentParser:
 
     open_parser = subparsers.add_parser("open", help="Print source file content for a node id")
     open_parser.add_argument("node", help="Node id, for example docs/proposal.md")
-    open_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    open_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     open_parser.add_argument("--root", default=".", help="Fallback root when metadata is absent")
     open_parser.set_defaults(func=_cmd_open)
 
     query_parser = subparsers.add_parser("query", help="Query one node and its neighbors")
-    query_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    query_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     query_parser.add_argument("--node", required=True, help="Node id")
     query_parser.set_defaults(func=_cmd_query)
 
     find_parser = subparsers.add_parser("find", help="Find nodes by keyword")
     find_parser.add_argument("query", help="Search query")
-    find_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    find_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     find_parser.add_argument("--limit", type=int, default=20, help="Maximum number of results")
     find_parser.add_argument("--format", choices=["table", "json"], default="json")
     find_parser.set_defaults(func=_cmd_find)
 
     orphan_parser = subparsers.add_parser("orphans", help="List nodes with no resolved edges")
-    orphan_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    orphan_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     orphan_parser.add_argument("--format", choices=["table", "json"], default="json")
     orphan_parser.set_defaults(func=_cmd_orphans)
 
     stale_parser = subparsers.add_parser("stale", help="List stale seed summaries for enrich planning")
-    stale_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    stale_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     stale_parser.add_argument("--days", type=int, default=30, help="Minimum age in days")
     stale_parser.add_argument("--format", choices=["table", "json"], default="json")
     stale_parser.set_defaults(func=_cmd_stale)
 
     related_parser = subparsers.add_parser("related", help="Recommend related nodes to read next")
     related_parser.add_argument("node", help="Node id")
-    related_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    related_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     related_parser.add_argument("--limit", type=int, default=10, help="Maximum number of results")
     related_parser.set_defaults(func=_cmd_related)
 
     first_parser = subparsers.add_parser("first", help="Return prerequisite nodes to read first")
     first_parser.add_argument("node", help="Node id")
-    first_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    first_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     first_parser.add_argument("--limit", type=int, default=10, help="Maximum number of results")
     first_parser.set_defaults(func=_cmd_first)
 
     context_parser = subparsers.add_parser("context", help="Select context nodes for a query")
     context_parser.add_argument("query", help="Query text")
-    context_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    context_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     context_parser.add_argument("--budget", type=int, default=4000, help="Token budget (soft)")
     context_parser.add_argument("--limit", type=int, default=10, help="Maximum nodes to return")
+    context_parser.add_argument("--actionable", action="store_true", help="Return action-oriented output")
     context_parser.add_argument(
         "--include-content",
         action="store_true",
@@ -482,14 +673,65 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     context_parser.set_defaults(func=_cmd_context)
 
+    start_parser = subparsers.add_parser("start", help="Task-start entry point with reading plan")
+    start_parser.add_argument("task", help="Task description")
+    start_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
+    start_parser.add_argument("--budget", type=int, default=4000, help="Token budget (soft)")
+    start_parser.add_argument("--limit", type=int, default=10, help="Maximum nodes to consider")
+    start_parser.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Include full node content in output",
+    )
+    start_parser.set_defaults(func=_cmd_start)
+
+    impact_parser = subparsers.add_parser("impact", help="Classify impacted docs from changed files")
+    impact_parser.add_argument("paths", nargs="*", help="Changed paths to inspect")
+    impact_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
+    impact_parser.add_argument("--limit", type=int, default=10, help="Maximum rows per category")
+    impact_parser.add_argument(
+        "--changed-files-from-git",
+        action="store_true",
+        help="Collect changed files from current git repository",
+    )
+    impact_parser.set_defaults(func=_cmd_impact)
+
+    finish_parser = subparsers.add_parser("finish", help="Task-finish planner and optional apply step")
+    finish_parser.add_argument("--task", required=True, help="Task description")
+    finish_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
+    finish_parser.add_argument(
+        "--changed-files-from-git",
+        action="store_true",
+        help="Require changed files from git (error when not in git repository)",
+    )
+    finish_parser.add_argument("--summary-file", help="Summary text file used for enrich apply")
+    finish_parser.add_argument("--scan", action="store_true", help="Run scan after apply")
+    finish_parser.add_argument("--dry-run", action="store_true", help="Return plan without writes")
+    finish_parser.add_argument("--limit", type=int, default=10, help="Maximum rows per impact category")
+    finish_parser.set_defaults(func=_cmd_finish)
+
     enrich_parser = subparsers.add_parser("enrich", help="Update node summary from provided text")
     enrich_parser.add_argument("node", nargs="?", help="Node id to enrich")
     enrich_parser.add_argument("--path", help="Absolute indexed file path to resolve as node id")
-    enrich_parser.add_argument("--db", default="mdex_index.db", help="Index SQLite file")
+    enrich_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     enrich_parser.add_argument("--summary", help="Summary text to store")
     enrich_parser.add_argument("--summary-file", help="Path to file containing summary text")
     enrich_parser.add_argument("--force", action="store_true", help="Overwrite existing agent summary")
     enrich_parser.set_defaults(func=_cmd_enrich)
+
+    new_parser = subparsers.add_parser("new", help="Create a task/decision document scaffold")
+    new_subparsers = new_parser.add_subparsers(dest="kind", required=True)
+    new_task = new_subparsers.add_parser("task", help="Create task scaffold")
+    new_task.add_argument("title", help="Task title")
+    new_task.set_defaults(func=_cmd_new, kind="task")
+    new_decision = new_subparsers.add_parser("decision", help="Create decision scaffold")
+    new_decision.add_argument("title", help="Decision title")
+    new_decision.set_defaults(func=_cmd_new, kind="decision")
+
+    stamp_parser = subparsers.add_parser("stamp", help="Update frontmatter updated date for node/path")
+    stamp_parser.add_argument("target", help="Node id or path")
+    stamp_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
+    stamp_parser.set_defaults(func=_cmd_stamp)
 
     return parser
 

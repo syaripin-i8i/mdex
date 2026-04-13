@@ -2,104 +2,115 @@
 type: design
 project: mdex
 status: active
-updated: 2026-04-09
+updated: 2026-04-13
 ---
 
 # mdex 設計書
 
 ## 一言で言うと
 
-`mdex` は Markdown 群をノード/エッジとして索引化し、  
-「次に何を読むか」を判断するための最小探索器。
-
-全文検索を置き換えるのではなく、先読み順序を作ることが主目的。
+`mdex` は Markdown / JSON の運用知識を SQLite に索引化し、  
+AI エージェントが作業開始 (`start`) と作業終了 (`finish`) を定型化するための CLI。
 
 ## 設計原則
 
-1. CLI は薄く、コアロジックは runtime モジュールへ閉じる。
-2. SQLite を正本とし、JSON はデバッグ出力として扱う。
-3. 未解決参照は `resolved=false` で明示し、解決済みと混ぜない。
-4. Phase 1-2 は AI 依存なし。
+1. CLI は薄く、ロジックは `runtime/` へ分離する。
+2. 全コマンドは JSON を返す（成功: stdout / 失敗: stderr）。
+3. SQLite を正本とし、`node_overrides` を scan と分離して保持する。
+4. 入口 (`start`) と出口 (`finish`) を最優先で安定化する。
 
 ## 永続化モデル
 
-scan ごとに再生成される seed と、scan をまたいで保持する agent override を分離する。
-
 ```
-scan のたびにリセット        scan をまたいで永続
-─────────────────────        ──────────────────
-nodes          （seed）       node_overrides （agent）
+scan で再生成される seed         scan をまたいで保持
+──────────────────────         ──────────────────
+nodes                           node_overrides
 edges
 index_metadata
 ```
 
-`get_node` / `list_nodes` は `nodes` を読み、同一 id の `node_overrides` があれば
-`summary` / `summary_source` / `summary_updated` を上書きして返す。
+`list_nodes` / `get_node` は `node_overrides` をマージして返す。
+
+## DB 自動解決
+
+`dbresolve.py` が以下を共通解決する。
+
+1. `--db`
+2. `MDEX_DB`
+3. `.mdex/config.json` の `db`
+4. `.mdex/mdex_index.db`
+5. `mdex_index.db`
+
+失敗時は `resolution_attempts` を含む JSON エラーを返す。
 
 ## モジュール責務
 
 ```
 runtime/
-  scanner.py    ← .md 列挙
-  parser.py     ← frontmatter / metadata / link / summary 抽出
-  builder.py    ← ノード・エッジ生成（リンク解決、resolved 判定）
-  indexer.py    ← JSON / SQLite 書き出し
-  store.py      ← SQLite 読み出し API
-  resolver.py   ← related / first 探索ロジック
-  context.py    ← context 候補選別（experimental）
-  enrich.py     ← summary 更新口（experimental）
-  tokens.py     ← トークン見積もり
-  reader.py     ← node-id から本文取得
-  cli.py        ← コマンド入口
+  cli.py         コマンド入口
+  dbresolve.py   repo/config/db 解決
+  scanner.py     対象ファイル列挙
+  parser.py      frontmatter/link/summary 抽出
+  builder.py     ノード・エッジ生成
+  indexer.py     JSON / SQLite 出力
+  store.py       SQLite API
+  resolver.py    first / related
+  context.py     context 選別（actionable 出力あり）
+  start.py       start JSON 生成
+  gittools.py    git changed files 収集
+  impact.py      changed file 起点の分類
+  finish.py      finish の dry-run / apply / scan 制御
+  scaffold.py    new / stamp
+  enrich.py      summary 更新
+  reader.py      node-id から本文取得
+  tokens.py      トークン見積もり
 ```
 
-## エージェントの作業サイクル
-
-mdex は「書く → 索引化 → 読む → 改善」のサイクルで使います。
-
-```
-書く        mdex new（将来）/ 規約に沿って Markdown を作成
-  ↓
-索引化      mdex scan
-  ↓
-読む        mdex context → 最小必要ファイルを特定
-            mdex open / related / first → 詳細探索
-  ↓
-改善        mdex enrich --summary/--summary-file → 外部で作成した summary を更新
-            mdex scan   → 索引に反映
-```
-
-書き方の規約は `docs/convention.md` を参照。
-
-## フェーズ
+## フェーズ状況 (2026-04-13)
 
 ### Phase 1（索引化）: 完了
 
 - `scan` で JSON + SQLite 出力
-- edge に `resolved` を保持
-- `list` / `query` は SQLite 参照
+- edge `resolved` 保持
+- `list` / `query` 提供
 
-### Phase 2（探索）: 実装済み・安定化中
+### Phase 2（探索）: 完了
 
-- `find`: title/summary/tags 検索の入口
-- `orphans`: resolved edge 観点の孤立ノード検出
-- `related`: 連想的な近傍候補（関連探索）
-- `first`: depends_on を基にした前提読み順（prerequisite reader）
+- `find` / `first` / `related` / `orphans` / `stale`
 
-### Phase 3（AI 補助）: experimental
+### Phase A（導線）: 完了
 
-- `context`: 問いに対する優先読解ノード集合を返す入口
-- `enrich`: 読後に summary を改善して索引品質を上げる更新器
+- `start`
+- `context --actionable`
+- `impact`
+- `finish` (`--dry-run`, `--summary-file`, `--scan`)
+- `new` / `stamp`
+- DB 自動解決
 
-### Phase 4（記録支援）: 未着手
+## コマンド設計
 
-- `new`: 規約に沿った Markdown テンプレートを生成
-- `stamp`: frontmatter の `updated` を現在日時に更新
+### start
 
-AI 実運用ではコンテクストを3層で扱う。  
-入力コンテクスト（ユーザーの依頼文）、推論対象コンテクスト（今回読むべき文書）、運用コンテクスト（過去判断や運用制約）を分離し、`mdex` は主に推論対象コンテクストの圧縮と選別を担う。
+- 入力: `task`, `budget`, `limit`
+- 出力: `recommended_read_order`, `recommended_next_actions`, `confidence`
 
-## スキーマ
+### impact
+
+- 入力: changed file path 群または `--changed-files-from-git`
+- 出力: `read_first`, `related_tasks`, `decision_records`, `stale_watch`
+
+### finish
+
+- dry-run: 計画のみ
+- apply: `--summary-file` 指定時、Primary 1 件のみ `enrich` 実行
+- scan: `--scan` 指定時に最後に再 scan
+
+### new / stamp
+
+- `new task|decision`: 規約準拠テンプレート生成
+- `stamp`: frontmatter の `updated` 更新
+
+## 主要スキーマ
 
 ### Node
 
@@ -115,13 +126,11 @@ AI 実運用ではコンテクストを3層で扱う。
   "summary_updated": "ISO date",
   "tags": [],
   "updated": "ISO date",
-  "links_to": ["resolved-target.md"],
-  "depends_on": ["resolved-target.md"],
-  "relates_to": ["resolved-target.md"]
+  "links_to": [],
+  "depends_on": [],
+  "relates_to": []
 }
 ```
-
-`links_to` / `depends_on` / `relates_to` は解決済みターゲットのみ保持する。
 
 ### Edge
 
@@ -134,82 +143,13 @@ AI 実運用ではコンテクストを3層で扱う。
 }
 ```
 
-未解決リンク:
+## 作業サイクル
 
-```json
-{
-  "from": "a.md",
-  "to": "missing.md",
-  "type": "links_to",
-  "resolved": false
-}
+```
+記録する  -> scan -> start -> 実装 -> finish --dry-run -> finish --summary-file ... --scan
 ```
 
-## query 出力仕様（方向保持）
+## 参照
 
-`query` は向きと型を保持して返す。
-
-```json
-{
-  "node": { "...": "..." },
-  "outgoing": {
-    "links_to": [{"id": "b.md", "resolved": true}],
-    "depends_on": [],
-    "relates_to": []
-  },
-  "incoming": {
-    "links_to": [],
-    "depends_on": [],
-    "relates_to": []
-  },
-  "stats": {
-    "outgoing_resolved": 0,
-    "outgoing_unresolved": 0,
-    "incoming_resolved": 0,
-    "incoming_unresolved": 0
-  }
-}
-```
-
-## related 仕様（最小探索器）
-
-`resolver.related_nodes(node_id, db_path, limit)` は resolved edge のみ対象にスコアリングする。
-
-- `depends_on`（outgoing）を最優先
-- `links_to`（outgoing）を中優先
-- `relates_to` を補助
-- incoming も小さく加点
-- タグ一致・type 一致も補助加点
-
-`first` と `related` は責務を分離する。`first` は「理解前に読む前提列」、`related` は「理解後に広げる連想近傍」を返す。
-
-## context / enrich 仕様
-
-- `context`:
-  - 入力クエリからキーワード抽出（非AI）
-  - `title` / `summary` / `tags` の一致とグラフ近傍で候補を選別
-  - `--budget` をソフト上限として返却集合を制御
-  - デフォルトは軽量メタのみ、`--include-content` で本文を同梱
-- `enrich`:
-  - 作業 AI / 人間が作成した summary を `--summary` または `--summary-file` で受け取る
-  - DB の `nodes.summary` / `summary_source` / `summary_updated` を更新する
-  - `summary_source=agent` の既存 summary は `--force` なしでスキップ
-  - `--path` で絶対パスから node-id を逆引き可能
-
-## CLI
-
-```bash
-mdex scan --root <dir> [--output <json>] [--db <sqlite>] [--config <json>]
-mdex list --db <sqlite> [--type <type>] [--project <project>] [--status <status>] [--format <table|json>]
-mdex open <node-id> --db <sqlite>
-mdex query --db <sqlite> --node <node-id>
-mdex find <query> --db <sqlite> [--limit <n>]
-mdex orphans --db <sqlite>
-mdex related <node-id> --db <sqlite> [--limit <n>]
-mdex first <node-id> --db <sqlite> [--limit <n>]
-mdex context "<query>" --db <sqlite> [--budget <n>] [--limit <n>] [--include-content]
-mdex enrich <node-id> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
-mdex enrich --path <absolute-path> --db <sqlite> (--summary "<text>" | --summary-file <path>) [--force]
-```
-
-成功時は stdout JSON、エラー時は stderr JSON を返す。
+- Phase A 詳細: `docs/phase_a_agent_flow.md`
+- 記録規約: `docs/convention.md`

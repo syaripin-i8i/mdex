@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from runtime.reader import read_node_text
+from runtime.resolver import prerequisite_order, related_nodes
 from runtime.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
 from runtime.tokens import estimate_tokens
 
@@ -171,6 +172,181 @@ def _estimated_tokens_for_node(node: dict[str, Any], scan_root: str) -> tuple[in
     return estimate_tokens(text), text
 
 
+def _node_meta_map(db_path: str) -> dict[str, dict[str, Any]]:
+    rows = list_nodes(db_path)
+    return {
+        str(row.get("id", "")).strip(): row
+        for row in rows
+        if str(row.get("id", "")).strip()
+    }
+
+
+def _read_order(
+    selected_nodes: list[dict[str, Any]],
+    db_path: str,
+    node_map: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append(node_id: str, source: str, reason: str) -> None:
+        clean_id = node_id.strip()
+        if not clean_id or clean_id in seen:
+            return
+        seen.add(clean_id)
+        node = node_map.get(clean_id, {})
+        ordered.append(
+            {
+                "id": clean_id,
+                "title": str(node.get("title", "")),
+                "priority": len(ordered) + 1,
+                "source": source,
+                "reason": reason,
+            }
+        )
+
+    anchors = selected_nodes[:3]
+    for anchor in anchors:
+        anchor_id = str(anchor.get("id", "")).strip()
+        if not anchor_id:
+            continue
+        for prerequisite in prerequisite_order(anchor_id, db_path, limit=2):
+            prereq_id = str(prerequisite.get("id", "")).strip()
+            if not prereq_id:
+                continue
+            _append(prereq_id, "first", str(prerequisite.get("reason", "prerequisite")))
+        _append(anchor_id, "context", "high lexical or graph score")
+
+    for row in selected_nodes:
+        node_id = str(row.get("id", "")).strip()
+        if not node_id:
+            continue
+        _append(node_id, "context", "selected by context score")
+
+    return ordered
+
+
+def _deferred_nodes(
+    selected_nodes: list[dict[str, Any]],
+    db_path: str,
+    picked_ids: set[str],
+) -> list[dict[str, Any]]:
+    deferred: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for anchor in selected_nodes[:2]:
+        anchor_id = str(anchor.get("id", "")).strip()
+        if not anchor_id:
+            continue
+        for related in related_nodes(anchor_id, db_path, limit=4):
+            related_id = str(related.get("id", "")).strip()
+            if not related_id or related_id in picked_ids or related_id in seen:
+                continue
+            seen.add(related_id)
+            deferred.append(
+                {
+                    "id": related_id,
+                    "reason": "related but low priority for first pass",
+                }
+            )
+            if len(deferred) >= 8:
+                return deferred
+    return deferred
+
+
+def _confidence(selected_nodes: list[dict[str, Any]]) -> float:
+    if not selected_nodes:
+        return 0.0
+    total = float(len(selected_nodes))
+    direct = 0
+    graph = 0
+    fresh = 0
+    for node in selected_nodes:
+        breakdown = node.get("score_breakdown", {})
+        keyword = breakdown.get("keyword", {})
+        if float(keyword.get("total", 0.0) or 0.0) > 0:
+            direct += 1
+        if float(breakdown.get("graph_boost", 0.0) or 0.0) > 0:
+            graph += 1
+        if float(breakdown.get("recency", 0.0) or 0.0) > 0:
+            fresh += 1
+    score = min(
+        1.0,
+        0.25 + (direct / total) * 0.4 + (graph / total) * 0.2 + (fresh / total) * 0.15,
+    )
+    return round(score, 2)
+
+
+def _why_this_set(
+    selected_nodes: list[dict[str, Any]],
+    confidence: float,
+    node_map: dict[str, dict[str, Any]],
+) -> list[str]:
+    reasons: list[str] = []
+    if selected_nodes:
+        reasons.append("top nodes contain direct query hits")
+    if any(
+        float(node.get("score_breakdown", {}).get("graph_boost", 0.0) or 0.0) > 0
+        for node in selected_nodes
+    ):
+        reasons.append("prerequisite documents are pulled ahead")
+    statuses = [
+        str(node_map.get(str(row.get("id", "")), {}).get("status", "")).strip().lower()
+        for row in selected_nodes
+    ]
+    if any(status in {"done", "archived"} for status in statuses):
+        reasons.append("done/archived nodes were deprioritized")
+    if confidence < 0.6:
+        reasons.append("low confidence due to sparse direct matches")
+    return reasons[:4]
+
+
+def _query_keywords(query: str) -> list[str]:
+    words = [item for item in _extract_keywords(query) if item and " " not in item]
+    filtered: list[str] = []
+    seen = set()
+    for word in words:
+        if len(word) < 2:
+            continue
+        if word in seen:
+            continue
+        seen.add(word)
+        filtered.append(word)
+    return filtered
+
+
+def _next_actions(
+    query: str,
+    recommended_read_order: list[dict[str, Any]],
+    confidence: float,
+    node_map: dict[str, dict[str, Any]],
+) -> list[str]:
+    actions: list[str] = []
+
+    for row in recommended_read_order[:2]:
+        node_id = str(row.get("id", "")).strip()
+        if not node_id:
+            continue
+        actions.append(f"open {node_id}")
+
+    keyword_terms = _query_keywords(query)
+    has_design_or_decision = any(
+        str(node_map.get(str(row.get("id", "")), {}).get("type", "")).strip().lower()
+        in {"design", "decision"}
+        for row in recommended_read_order[:4]
+    )
+    if has_design_or_decision and len(keyword_terms) >= 2:
+        actions.append(f"search code for {' '.join(keyword_terms[:3])}")
+    elif len(keyword_terms) >= 2:
+        actions.append(f"search code for {' '.join(keyword_terms[:3])}")
+
+    if confidence < 0.6:
+        actions.append(f'run mdex find "{query}"')
+
+    if not actions:
+        actions.append("run mdex context with a more specific query")
+    return actions[:5]
+
+
 def select_context(
     query: str,
     db_path: str,
@@ -178,10 +354,21 @@ def select_context(
     limit: int = 10,
     *,
     include_content: bool = False,
+    actionable: bool = False,
 ) -> dict[str, Any]:
     keywords = _extract_keywords(query)
     if not keywords:
-        return {"query": query, "nodes": [], "total_tokens": 0, "budget": int(budget)}
+        return {
+            "query": query,
+            "nodes": [],
+            "total_tokens": 0,
+            "budget": int(budget),
+            "recommended_read_order": [],
+            "recommended_next_actions": [],
+            "deferred_nodes": [],
+            "confidence": 0.0,
+            "why_this_set": [],
+        }
 
     safe_limit = _coerce_positive_int(limit, 10)
     safe_budget = _coerce_positive_int(budget, 4000)
@@ -200,7 +387,17 @@ def select_context(
                 candidate_map[node_id] = node
 
     if not candidate_map:
-        return {"query": query, "nodes": [], "total_tokens": 0, "budget": safe_budget}
+        return {
+            "query": query,
+            "nodes": [],
+            "total_tokens": 0,
+            "budget": safe_budget,
+            "recommended_read_order": [],
+            "recommended_next_actions": [],
+            "deferred_nodes": [],
+            "confidence": 0.0,
+            "why_this_set": [],
+        }
 
     seed_ids = sorted(candidate_map.keys())
     node_map = {str(node.get("id", "")): node for node in list_nodes(db_path)}
@@ -281,9 +478,30 @@ def select_context(
         selected_nodes.append(row)
         total_tokens = projected
 
-    return {
+    payload = {
         "query": query,
         "nodes": selected_nodes,
         "total_tokens": total_tokens,
         "budget": safe_budget,
     }
+    if not actionable:
+        return payload
+
+    node_map = _node_meta_map(db_path)
+    read_order = _read_order(selected_nodes, db_path, node_map)
+    read_order_ids = {str(item.get("id", "")).strip() for item in read_order}
+    deferred = _deferred_nodes(selected_nodes, db_path, read_order_ids)
+    confidence = _confidence(selected_nodes)
+    why_this_set = _why_this_set(selected_nodes, confidence, node_map)
+    next_actions = _next_actions(query, read_order, confidence, node_map)
+
+    payload.update(
+        {
+            "recommended_read_order": read_order,
+            "recommended_next_actions": next_actions,
+            "deferred_nodes": deferred,
+            "confidence": confidence,
+            "why_this_set": why_this_set,
+        }
+    )
+    return payload

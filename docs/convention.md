@@ -2,145 +2,96 @@
 type: spec
 project: mdex
 status: active
-updated: 2026-04-09
+updated: 2026-04-13
 ---
 
 # mdex 記録規約
 
-AI エージェントが残す Markdown ファイルが mdex によって正しく索引化されるための規約です。  
-この規約に沿って書かれたファイルは、他のエージェントが `mdex context` で正確に発見できます。
+AI エージェントが残す Markdown / JSON を `mdex` で安定して索引化するための規約。
 
-規約はすべて「推奨」であり、欠けていても mdex は動作します。  
-ただし規約に沿うほど `context` の精度が上がります。
+## 基本ルール
 
----
+1. `type` / `status` / `updated` を frontmatter に入れる
+2. 前提は `depends_on`、関連は `relates_to` に分ける
+3. 先頭段落で 1〜2 文の summary を書く
+4. 可能な限り `mdex new` と `mdex stamp` を使う
 
-## 1. frontmatter
+## 推奨ワークフロー
 
-ファイル先頭に YAML frontmatter を書いてください。
+```bash
+# 新規作成
+mdex new task "Phase A DB resolver"
+mdex new decision "adopt start/finish workflow"
+
+# 変更したら updated を更新
+mdex stamp tasks/pending/T20260412190917.md
+
+# 作業完了時
+mdex finish --task "Phase A DB resolver" --dry-run
+mdex finish --task "Phase A DB resolver" --summary-file ./summary.txt --scan
+```
+
+## frontmatter 最小構成
 
 ```yaml
 ---
-type: decision        # ノード種別（後述）
-project: yura         # プロジェクト名
-status: active        # 状態（後述）
-updated: 2026-04-09   # 最終更新日（ISO 8601）
-tags: [emotion, arch] # 任意。検索・関連付けに使われる
-depends_on:           # このファイルを読む前提となるファイル
-  - design.md
-relates_to:           # 関連するが前提ではないファイル
-  - proposal.md
+type: decision
+project: mdex
+status: active
+updated: 2026-04-13
+tags: [phase-a, workflow]
+depends_on:
+  - docs/design.md
+relates_to:
+  - tasks/pending/T20260412190917.md
 ---
 ```
 
-**最低限書くべきフィールド**: `type` / `status` / `updated`  
-この3つがあれば `list` / `find` / `context` が正しく機能します。
+## type
 
----
+| type | 用途 |
+|---|---|
+| `decision` | 方針決定・理由 |
+| `design` | 設計仕様 |
+| `spec` | インターフェース/形式仕様 |
+| `task` | 実装タスク |
+| `log` | セッション記録 |
+| `reference` | 参照情報 |
 
-## 2. type（ノード種別）
-
-| type | 使う場面 |
-|------|---------|
-| `decision` | アーキテクチャや方針の決定記録。なぜそう決めたかを書く |
-| `design` | 設計書・仕様書。実装前に書く |
-| `spec` | インターフェース仕様・スキーマ定義 |
-| `task` | 作業記録。何をやったか・結果・残課題を書く |
-| `log` | セッションログ・作業メモ。時系列で追記される |
-| `reference` | 外部仕様の引用・まとめ。変更が少ないもの |
-
-`type` が未指定の場合、ディレクトリ名から推定されます（`decisions/` → `decision`）。  
-それも判定できない場合は `unknown` になります。`unknown` は `context` での優先度が下がります。
-
----
-
-## 3. status（状態）
+## status
 
 | status | 意味 |
-|--------|------|
-| `active` | 現在有効。参照・更新の対象 |
-| `draft` | 作成中。まだ確定していない |
-| `done` | 完了・解決済み。履歴として残す |
-| `archived` | 無効化。参照不要だが削除しない |
+|---|---|
+| `active` | 有効 |
+| `draft` | 作成中 |
+| `pending` | 未着手タスク |
+| `done` | 完了 |
+| `archived` | 参照のみ |
 
-`done/` ディレクトリに置かれたファイルは `status` が未指定でも自動的に `done` と判定されます。  
-`pending/` も同様に `pending` と判定されます。
+## ディレクトリ推奨
 
----
-
-## 4. ディレクトリ構造（推奨）
-
-明確な構造がないと `type` 推定が `unknown` になりやすいです。
-
-```
+```text
 project/
-  decisions/   ← type: decision
-  design/      ← type: design
-  specs/       ← type: spec
+  decision/
+  design/
+  spec/
   tasks/
-    pending/   ← status: pending
-    done/      ← status: done
-  logs/        ← type: log
+    pending/
+    done/
+  logs/
 ```
 
-規模が小さい場合はフラットでも構いません。その場合は frontmatter の `type` を必ず書いてください。
+## summary の書き方
 
----
+他エージェントが「読む価値」を判定できるように書く。
 
-## 5. summary（要約）
+- 何を決めた/定義した文書か
+- どの作業で参照すべきか
+- どんな制約があるか
 
-mdex は frontmatter の直後にある最初の段落を summary として使います。  
-ここに「このファイルが何について書かれているか」を1〜2文で書いてください。
+## テンプレート
 
-**良い例**:
-```markdown
----
-type: decision
-...
----
-
-感情モデルのアーキテクチャを state machine から score-based に変更した決定記録。
-変更理由・却下した代替案・影響範囲を含む。
-```
-
-**悪い例**（summary が死ぬパターン）:
-```markdown
----
-type: decision
-...
----
-
-**Status**: active
-**Project**: yura
-
-## 背景
-...
-```
-
-この場合 summary は `"Status: active"` になります。  
-`**Key**: Value` 形式のメタデータをファイル冒頭に置く場合は、その後に空行 + 説明段落を入れてください。
-
----
-
-## 6. リンク記法
-
-他のファイルへの参照は以下の形式で書いてください。mdex がエッジとして認識します。
-
-```markdown
-[[design]]              ← wikilink（拡張子なしでも可）
-[設計書](design.md)     ← Markdown リンク
-`<repo-root>/design.md`  ← 絶対パス（コードブロック内）
-T20260409043442         ← タスク ID（自動で relates_to エッジになる）
-```
-
-**`depends_on`**: 前提関係（読む順序がある）は frontmatter に書いてください。  
-**`relates_to`**: 横のつながりは frontmatter か本文リンクで。
-
----
-
-## 7. 最小構成のテンプレート
-
-### decision（決定記録）
+### decision
 
 ```markdown
 ---
@@ -150,7 +101,7 @@ status: active
 updated: <today>
 ---
 
-<1〜2文でこの決定が何についてかを書く>
+<この決定の要点を1〜2文で>
 
 ## 決定内容
 
@@ -161,19 +112,19 @@ updated: <today>
 ## 影響範囲
 ```
 
-### task（作業記録）
+### task
 
 ```markdown
 ---
 type: task
 project: <project>
-status: done
+status: pending
 updated: <today>
 relates_to:
-  - <関連する設計ファイル>
+  - <関連設計>
 ---
 
-<1〜2文でこのタスクが何をしたかを書く>
+<このタスクの目的を1〜2文で>
 
 ## 実施内容
 
@@ -182,38 +133,9 @@ relates_to:
 ## 残課題
 ```
 
-### log（セッションログ）
+## コマンド対応
 
-```markdown
----
-type: log
-project: <project>
-status: active
-updated: <today>
----
-
-<セッションの概要を1文で>
-
-## <日付>
-
-<作業内容・判断・気づき>
-```
-
----
-
-## 8. エージェントへの指示
-
-タスクを完了したら以下を実行してください：
-
-```bash
-# 1. 作業記録を残す（上記テンプレートを使う）
-
-# 2. 参照した・更新したファイルの summary を改善する
-mdex enrich <node-id> --db <db> --summary "<2〜3文の要約>"
-mdex enrich --path <絶対パス> --db <db> --summary-file <要約テキストファイル>
-
-# 3. 索引を更新する
-mdex scan --root <dir> --db <db> --config control/scan_config.json
-```
-
-この3ステップで次のエージェントが正確にコンテクストを引き出せるようになります。
+- 作成: `mdex new task|decision`
+- 日付更新: `mdex stamp <node-id or path>`
+- 終了整理: `mdex finish --dry-run`
+- 反映: `mdex finish --summary-file ... --scan`
