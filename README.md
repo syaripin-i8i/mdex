@@ -1,76 +1,75 @@
 # mdex
 
-**このツールは AI エージェント（Claude Code・Codex など）のために作られています。人間向けの対話 UX は優先しません。**
+**`mdex` は AI エージェントのための protocol-first CLI です。人間向けの閲覧 UX は優先しません。**  
+**想定する公開先は「誰でも触る OSS」ではなく、分かる相手が AI に読ませて使う repo です。**
 
----
+## For Agents
 
-## 何を解くツールか
+- standard flow: `scan -> start -> (context | first | related | impact) -> finish --dry-run`
+- apply summaries only with `finish --summary-file <path> --scan`
+- success JSON goes to stdout; error JSON goes to stderr
+- read next: `README.md` -> `AGENT.md` -> `docs/design.md` -> `docs/convention.md`
 
-`mdex` は Markdown / JSON の運用コンテクストを索引化し、AI が「今読むべき文書」を最短で決めるための補助 CLI です。  
-全文検索の代替ではなく、作業開始・作業終了の導線を揃えることを主目的にしています。
+## Protocol
 
-```
-記録（Markdown / JSON）
-  ↓ mdex scan
-SQLite 索引
-  ↓ mdex start
-読む順序と次アクション
-  ↓ 実装
-  ↓ mdex finish
-更新候補・後処理を整理
-```
+これは紹介文ではなく、AI が最初に従う標準手順です。
 
----
-
-## タスク着手〜終了の標準フロー
+| phase | standard command | contract |
+|---|---|---|
+| before work | `mdex scan`, then `mdex start` | 索引を更新してから入口を決める |
+| during work | `mdex context --actionable` / `mdex first` / `mdex related` | 必要な深掘りだけ追加する |
+| when changed files exist | `mdex impact` | changed files 起点で関連文書を分類する |
+| after work | `mdex finish --dry-run` | 更新候補と後処理を確認する |
+| apply summary | `mdex finish --summary-file <path> --scan` | summary が実在するときだけ反映する |
 
 ```bash
-# 1) 索引を作る / 更新する
-mdex scan --root <dir> --db mdex_index.db --config control/scan_config.json
-
-# 2) 作業開始時（入口）
-mdex start "emotion bug fix" --db mdex_index.db
-
-# 3) 必要なら深掘り
-mdex context "emotion bug fix" --db mdex_index.db --actionable
-mdex first design/emotion.md --db mdex_index.db --limit 5
-mdex related design/emotion.md --db mdex_index.db --limit 5
-
-# 4) 作業終了時（出口）
-mdex finish --task "emotion bug fix" --db mdex_index.db --dry-run
-
-# 5) summary を適用したいとき
-mdex finish --task "emotion bug fix" --db mdex_index.db --summary-file ./summary.txt --scan
+mdex scan --root <dir> --db <db> --config control/scan_config.json
+mdex start "<task>" --db <db>
+mdex context "<task>" --db <db> --actionable
+mdex first <node-id> --db <db> --limit 5
+mdex related <node-id> --db <db> --limit 5
+mdex impact <changed-file-or-node> --db <db>
+mdex finish --task "<task>" --db <db> --dry-run
+mdex finish --task "<task>" --db <db> --summary-file ./summary.txt --scan
 ```
 
-`--db` を省略した場合は以下の優先順で自動解決されます。
+## Assumptions
 
-1. CLI 引数 `--db`
-2. 環境変数 `MDEX_DB`
-3. `.mdex/config.json` の `db`
-4. `repo/.mdex/mdex_index.db`
-5. `repo/mdex_index.db`
+- `mdex` は規約のある Markdown / JSON 運用で最も強く効きます
+- frontmatter の `type`, `status`, `updated` を推奨します
+- `depends_on` と `relates_to` を使うと `start` / `context` / `impact` の解像度が上がります
+- 先頭 summary があると `start` / `context` / `finish` が安定します
+- 新規ノートは `mdex new`、`updated` 更新は `mdex stamp` を優先してください
 
----
+> mdex is only as good as your note discipline.  
+> For stable results, follow `docs/convention.md`.
 
-## 主なコマンド
+## Non-goals
 
-| コマンド | 役割 |
-|---|---|
-| `scan` | 索引を生成/更新 |
-| `start` | 開始時に読む順序と次アクションを返す |
-| `context --actionable` | `start` 相当の詳細情報を直接取得 |
-| `impact` | changed files 起点で関連ドキュメントを分類 |
-| `finish` | 終了時の更新候補・後処理をまとめる |
-| `enrich` | summary を node_overrides に反映 |
-| `new` | task / decision テンプレートを生成 |
-| `stamp` | frontmatter の `updated` を更新 |
+- 全文検索の代替ではありません
+- source code understanding の完全代替ではありません
+- ノート群を魔法のように整理するツールではありません
+- 人間向け閲覧 UX を主目的にしません
+- 規約の薄い repo で高精度を保証しません
+- 汎用ナレッジベースではなく、agent workflow を圧縮するための CLI です
 
----
+## Command Selection Rules
+
+| situation | use | default reading |
+|---|---|---|
+| start a task | `mdex start` | 入口を決める |
+| need a wider actionable entrance | `mdex context --actionable` | `start` 相当を直接確認する |
+| inspect read order from a node | `mdex first` | 特定文書から読む順を決める |
+| inspect nearby docs | `mdex related` | 関連文書を探す |
+| changed files already exist | `mdex impact` | 影響範囲を changed files 起点で見る |
+| close a task | `mdex finish --dry-run` | 出口を先に確認する |
+| apply a summary | `mdex finish --summary-file ... --scan` | summary が実在するときだけ反映する |
+| create a task or decision note | `mdex new` | frontmatter を手書きしない |
+| update only `updated` | `mdex stamp` | metadata 更新だけに留める |
 
 ## 再現サンプル（fixtures/quality_repo）
 
-`tests/fixtures/quality_repo` で `scan → start → impact → finish` を再現できます。
+この節は protocol の補助資料です。`tests/fixtures/quality_repo` で `scan -> start -> impact -> finish` を再現できます。
 
 ```bash
 mdex scan --root tests/fixtures/quality_repo --db .tmp_quality.db
@@ -136,17 +135,47 @@ mdex finish --task "root fix" --db .tmp_quality.db --dry-run
 
 ## 全出力は JSON
 
-成功時は stdout JSON、エラー時は stderr JSON を返します。
+### Output Contract
+
+すべての成功出力は stdout JSON、失敗出力は stderr JSON です。  
+field 名は prose より強い契約として扱ってください。別名は導入しません。
+
+| command | primary keys |
+|---|---|
+| `scan` | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
+| `start` | `task`, `recommended_read_order`, `recommended_next_actions`, `confidence` |
+| `impact` | `inputs`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
+| `finish` | `task`, `dry_run`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
+| db resolution error | `error`, `resolution_attempts` |
 
 ```json
 { "error": "db not found", "resolution_attempts": [] }
 ```
 
-人間向け出力が必要な場合のみ `--format table` を使ってください。
+人間向け整形が必要な場合だけ `--format table` を使ってください。
 
----
+## DB Resolution
 
-## セットアップ
+`--db` 省略時は以下の優先順で自動解決されます。
+
+1. CLI 引数 `--db`
+2. 環境変数 `MDEX_DB`
+3. `.mdex/config.json` の `db`
+4. `repo/.mdex/mdex_index.db`
+5. `repo/mdex_index.db`
+
+## Source of Truth
+
+| scope | source |
+|---|---|
+| workflow contract | `README.md` |
+| execution heuristics | `AGENT.md` |
+| architecture / persistence / schema | `docs/design.md` |
+| input note contract | `docs/convention.md` |
+
+`docs/phase_a_agent_flow.md` は背景設計の詳細であり、入口契約の正本ではありません。
+
+## Setup
 
 ```bash
 python -m pip install -e .
@@ -155,54 +184,12 @@ python -m pip install -e ".[dev]"
 
 依存: Python 3.10+, PyYAML
 
----
+## Quick Verification
 
-## モジュール構成
-
+```bash
+mdex scan --root tests/fixtures/quality_repo --db .tmp_quality.db
+mdex start "root decision" --db .tmp_quality.db --limit 5
+mdex impact design/root.md --db .tmp_quality.db
+mdex finish --task "root fix" --db .tmp_quality.db --dry-run
+python -m pytest -q
 ```
-runtime/
-  cli.py         コマンド入口
-  dbresolve.py   DB 自動解決と repo/config 解決
-  scanner.py     .md / .json / .jsonl 列挙
-  parser.py      frontmatter / link / summary 抽出
-  builder.py     ノード・エッジ生成
-  indexer.py     JSON / SQLite 出力
-  store.py       SQLite 読み書き API
-  resolver.py    related / first
-  context.py     context 選別（actionable 出力対応）
-  start.py       start 出力構築
-  gittools.py    git changed files 収集
-  impact.py      changed files 起点の文書分類
-  finish.py      finish 出口処理
-  scaffold.py    new / stamp
-  enrich.py      summary 更新
-  reader.py      node-id から本文取得
-  tokens.py      トークン見積もり
-```
-
----
-
-## 作業サイクル
-
-```
-記録する       docs/convention.md に沿って Markdown / JSON を残す
-  ↓
-索引化         mdex scan
-  ↓
-開始           mdex start
-  ↓
-実装           必要に応じて context / first / related / query
-  ↓
-終了           mdex finish --dry-run
-  ↓
-反映           mdex finish --summary-file ... --scan（必要時）
-```
-
----
-
-## 設計ドキュメント
-
-- 詳細設計（Phase A）: `docs/phase_a_agent_flow.md`
-- 全体設計: `docs/design.md`
-- 記録規約: `docs/convention.md`
-- エージェント向け運用: `AGENT.md`

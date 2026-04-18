@@ -1,55 +1,44 @@
-# mdex — Agent Operation Guide
+# mdex Agent Rules
 
-## Goal
+`AGENT.md` は実行時の判断規則だけを置くファイルです。  
+役割説明や詳細仕様は `README.md` / `docs/design.md` / `docs/convention.md` を読んでください。
 
-`mdex` は「AI が最初に何を読むか / 最後に何を更新すべきか」を決めるための CLI です。  
-迷ったら次の 3 コマンドだけ覚えてください。
+## If-Then Rules
 
-```bash
-mdex scan   # 索引更新
-mdex start  # 作業開始
-mdex finish # 作業終了
-```
+| if | then | why |
+|---|---|---|
+| repo を初めて触る | `mdex scan` の後に必ず `mdex start` | 入口を推測しない |
+| 索引の新しさが怪しい | 先に `mdex scan` | 読む順序の誤判定を減らす |
+| 作業を始める | `mdex start "<task>"` | `recommended_read_order` と `recommended_next_actions` を得る |
+| `start` より広い入口が欲しい | `mdex context "<task>" --actionable` | 入口情報を直接深掘りする |
+| 特定文書から読む順を決めたい | `mdex first <node-id>` | node 起点の read order を得る |
+| 関連文書を掘りたい | `mdex related <node-id>` | 近接文脈を確認する |
+| changed files がある | `mdex impact <path...>` または `mdex impact --changed-files-from-git` | `read_first` / `related_tasks` / `decision_records` を得る |
+| タスクを閉じる | `mdex finish --task "<task>" --dry-run` | 更新候補を先に確認する |
+| summary を適用する | `mdex finish --task "<task>" --summary-file <path> --scan` | apply と再 scan を一連で行う |
+| task / decision を新規作成する | `mdex new task|decision` | frontmatter を手で作らない |
+| `updated` だけ直したい | `mdex stamp <node-id or path>` | metadata 更新だけに留める |
 
-## Default Flow
+## Priority When Unsure
 
-1. 開始前に `scan`
-2. 最初に `start`
-3. 必要に応じて `context` / `first` / `related` / `query`
-4. 最後に `finish --dry-run`
-5. summary を反映するときだけ `finish --summary-file ... --scan`
+1. `mdex scan`
+2. `mdex start`
+3. changed files があるなら `mdex impact`
+4. 終了前に `mdex finish --dry-run`
 
-## DB Resolution
+## Prohibitions / Discouraged
 
-`--db` 省略時は以下の優先順で自動解決します。
+- `mdex` を全文検索やコード理解の完全代替として扱わない
+- prose 出力を期待しない。JSON field を読む
+- `finish --summary-file` を summary なしで実行しない
+- 通常の反映で `enrich` を優先しない。まず `finish` を使う
+- `recommended_read_order` などの契約名に別名を付けない
 
-1. `--db`
-2. `MDEX_DB`
-3. `.mdex/config.json` の `db`
-4. `.mdex/mdex_index.db`
-5. `mdex_index.db`
+## Contract Reminders
 
-## Command Roles
-
-- `start`: 入口。読む順序と次アクションを返す
-- `context --actionable`: `start` 相当を直接確認
-- `impact`: changed files 起点の分類
-- `finish`: 出口。enrich 候補と後処理を返す
-- `enrich`: summary を直接更新（限定用途）
-- `new`: task / decision のテンプレート生成
-- `stamp`: `updated` 更新
-
-## Output Contract
-
-- すべて JSON（成功: stdout / エラー: stderr）
-- エラーにも理由を入れる
+- 成功出力は stdout JSON、失敗出力は stderr JSON
 - `finish --dry-run` は DB を更新しない
-
-## Phase Status (2026-04-13)
-
-- Phase 1: scan / list / query
-- Phase 2: find / first / related / orphans / stale
-- Phase A: dbresolve / start / finish / impact / new / stamp
+- `--db` 省略時の優先順は `README.md` / `docs/design.md` の記載に従う
 
 ## Verification
 

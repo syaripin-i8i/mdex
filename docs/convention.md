@@ -2,12 +2,18 @@
 type: spec
 project: mdex
 status: active
-updated: 2026-04-13
+updated: 2026-04-19
 ---
 
 # mdex 記録規約
 
 AI エージェントが残す Markdown / JSON を `mdex` で安定して索引化するための規約。
+
+## Scope
+
+- この文書は `mdex` の input note contract の正本です
+- `start` / `context` / `finish` の安定性は、この規約への準拠度に強く依存します
+- `mdex` は記録規律が高いほど強く効きます
 
 ## 基本ルール
 

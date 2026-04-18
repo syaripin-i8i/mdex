@@ -2,10 +2,17 @@
 type: design
 project: mdex
 status: active
-updated: 2026-04-13
+updated: 2026-04-19
 ---
 
 # mdex 設計書
+
+## Scope
+
+- この文書は architecture / persistence / command responsibility / schema の正本です
+- workflow contract は `README.md` を参照してください
+- execution heuristics は `AGENT.md` を参照してください
+- input note contract は `docs/convention.md` を参照してください
 
 ## 一言で言うと
 
@@ -18,6 +25,7 @@ AI エージェントが作業開始 (`start`) と作業終了 (`finish`) を定
 2. 全コマンドは JSON を返す（成功: stdout / 失敗: stderr）。
 3. SQLite を正本とし、`node_overrides` を scan と分離して保持する。
 4. 入口 (`start`) と出口 (`finish`) を最優先で安定化する。
+5. 契約 field 名は README / AGENT / design で表記ゆれさせない。
 
 ## 永続化モデル
 
