@@ -13,6 +13,7 @@ def _run_git(base_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
         ["git", "-C", str(base_dir), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         stdin=subprocess.DEVNULL,
     )

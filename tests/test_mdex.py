@@ -40,6 +40,7 @@ def _run_cli(*args: str, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProces
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         stdin=subprocess.DEVNULL,
     )

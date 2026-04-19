@@ -27,6 +27,7 @@ def _run_cli(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subpro
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         stdin=subprocess.DEVNULL,
         env=merged_env,
@@ -44,17 +45,19 @@ def _init_git_repo(root: Path) -> None:
         ["git", "--version"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if probe.returncode != 0:
         pytest.skip("git not available")
-    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True, encoding="utf-8")
     subprocess.run(
         ["git", "config", "user.email", "codex@example.com"],
         cwd=root,
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     subprocess.run(
         ["git", "config", "user.name", "Codex"],
@@ -62,14 +65,16 @@ def _init_git_repo(root: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
-    subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, text=True, encoding="utf-8")
     subprocess.run(
         ["git", "commit", "-m", "initial"],
         cwd=root,
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
 

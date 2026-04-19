@@ -20,7 +20,7 @@ def main() -> int:
     if args.include_content:
         command.append("--include-content")
 
-    completed = subprocess.run(command, check=False, text=True, capture_output=True)
+    completed = subprocess.run(command, check=False, text=True, encoding="utf-8", capture_output=True)
     if completed.stdout:
         print(completed.stdout, end="")
     if completed.stderr:

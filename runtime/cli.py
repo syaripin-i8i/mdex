@@ -34,6 +34,20 @@ from runtime.store import (
 )
 
 
+def _force_utf8_stdio() -> None:
+    # Windows pipes can default to locale encodings (for example cp932/cp1252),
+    # which breaks non-ASCII JSON output. Force UTF-8 when reconfigure is available.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="strict")
+        except Exception:
+            # Keep CLI behavior intact even in exotic stream environments.
+            continue
+
+
 def _emit_payload(payload: dict[str, Any], *, stderr: bool) -> None:
     output = json.dumps(payload, ensure_ascii=False)
     if stderr:
@@ -742,6 +756,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    _force_utf8_stdio()
     parser = _build_parser()
     args = parser.parse_args()
     return int(args.func(args))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,14 +10,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def _run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
     return subprocess.run(
         [sys.executable, "-m", "runtime.cli", *args],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         stdin=subprocess.DEVNULL,
+        env=merged_env,
     )
 
 
@@ -74,3 +80,35 @@ def test_quality_repo_scan_first_related_enrich_e2e(tmp_path: Path) -> None:
     assert enrich_payload["node_id"] == "design/root.md"
     assert enrich_payload["summary_source"] == "agent"
     assert enrich_payload["skipped"] is False
+
+
+def test_enrich_non_ascii_output_with_cp1252_stdio_override(tmp_path: Path) -> None:
+    db_path = tmp_path / "quality_utf8_guard.db"
+    output_json = tmp_path / "quality_utf8_guard.json"
+    scan = _run_cli(
+        "scan",
+        "--root",
+        "tests/fixtures/quality_repo",
+        "--config",
+        "control/scan_config.json",
+        "--output",
+        str(output_json),
+        "--db",
+        str(db_path),
+        env={"PYTHONIOENCODING": "cp1252"},
+    )
+    assert scan.returncode == 0
+
+    enrich = _run_cli(
+        "enrich",
+        "design/root.md",
+        "--db",
+        str(db_path),
+        "--summary",
+        "日本語を含む summary 出力の UTF-8 ガード",
+        env={"PYTHONIOENCODING": "cp1252"},
+    )
+    assert enrich.returncode == 0
+    assert "UnicodeEncodeError" not in enrich.stderr
+    payload = json.loads(enrich.stdout)
+    assert payload["status"] == "enriched"
