@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from runtime.builder import build_index
 from runtime.context import select_context
 from runtime.indexer import write_sqlite
@@ -102,3 +104,24 @@ shared ranking term for context selection
     ids = [row["id"] for row in result["nodes"]]
     assert ids[0] == "active_doc.md"
     assert "done_doc.md" in ids
+
+
+def test_select_context_skips_file_read_when_content_not_requested(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "quality_context_no_read.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    original_read_text = Path.read_text
+
+    def _blocked_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self.suffix in {".md", ".json", ".jsonl"}:
+            raise AssertionError("context should not read source files when include_content=False")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _blocked_read_text)
+    result = select_context("root decision", str(db_path), budget=4000, limit=5, include_content=False)
+    assert result["nodes"]

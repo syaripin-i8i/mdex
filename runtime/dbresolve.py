@@ -132,7 +132,54 @@ def resolve_decision_dir(context: RuntimeContext) -> Path:
 
 
 def resolve_scan_root(context: RuntimeContext) -> Path:
-    return resolve_config_path(context, "scan_root", default_relative=DEFAULT_SCAN_ROOT)
+    roots, _ = resolve_scan_roots(context)
+    return roots[0]
+
+
+def _raw_scan_root_values(config: dict[str, Any]) -> tuple[list[str], list[str]]:
+    warnings: list[str] = []
+    raw_roots = config.get("scan_roots")
+    has_scan_roots = isinstance(raw_roots, list)
+    values: list[str] = []
+
+    if has_scan_roots:
+        for item in raw_roots:
+            text = str(item).strip()
+            if text:
+                values.append(text)
+
+    raw_single = config.get("scan_root")
+    if isinstance(raw_single, str) and raw_single.strip():
+        if has_scan_roots:
+            warnings.append("scan_root is deprecated when scan_roots is present; scan_roots takes precedence")
+        elif not values:
+            values.append(raw_single.strip())
+    return values, warnings
+
+
+def resolve_scan_roots(
+    context: RuntimeContext,
+    *,
+    config: dict[str, Any] | None = None,
+) -> tuple[list[Path], list[str]]:
+    source = config if config is not None else context.config
+    values, warnings = _raw_scan_root_values(source)
+    if not values:
+        values = [DEFAULT_SCAN_ROOT]
+
+    resolved: list[Path] = []
+    seen = set()
+    for value in values:
+        path = _as_path(context.repo_root, value, key="scan_roots")
+        normalized = path.as_posix().lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        resolved.append(path)
+
+    if not resolved:
+        resolved = [_as_path(context.repo_root, DEFAULT_SCAN_ROOT, key="scan_roots")]
+    return resolved, warnings
 
 
 def resolve_scan_config_path(context: RuntimeContext) -> Path:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from runtime.builder import build_index
 from runtime.enrich import enrich_node
+from runtime import indexer
 from runtime.indexer import write_sqlite
-from runtime.store import list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes
+from runtime.store import list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes, update_node_summary
 
 
 def _build_quality_db(quality_repo: Path, quality_config: dict[str, object], db_path: Path) -> None:
@@ -185,3 +189,67 @@ override candidate
     assert "agent_override.md" not in stale_ids
     assert rows[0]["summary_source"] == "seed"
     assert "updated" in rows[0]
+
+
+def test_list_nodes_includes_estimated_tokens(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_store_estimated_tokens.db"
+    _build_quality_db(quality_repo, quality_config, db_path)
+
+    rows = list_nodes(str(db_path))
+    assert rows
+    assert all("estimated_tokens" in row for row in rows)
+    assert all(int(row["estimated_tokens"]) > 0 for row in rows)
+
+
+def test_update_node_summary_uses_source_argument(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_store_source.db"
+    _build_quality_db(quality_repo, quality_config, db_path)
+
+    ok = update_node_summary(str(db_path), "design/root.md", "scan refresh summary", source="scan")
+    assert ok is True
+    nodes = {row["id"]: row for row in list_nodes(str(db_path))}
+    assert nodes["design/root.md"]["summary_source"] == "scan"
+
+
+def test_write_sqlite_rolls_back_on_insert_failure(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "quality_store_tx_rollback.db"
+    _build_quality_db(quality_repo, quality_config, db_path)
+
+    enriched = enrich_node("design/root.md", str(db_path), "keep override", force=False)
+    assert enriched["status"] == "enriched"
+
+    with sqlite3.connect(str(db_path)) as conn:
+        original_nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+        original_overrides = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+
+    failing_index = build_index(str(quality_repo), quality_config)
+    original_insert_nodes = indexer._insert_nodes
+
+    def _boom(cur: sqlite3.Cursor, nodes: list[dict[str, object]]) -> None:
+        original_insert_nodes(cur, nodes[:1])
+        raise RuntimeError("injected failure")
+
+    monkeypatch.setattr(indexer, "_insert_nodes", _boom)
+
+    with pytest.raises(RuntimeError, match="injected failure"):
+        write_sqlite(failing_index, str(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        nodes_after = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+        overrides_after = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+
+    assert nodes_after == original_nodes
+    assert overrides_after == original_overrides

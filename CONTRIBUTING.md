@@ -5,8 +5,21 @@ Thanks for helping improve `mdex`.
 ## Development Setup
 
 ```bash
+python -m pip install --upgrade pip
+python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
+```
+
+Fallback (when you intentionally refresh lock inputs locally):
+
+```bash
 python -m pip install -e .
 python -m pip install -e ".[dev]"
+```
+
+Lockfile refresh:
+
+```bash
+python -m pip lock -e ".[dev]" -o pylock.toml
 ```
 
 ## Run Tests

@@ -13,7 +13,7 @@ from runtime.dbresolve import (
     load_runtime_context,
     resolve_db_path,
     resolve_scan_config_path,
-    resolve_scan_root,
+    resolve_scan_roots,
 )
 from runtime.enrich import enrich_node, resolve_node_id
 from runtime.finish import FinishError, run_finish
@@ -128,9 +128,21 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
     try:
         context = load_runtime_context(Path.cwd())
-        root_path = Path(args.root).resolve() if args.root else resolve_scan_root(context)
         config_path = Path(args.config).resolve() if args.config else resolve_scan_config_path(context)
         config = _load_json(str(config_path), optional=not bool(args.config))
+
+        scan_root_warnings: list[str] = []
+        if args.root:
+            scan_roots: list[Path] = [Path(args.root).resolve()]
+        else:
+            has_scan_roots = isinstance(config.get("scan_roots"), list) or (
+                isinstance(config.get("scan_root"), str) and str(config.get("scan_root")).strip()
+            )
+            if has_scan_roots:
+                scan_roots, scan_root_warnings = resolve_scan_roots(context, config=config)
+            else:
+                scan_roots, scan_root_warnings = resolve_scan_roots(context)
+
         if args.output:
             output_path = Path(args.output).resolve()
         else:
@@ -140,7 +152,11 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             else:
                 output_path = (context.repo_root / ".mdex" / "mdex_index.json").resolve()
 
-        index = build_index(str(root_path), config)
+        index = build_index(scan_roots, config, strict=bool(args.strict))
+        index_warnings = [item for item in index.get("warnings", []) if isinstance(item, dict)]
+        for warning in scan_root_warnings:
+            index_warnings.append({"path": "scan_config", "error": warning})
+        index["warnings"] = index_warnings
         write_json(index, str(output_path))
         write_sqlite(index, db_path)
     except Exception as exc:
@@ -163,6 +179,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             "json": str(output_path),
             "db": db_path,
         },
+        "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -628,6 +645,7 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--output", help="Output JSON file path")
     scan_parser.add_argument("--db", help="Output SQLite file path")
     scan_parser.add_argument("--config", help="Path to scan config JSON")
+    scan_parser.add_argument("--strict", action="store_true", help="Fail fast when any indexed file cannot be parsed")
     scan_parser.set_defaults(func=_cmd_scan)
 
     list_parser = subparsers.add_parser("list", help="List nodes with optional filters")

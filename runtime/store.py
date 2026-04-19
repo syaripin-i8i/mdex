@@ -8,10 +8,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-NODE_SELECT_SQL = (
-    "SELECT id, title, type, project, status, summary, summary_source, summary_updated, tags_json, updated, "
-    "links_to_json, depends_on_json, relates_to_json "
-    "FROM nodes"
+NODE_SELECT_COLUMNS = (
+    "id, title, type, project, status, summary, summary_source, summary_updated, "
+    "estimated_tokens, tags_json, updated, links_to_json, depends_on_json, relates_to_json"
+)
+
+LEGACY_NODE_SELECT_COLUMNS = (
+    "id, title, type, project, status, summary, summary_source, summary_updated, "
+    "0 AS estimated_tokens, tags_json, updated, links_to_json, depends_on_json, relates_to_json"
 )
 
 OVERRIDE_SELECT_SQL = (
@@ -59,6 +63,16 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
         (name,),
     ).fetchone()
     return row is not None
+
+
+def _column_exists(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(row["name"] or "").strip() == column_name for row in rows)
+
+
+def _node_select_sql(conn: sqlite3.Connection) -> str:
+    columns = NODE_SELECT_COLUMNS if _column_exists(conn, "nodes", "estimated_tokens") else LEGACY_NODE_SELECT_COLUMNS
+    return f"SELECT {columns} FROM nodes"
 
 
 def _ensure_node_overrides_table(conn: sqlite3.Connection) -> None:
@@ -239,6 +253,7 @@ def _row_to_node(row: sqlite3.Row) -> dict[str, Any]:
         "summary": str(row["summary"] or ""),
         "summary_source": str(row["summary_source"] or ""),
         "summary_updated": str(row["summary_updated"] or ""),
+        "estimated_tokens": int(row["estimated_tokens"] or 0),
         "tags": _as_json_list(row["tags_json"]),
         "updated": str(row["updated"] or ""),
         "links_to": _as_json_list(row["links_to_json"]),
@@ -261,9 +276,8 @@ def list_nodes(
     }
     where_sql, params = _build_where_clauses(filters)
 
-    query = f"{NODE_SELECT_SQL}{where_sql} ORDER BY id"
-
     with _connect(db_path) as conn:
+        query = f"{_node_select_sql(conn)}{where_sql} ORDER BY id"
         rows = conn.execute(query, params).fetchall()
         nodes = [_row_to_node(row) for row in rows]
         overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
@@ -273,13 +287,9 @@ def list_nodes(
 
 def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
     with _connect(db_path) as conn:
+        select_sql = _node_select_sql(conn)
         row = conn.execute(
-            """
-            SELECT id, title, type, project, status, summary, summary_source, summary_updated, tags_json, updated,
-                   links_to_json, depends_on_json, relates_to_json
-            FROM nodes
-            WHERE id = ?
-            """,
+            f"{select_sql} WHERE id = ?",
             (node_id,),
         ).fetchone()
         overrides = _load_overrides(conn, [node_id])
@@ -290,15 +300,21 @@ def get_node(db_path: str, node_id: str) -> dict[str, Any] | None:
     return _apply_override(_row_to_node(row), overrides)
 
 
-def search_nodes(db_path: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
+def search_nodes(
+    db_path: str,
+    query: str,
+    limit: int = 20,
+    *,
+    nodes: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     terms = _search_terms(query)
     if not terms:
         return []
     safe_limit = _coerce_positive_int(limit, 20)
-    nodes = list_nodes(db_path)
+    candidate_nodes = nodes if nodes is not None else list_nodes(db_path)
 
     scored: list[tuple[float, str, dict[str, Any]]] = []
-    for node in nodes:
+    for node in candidate_nodes:
         node_id = str(node.get("id", "")).strip()
         if not node_id:
             continue
@@ -312,14 +328,14 @@ def search_nodes(db_path: str, query: str, limit: int = 20) -> list[dict[str, An
 
 
 def list_orphan_nodes(db_path: str) -> list[dict[str, Any]]:
-    sql = (
-        f"{NODE_SELECT_SQL} AS n WHERE NOT EXISTS ("
-        "SELECT 1 FROM edges e "
-        "WHERE e.resolved = 1 AND (e.src = n.id OR e.dst = n.id)"
-        ") ORDER BY n.id"
-    )
-
     with _connect(db_path) as conn:
+        select_sql = _node_select_sql(conn)
+        sql = (
+            f"{select_sql} AS n WHERE NOT EXISTS ("
+            "SELECT 1 FROM edges e "
+            "WHERE e.resolved = 1 AND (e.src = n.id OR e.dst = n.id)"
+            ") ORDER BY n.id"
+        )
         rows = conn.execute(sql).fetchall()
         nodes = [_row_to_node(row) for row in rows]
         overrides = _load_overrides(conn, (node.get("id", "") for node in nodes))
@@ -488,7 +504,7 @@ def update_node_summary(
     if not clean_id:
         return False
     clean_summary = summary.strip()
-    clean_source = "agent"
+    clean_source = source.strip() if source and source.strip() else "agent"
     now = datetime.now(timezone.utc).isoformat()
 
     with _connect(db_path) as conn:

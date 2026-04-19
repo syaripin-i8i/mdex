@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from runtime.tokens import estimate_tokens
 
 FRONTMATTER_BOUNDARY_RE = re.compile(r"^\s*---\s*$")
 H1_RE = re.compile(r"^#\s+(.+?)\s*$")
@@ -678,7 +679,11 @@ def parse_file(path: str, options: dict[str, Any] | None = None) -> dict[str, An
     suffix = source_path.suffix.lower()
 
     if suffix == ".md":
-        return _parse_markdown_file(source_path, raw_text, options)
-    if suffix in {".json", ".jsonl"}:
-        return _parse_json_file(source_path, raw_text, options)
-    return _parse_text_file(source_path, raw_text, options)
+        parsed = _parse_markdown_file(source_path, raw_text, options)
+    elif suffix in {".json", ".jsonl"}:
+        parsed = _parse_json_file(source_path, raw_text, options)
+    else:
+        parsed = _parse_text_file(source_path, raw_text, options)
+
+    parsed["estimated_tokens"] = estimate_tokens(raw_text)
+    return parsed

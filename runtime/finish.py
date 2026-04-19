@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime.builder import build_index
-from runtime.dbresolve import RuntimeContext, resolve_scan_config_path, resolve_scan_root
+from runtime.dbresolve import RuntimeContext, resolve_scan_config_path, resolve_scan_roots
 from runtime.enrich import enrich_node
 from runtime.gittools import GitError, collect_changed_files
 from runtime.impact import build_impact_report
@@ -145,10 +145,14 @@ def _scan_summary(index: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_scan(context: RuntimeContext, db_path: str) -> dict[str, Any]:
-    scan_root = resolve_scan_root(context)
     scan_config_path = resolve_scan_config_path(context)
     config = _load_scan_config(scan_config_path)
-    index = build_index(str(scan_root), config)
+    scan_roots, scan_root_warnings = resolve_scan_roots(context, config=config)
+    index = build_index(scan_roots, config)
+    warnings = [item for item in index.get("warnings", []) if isinstance(item, dict)]
+    for warning in scan_root_warnings:
+        warnings.append({"path": "scan_config", "error": warning})
+    index["warnings"] = warnings
     write_sqlite(index, db_path)
     return _scan_summary(index)
 

@@ -70,7 +70,7 @@ relates_to:
 |---|---|
 | `active` | 有効 |
 | `draft` | 作成中 |
-| `pending` | 未着手タスク |
+| `pending` | 開始前タスク |
 | `done` | 完了 |
 | `archived` | 参照のみ |
 

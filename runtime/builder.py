@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,11 +26,42 @@ def _node_id_for_path(file_path: Path, root_path: Path) -> str:
     return _to_posix(str(resolved.relative_to(root_resolved)))
 
 
-def _resolve_indexed_files(root_path: Path, relative_files: list[str]) -> list[Path]:
+def _normalize_root_inputs(root: str | Path | Iterable[str | Path]) -> tuple[Path, list[Path]]:
+    if isinstance(root, (str, Path)):
+        roots = [Path(root).resolve()]
+        return roots[0], roots
+
+    raw_items = list(root)
+    if not raw_items:
+        base = Path(".").resolve()
+        return base, [base]
+
+    roots: list[Path] = []
+    seen = set()
+    for item in raw_items:
+        resolved = Path(item).resolve()
+        key = resolved.as_posix().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(resolved)
+
+    if not roots:
+        base = Path(".").resolve()
+        return base, [base]
+
+    if len(roots) == 1:
+        return roots[0], roots
+
+    common = Path(os.path.commonpath([str(path) for path in roots])).resolve()
+    return common, roots
+
+
+def _resolve_indexed_files(root_path: Path, indexed_paths: list[Path]) -> list[Path]:
     root_resolved = root_path.resolve()
     indexed_files: list[Path] = []
-    for relative in relative_files:
-        candidate = (root_resolved / relative).resolve()
+    for candidate in indexed_paths:
+        candidate = candidate.resolve()
         try:
             candidate.relative_to(root_resolved)
         except ValueError:
@@ -345,8 +378,13 @@ def _resolve_targets(
     return resolved_targets
 
 
-def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
-    root_path = Path(root).resolve()
+def build_index(
+    root: str | Path | Iterable[str | Path],
+    config: dict[str, Any],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    root_path, scan_roots = _normalize_root_inputs(root)
     exclude_patterns = _normalize_str_list(config.get("exclude_patterns"))
     include_extensions = _normalize_extensions(config.get("include_extensions"))
     node_type_map = config.get("node_type_map") or {}
@@ -359,23 +397,36 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
         "linkable_extensions": list(include_extensions),
     }
 
-    relative_files = list_indexable_files(str(root_path), include_extensions, exclude_patterns)
-    indexed_files = _resolve_indexed_files(root_path, relative_files)
+    indexed_paths = list_indexable_files(scan_roots, include_extensions, exclude_patterns)
+    indexed_files = _resolve_indexed_files(root_path, indexed_paths)
     path_to_id: dict[Path, str] = {}
+    id_to_path: dict[str, Path] = {}
     for file_path in indexed_files:
         try:
-            path_to_id[file_path] = _node_id_for_path(file_path, root_path)
+            node_id = _node_id_for_path(file_path, root_path)
         except ValueError:
             continue
+        if node_id in id_to_path:
+            raise ValueError(f"node_id collision detected across scan roots: {node_id}")
+        id_to_path[node_id] = file_path
+        path_to_id[file_path] = node_id
     indexed_files = list(path_to_id.keys())
     stem_to_ids, name_to_ids = _build_lookup_maps(path_to_id)
 
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     edge_keys = set()
+    warnings: list[dict[str, str]] = []
 
     for file_path in indexed_files:
-        parsed = parse_file(str(file_path), options=parser_options)
+        try:
+            parsed = parse_file(str(file_path), options=parser_options)
+        except Exception as exc:
+            if strict:
+                raise
+            warning_path = path_to_id.get(file_path, _to_posix(str(file_path)))
+            warnings.append({"path": warning_path, "error": str(exc)})
+            continue
         frontmatter = parsed.get("frontmatter", {}) or {}
         if not isinstance(frontmatter, dict):
             frontmatter = {}
@@ -471,6 +522,7 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
             "summary": parsed.get("summary", ""),
             "tags": parsed.get("tags", []),
             "updated": parsed.get("updated", ""),
+            "estimated_tokens": int(parsed.get("estimated_tokens", 0) or 0),
             "links_to": links_to_resolved,
             "depends_on": depends_resolved,
             "relates_to": relates_resolved,
@@ -496,8 +548,10 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
     return {
         "generated": _to_iso_now(),
         "scan_root": _to_posix(str(root_path)),
+        "scan_roots": [_to_posix(str(path)) for path in scan_roots],
         "nodes": nodes,
         "edges": edges,
+        "warnings": warnings,
     }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -16,10 +17,13 @@ from runtime.store import get_node
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+MALFORMED_FIXTURES = PROJECT_ROOT / "tests" / "fixtures" / "malformed"
 
 
 def _run_cli(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
+    existing_pythonpath = merged_env.get("PYTHONPATH", "")
+    merged_env["PYTHONPATH"] = str(PROJECT_ROOT) if not existing_pythonpath else f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
     if env:
         merged_env.update(env)
     return subprocess.run(
@@ -38,6 +42,12 @@ def _build_db(root: Path, config: dict[str, object], db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     index = build_index(str(root), config)
     write_sqlite(index, str(db_path))
+
+
+def _copy_fixture(name: str, dst: Path) -> None:
+    src = MALFORMED_FIXTURES / name
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
 
 
 def _init_git_repo(root: Path) -> None:
@@ -141,6 +151,210 @@ scan default output test
     assert (repo / ".mdex" / "mdex_index.json").exists()
 
 
+def test_scan_supports_multiple_scan_roots_non_collision(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_multi_roots_repo"
+    repo.mkdir()
+    (repo / "design").mkdir()
+    (repo / "notes").mkdir()
+    (repo / "design" / "root.md").write_text("# root\n", encoding="utf-8")
+    (repo / "notes" / "memo.md").write_text("# memo\n", encoding="utf-8")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["design", "notes"],
+            "include_extensions": [".md"],
+            "exclude_patterns": [],
+            "node_type_map": {"design": ["design"], "reference": ["notes"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", cwd=repo)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"] == 2
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    ids = {row["id"] for row in json.loads(listed.stdout)}
+    assert "design/root.md" in ids
+    assert "notes/memo.md" in ids
+
+
+def test_scan_fails_on_overlapping_scan_roots_collision(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_collision_roots_repo"
+    repo.mkdir()
+    (repo / "design").mkdir()
+    (repo / "design" / "root.md").write_text("# root\n", encoding="utf-8")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": [".", "design"],
+            "include_extensions": [".md"],
+            "exclude_patterns": [],
+            "node_type_map": {"design": ["design"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", cwd=repo)
+    assert result.returncode == 2
+    payload = json.loads(result.stderr)
+    assert payload["error"] == "scan failed"
+    assert "node_id collision" in payload["detail"]
+
+
+def test_scan_supports_legacy_scan_root_alias(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_legacy_root_alias_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    (repo / "docs" / "a.md").write_text("# a\n", encoding="utf-8")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_root": "docs",
+            "include_extensions": [".md"],
+            "exclude_patterns": [],
+            "node_type_map": {"design": ["docs"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", cwd=repo)
+    assert result.returncode == 0
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    ids = {row["id"] for row in json.loads(listed.stdout)}
+    assert "a.md" in ids
+
+
+def test_scan_cli_root_overrides_scan_roots_config(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_cli_root_priority_repo"
+    repo.mkdir()
+    (repo / "ignored").mkdir()
+    (repo / "ignored" / "x.md").write_text("# ignored\n", encoding="utf-8")
+    (repo / "chosen").mkdir()
+    (repo / "chosen" / "y.md").write_text("# chosen\n", encoding="utf-8")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["ignored"],
+            "include_extensions": [".md"],
+            "exclude_patterns": [],
+            "node_type_map": {"design": ["chosen", "ignored"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", "--root", "chosen", cwd=repo)
+    assert result.returncode == 0
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    ids = {row["id"] for row in json.loads(listed.stdout)}
+    assert "y.md" in ids
+    assert "x.md" not in ids
+
+
+def test_scan_warn_continue_with_malformed_file(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_warn_continue_repo"
+    repo.mkdir()
+    (repo / "good.md").write_text("# good\n", encoding="utf-8")
+    _copy_fixture("bad_utf8.json", repo / "bad.json")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["."],
+            "include_extensions": [".md", ".json"],
+            "exclude_patterns": ["control/**"],
+            "node_type_map": {"design": ["."]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", cwd=repo)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"] == 1
+    warnings = payload.get("warnings", [])
+    assert isinstance(warnings, list)
+    assert len(warnings) == 1
+    assert warnings[0]["path"] == "bad.json"
+    assert "utf" in warnings[0]["error"].lower()
+
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    ids = {row["id"] for row in json.loads(listed.stdout)}
+    assert "good.md" in ids
+
+
+def test_scan_strict_fails_on_malformed_file(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_strict_repo"
+    repo.mkdir()
+    (repo / "good.md").write_text("# good\n", encoding="utf-8")
+    _copy_fixture("bad_utf8.json", repo / "bad.json")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["."],
+            "include_extensions": [".md", ".json"],
+            "exclude_patterns": ["control/**"],
+            "node_type_map": {"design": ["."]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", "--strict", cwd=repo)
+    assert result.returncode == 2
+    payload = json.loads(result.stderr)
+    assert payload["error"] == "scan failed"
+
+
+def test_scan_warns_for_bad_yaml_and_broken_json_fixtures(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_malformed_fixture_repo"
+    repo.mkdir()
+    _copy_fixture("bad_frontmatter.md", repo / "bad_frontmatter.md")
+    _copy_fixture("broken.json", repo / "broken.json")
+    (repo / "good.md").write_text("# good\n", encoding="utf-8")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["."],
+            "include_extensions": [".md", ".json"],
+            "exclude_patterns": ["control/**"],
+            "node_type_map": {"design": ["."]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", cwd=repo)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"] == 2
+    warnings = payload.get("warnings", [])
+    assert isinstance(warnings, list)
+    warning_paths = {str(row.get("path", "")) for row in warnings}
+    assert "bad_frontmatter.md" in warning_paths
+
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    ids = {row["id"] for row in json.loads(listed.stdout)}
+    assert "good.md" in ids
+    assert "broken.json" in ids
+
+
 def test_new_rejects_task_dir_outside_repo_from_config(tmp_path: Path) -> None:
     repo = tmp_path / "task_dir_outside_repo"
     repo.mkdir()
@@ -179,7 +393,7 @@ def test_scan_rejects_scan_root_outside_repo_from_config(tmp_path: Path) -> None
     assert result.returncode == 2
     payload = json.loads(result.stderr)
     assert payload["error"] == "scan failed"
-    assert "scan_root must stay within repo" in payload["detail"]
+    assert "scan_roots must stay within repo" in payload["detail"]
 
 
 def test_scan_skips_outside_symlink_target(tmp_path: Path) -> None:

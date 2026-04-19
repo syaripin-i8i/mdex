@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,9 @@ SCHEMA_DIR = PROJECT_ROOT / "schemas"
 
 
 def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    merged_env = os.environ.copy()
+    existing_pythonpath = merged_env.get("PYTHONPATH", "")
+    merged_env["PYTHONPATH"] = str(PROJECT_ROOT) if not existing_pythonpath else f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
     return subprocess.run(
         [sys.executable, "-m", "runtime.cli", *args],
         cwd=cwd,
@@ -21,6 +25,7 @@ def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         encoding="utf-8",
         check=False,
         stdin=subprocess.DEVNULL,
+        env=merged_env,
     )
 
 

@@ -14,6 +14,8 @@ relates_to:
 
 # Phase A AI導線 詳細設計
 
+> Historical planning doc (archived). Current state and canonical contracts are in `docs/design.md`.
+
 `mdex` を「呼べば役立つ補助ツール」から、「作業開始と作業終了で自然に通る入口/出口」へ寄せるための詳細設計。
 この文書は 2026-04-13 時点では実装計画であり、実装本体は未着手。
 

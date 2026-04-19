@@ -105,7 +105,7 @@ mdex finish --task "<task>" --db <db> --summary-file ./summary.txt --scan
 | changed files already exist | `mdex impact` | 影響範囲を changed files 起点で見る |
 | close a task | `mdex finish --dry-run` | 出口を先に確認する |
 | apply a summary | `mdex finish --summary-file ... --scan` | summary が実在するときだけ反映する |
-| update `updated` metadata | `mdex stamp <node-id>` | indexed node id のみ。scan_root 外は拒否 |
+| update `updated` metadata | `mdex stamp <node-id>` | indexed node id のみ。scan_roots の包含外は拒否 |
 
 ## 再現サンプル（fixtures/quality_repo）
 
@@ -246,7 +246,7 @@ read order と source of truth は同義ではありません。
 | input note contract | `docs/convention.md` |
 | schema versioning policy | `docs/schema_versioning.md` |
 
-`docs/phase_a_agent_flow.md` は背景設計の詳細であり、入口契約の正本ではありません。
+`docs/archive/phase_a_agent_flow.md` は historical planning doc であり、入口契約の正本ではありません。
 
 ## License
 
@@ -262,6 +262,7 @@ read order と source of truth は同義ではありません。
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 - Support matrix: [docs/support_matrix.md](docs/support_matrix.md)
+- Release process: [docs/release_process.md](docs/release_process.md)
 
 ## Setup
 
@@ -274,6 +275,19 @@ python -m pip install -e ".[dev]"
 依存: Python 3.10+, PyYAML
 
 `pip install mdex-cli` は PyPI 公開後の利用を想定した手順です。`pip install -e .` は開発用のローカル編集モードです。
+
+ロック依存で開発環境を再現する場合:
+
+```bash
+python -m pip install --upgrade pip
+python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
+```
+
+`pylock.toml` 更新:
+
+```bash
+python -m pip lock -e ".[dev]" -o pylock.toml
+```
 
 ## Privacy Note
 

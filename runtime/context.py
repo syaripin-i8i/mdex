@@ -7,7 +7,6 @@ from typing import Any
 from runtime.reader import read_node_text
 from runtime.resolver import prerequisite_order, related_nodes
 from runtime.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
-from runtime.tokens import estimate_tokens
 
 KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"']+")
 
@@ -163,13 +162,19 @@ def _type_status_breakdown(node: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def _estimated_tokens_for_node(node: dict[str, Any], scan_root: str) -> tuple[int, str]:
-    node_id = str(node.get("id", ""))
+def _estimated_tokens_for_node(node: dict[str, Any]) -> int:
+    value = int(node.get("estimated_tokens", 0) or 0)
+    if value > 0:
+        return value
+    fallback = str(node.get("summary", "")) or str(node.get("title", ""))
+    return max(1, len(fallback) // 4)
+
+
+def _load_node_content(node_id: str, scan_root: str, summary_fallback: str) -> str:
     try:
-        text = read_node_text(scan_root, node_id)
+        return read_node_text(scan_root, node_id)
     except FileNotFoundError:
-        text = str(node.get("summary", "")) or str(node.get("title", ""))
-    return estimate_tokens(text), text
+        return summary_fallback
 
 
 def _node_meta_map(db_path: str) -> dict[str, dict[str, Any]]:
@@ -373,6 +378,8 @@ def select_context(
     safe_limit = _coerce_positive_int(limit, 10)
     safe_budget = _coerce_positive_int(budget, 4000)
 
+    all_nodes = list_nodes(db_path)
+    all_node_map = {str(node.get("id", "")).strip(): node for node in all_nodes if str(node.get("id", "")).strip()}
     candidate_map: dict[str, dict[str, Any]] = {}
     for index, keyword in enumerate(keywords):
         search_limit = max(PRIMARY_KEYWORD_SEARCH_FLOOR, safe_limit * PRIMARY_KEYWORD_SEARCH_MULTIPLIER)
@@ -381,7 +388,7 @@ def select_context(
                 SECONDARY_KEYWORD_SEARCH_FLOOR,
                 safe_limit * SECONDARY_KEYWORD_SEARCH_MULTIPLIER,
             )
-        for node in search_nodes(db_path, keyword, limit=search_limit):
+        for node in search_nodes(db_path, keyword, limit=search_limit, nodes=all_nodes):
             node_id = str(node.get("id", "")).strip()
             if node_id:
                 candidate_map[node_id] = node
@@ -400,8 +407,6 @@ def select_context(
         }
 
     seed_ids = sorted(candidate_map.keys())
-    node_map = {str(node.get("id", "")): node for node in list_nodes(db_path)}
-
     graph_boost: dict[str, float] = {}
     linked_ids: set[str] = set(seed_ids)
     for edge in list_edges_for_nodes(db_path, seed_ids, resolved_only=True):
@@ -419,8 +424,8 @@ def select_context(
             linked_ids.add(src)
 
     for linked_id in linked_ids:
-        if linked_id in node_map:
-            candidate_map[linked_id] = node_map[linked_id]
+        if linked_id in all_node_map:
+            candidate_map[linked_id] = all_node_map[linked_id]
 
     scored_rows: list[tuple[float, str, dict[str, Any], dict[str, Any]]] = []
     for node_id, node in candidate_map.items():
@@ -454,7 +459,7 @@ def select_context(
         if len(selected_nodes) >= safe_limit:
             break
 
-        estimated_tokens, content_text = _estimated_tokens_for_node(node, scan_root)
+        estimated_tokens = _estimated_tokens_for_node(node)
         projected = total_tokens + estimated_tokens
 
         if selected_nodes and projected > soft_cap:
@@ -474,7 +479,8 @@ def select_context(
             "estimated_tokens": estimated_tokens,
         }
         if include_content:
-            row["content"] = content_text
+            summary_fallback = str(node.get("summary", "")) or str(node.get("title", ""))
+            row["content"] = _load_node_content(node_id, scan_root, summary_fallback)
         selected_nodes.append(row)
         total_tokens = projected
 
@@ -487,7 +493,7 @@ def select_context(
     if not actionable:
         return payload
 
-    node_map = _node_meta_map(db_path)
+    node_map = all_node_map
     read_order = _read_order(selected_nodes, db_path, node_map)
     read_order_ids = {str(item.get("id", "")).strip() for item in read_order}
     deferred = _deferred_nodes(selected_nodes, db_path, read_order_ids)

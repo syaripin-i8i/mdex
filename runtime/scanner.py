@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 DEFAULT_INDEX_EXTENSIONS = (".md", ".json", ".jsonl")
 
@@ -61,28 +62,48 @@ def _normalize_extensions(include_extensions: Iterable[str] | None) -> tuple[str
 
 
 def list_indexable_files(
-    root: str,
+    root: str | Path | Iterable[str | Path],
     include_extensions: Iterable[str] | None = None,
     exclude_patterns: list[str] | None = None,
-) -> list[str]:
-    root_path = Path(root).resolve()
+) -> list[Path]:
     patterns = exclude_patterns or []
     allowed_extensions = set(_normalize_extensions(include_extensions))
 
-    indexed_files: list[str] = []
-    for file_path in root_path.rglob("*"):
-        if file_path.is_symlink():
+    raw_roots: list[Any]
+    if isinstance(root, (str, Path)):
+        raw_roots = [root]
+    else:
+        raw_roots = list(root)
+
+    roots: list[Path] = []
+    seen_roots = set()
+    for raw in raw_roots:
+        path = Path(raw).resolve()
+        key = path.as_posix().lower()
+        if key in seen_roots:
             continue
-        if not file_path.is_file():
-            continue
-        if file_path.suffix.lower() not in allowed_extensions:
-            continue
-        relative = _to_posix(str(file_path.relative_to(root_path)))
-        if _is_excluded(relative, patterns):
-            continue
-        indexed_files.append(relative)
-    return sorted(indexed_files)
+        seen_roots.add(key)
+        roots.append(path)
+
+    indexed_files: list[Path] = []
+    for root_path in roots:
+        for file_path in root_path.rglob("*"):
+            if file_path.is_symlink():
+                continue
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in allowed_extensions:
+                continue
+            relative = _to_posix(str(file_path.relative_to(root_path)))
+            if _is_excluded(relative, patterns):
+                continue
+            resolved = file_path.resolve()
+            indexed_files.append(resolved)
+    return sorted(indexed_files, key=lambda item: item.as_posix())
 
 
-def list_markdown_files(root: str, exclude_patterns: list[str] | None = None) -> list[str]:
+def list_markdown_files(
+    root: str | Path | Iterable[str | Path],
+    exclude_patterns: list[str] | None = None,
+) -> list[Path]:
     return list_indexable_files(root, include_extensions=[".md"], exclude_patterns=exclude_patterns)

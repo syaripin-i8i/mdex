@@ -10,6 +10,7 @@ updated: 2026-04-19
 ## Scope
 
 - この文書は architecture / persistence / command responsibility / schema の正本です
+- historical planning doc は `docs/archive/` に隔離し、現行仕様はこの文書を正本として扱います
 - workflow contract は `README.md` を参照してください
 - execution heuristics は `AGENT.md` を参照してください
 - input note contract は `docs/convention.md` を参照してください
@@ -50,6 +51,13 @@ index_metadata
 5. `mdex_index.db`
 
 失敗時は `resolution_attempts` を含む JSON エラーを返す。
+
+## Scan Config Contract
+
+- `scan` は `scan_roots` (array) を正式サポートします
+- `scan_root` (string) は後方互換 alias として扱います
+- `scan_roots` と `scan_root` が同時にある場合は `scan_roots` を優先し、warning を返します
+- 複数 root で同一 `node_id` が衝突した場合は fail-closed で `scan` を失敗させます
 
 ## モジュール責務
 
@@ -159,5 +167,5 @@ runtime/
 
 ## 参照
 
-- Phase A 詳細: `docs/phase_a_agent_flow.md`
+- Phase A 詳細（historical planning）: `docs/archive/phase_a_agent_flow.md`
 - 記録規約: `docs/convention.md`

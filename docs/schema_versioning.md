@@ -52,3 +52,7 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - Breaking changes are announced in `CHANGELOG.md` under an explicit breaking-change note.
 - Deprecations are announced in `CHANGELOG.md` before removal.
 - README links remain the entry point for schema location and policy reference.
+
+## Recent Minor Additions
+
+- `scan.schema.json` adds optional `warnings` for per-file parse failures in non-strict scan mode.
