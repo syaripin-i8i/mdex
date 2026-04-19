@@ -3,10 +3,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from runtime.builder import build_index
-from runtime.enrich import enrich_node
-from runtime.indexer import write_sqlite
-from runtime.store import get_node
+from mdex.builder import build_index
+from mdex.enrich import enrich_node
+from mdex.indexer import write_sqlite
+from mdex.store import get_node
 
 
 def _build_db(root: Path, config: dict[str, object], db_path: Path) -> None:

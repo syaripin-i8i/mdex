@@ -6,24 +6,24 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from runtime.builder import build_index
-from runtime.context import select_context
-from runtime.dbresolve import (
+from mdex.builder import build_index
+from mdex.context import select_context
+from mdex.dbresolve import (
     DbResolutionError,
     load_runtime_context,
     resolve_db_path,
     resolve_scan_config_path,
     resolve_scan_roots,
 )
-from runtime.enrich import enrich_node, resolve_node_id
-from runtime.finish import FinishError, run_finish
-from runtime.gittools import GitError, collect_changed_files
-from runtime.impact import build_impact_report
-from runtime.indexer import write_json, write_sqlite
-from runtime.reader import NodePathError, read_node_text, validate_node_id
-from runtime.scaffold import create_decision_file, create_task_file, stamp_updated
-from runtime.start import build_start_payload
-from runtime.store import (
+from mdex.enrich import enrich_node, resolve_node_id
+from mdex.finish import FinishError, run_finish
+from mdex.gittools import GitError, collect_changed_files
+from mdex.impact import build_impact_report
+from mdex.indexer import write_json, write_sqlite
+from mdex.reader import NodePathError, read_node_text, validate_node_id
+from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
+from mdex.start import build_start_payload
+from mdex.store import (
     get_node,
     get_scan_root,
     list_edges,
@@ -333,7 +333,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
 
 
 def _cmd_related(args: argparse.Namespace) -> int:
-    from runtime.resolver import related_nodes
+    from mdex.resolver import related_nodes
 
     db_info = _resolve_db(args, must_exist=True)
     if db_info is None:
@@ -355,7 +355,7 @@ def _cmd_related(args: argparse.Namespace) -> int:
 
 
 def _cmd_first(args: argparse.Namespace) -> int:
-    from runtime.resolver import prerequisite_order
+    from mdex.resolver import prerequisite_order
 
     db_info = _resolve_db(args, must_exist=True)
     if db_info is None:

@@ -20,6 +20,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Internal Python package namespace moved from top-level `runtime` to `mdex` to avoid cross-project import shadowing (`mdex` CLI behavior unchanged).
 - `scan` now rejects cross-root `node_id` collisions (fail-closed).
 - `write_sqlite` is now transactional (rollback on failure, `node_overrides` preserved).
 - `context` skips source file reads when `include_content=False`.

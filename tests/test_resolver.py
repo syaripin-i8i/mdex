@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from runtime.builder import build_index
-from runtime.enrich import enrich_node
-from runtime.indexer import write_sqlite
-from runtime.resolver import prerequisite_order, related_nodes
+from mdex.builder import build_index
+from mdex.enrich import enrich_node
+from mdex.indexer import write_sqlite
+from mdex.resolver import prerequisite_order, related_nodes
 
 
 def _build_db(root: Path, config: dict[str, object], db_path: Path) -> None:

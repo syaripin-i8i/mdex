@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from runtime.builder import build_index
-from runtime.indexer import write_sqlite
-from runtime.store import get_node
+from mdex.builder import build_index
+from mdex.indexer import write_sqlite
+from mdex.store import get_node
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,7 @@ def _run_cli(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subpro
     if env:
         merged_env.update(env)
     return subprocess.run(
-        [sys.executable, "-m", "runtime.cli", *args],
+        [sys.executable, "-m", "mdex.cli", *args],
         cwd=cwd,
         capture_output=True,
         text=True,

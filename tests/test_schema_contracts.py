@@ -18,7 +18,7 @@ def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     existing_pythonpath = merged_env.get("PYTHONPATH", "")
     merged_env["PYTHONPATH"] = str(PROJECT_ROOT) if not existing_pythonpath else f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
     return subprocess.run(
-        [sys.executable, "-m", "runtime.cli", *args],
+        [sys.executable, "-m", "mdex.cli", *args],
         cwd=cwd,
         capture_output=True,
         text=True,

@@ -4,7 +4,7 @@ import re
 from collections import deque
 from typing import Any
 
-from runtime.store import get_node, list_edges, list_nodes
+from mdex.store import get_node, list_edges, list_nodes
 
 
 OUTGOING_WEIGHTS = {

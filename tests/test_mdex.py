@@ -6,10 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from runtime.builder import build_index
-from runtime.indexer import write_sqlite
-from runtime.parser import parse_file
-from runtime.resolver import prerequisite_order, related_nodes
+from mdex.builder import build_index
+from mdex.indexer import write_sqlite
+from mdex.parser import parse_file
+from mdex.resolver import prerequisite_order, related_nodes
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +40,7 @@ def _run_cli(*args: str, cwd: Path = PROJECT_ROOT) -> subprocess.CompletedProces
     existing_pythonpath = merged_env.get("PYTHONPATH", "")
     merged_env["PYTHONPATH"] = str(PROJECT_ROOT) if not existing_pythonpath else f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
     return subprocess.run(
-        [sys.executable, "-m", "runtime.cli", *args],
+        [sys.executable, "-m", "mdex.cli", *args],
         cwd=cwd,
         capture_output=True,
         text=True,

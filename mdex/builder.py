@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from runtime.parser import parse_file
-from runtime.scanner import DEFAULT_INDEX_EXTENSIONS, list_indexable_files
+from mdex.parser import parse_file
+from mdex.scanner import DEFAULT_INDEX_EXTENSIONS, list_indexable_files
 
 
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://")

@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from runtime.builder import build_index
-from runtime.enrich import enrich_node
-from runtime import indexer
-from runtime.indexer import write_sqlite
-from runtime.store import list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes, update_node_summary
+from mdex.builder import build_index
+from mdex.enrich import enrich_node
+from mdex import indexer
+from mdex.indexer import write_sqlite
+from mdex.store import list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes, update_node_summary
 
 
 def _build_quality_db(quality_repo: Path, quality_config: dict[str, object], db_path: Path) -> None:

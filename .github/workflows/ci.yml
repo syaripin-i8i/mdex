@@ -33,7 +33,7 @@ jobs:
           python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
 
       - name: Run tests with coverage gate
-        run: python -m pytest -q --cov=runtime --cov-report=term --cov-fail-under=40
+        run: python -m pytest -q --cov=mdex --cov-report=term --cov-fail-under=40
 
   build-smoke:
     name: build smoke (ubuntu, py3.12)

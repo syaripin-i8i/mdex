@@ -4,9 +4,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from runtime.reader import read_node_text
-from runtime.resolver import prerequisite_order, related_nodes
-from runtime.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
+from mdex.reader import read_node_text
+from mdex.resolver import prerequisite_order, related_nodes
+from mdex.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
 
 KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"']+")
 

@@ -33,10 +33,10 @@ dev = [
 ]
 
 [project.scripts]
-mdex = "runtime.cli:main"
+mdex = "mdex.cli:main"
 
 [tool.setuptools]
-packages = ["runtime"]
+packages = ["mdex"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from runtime.tokens import estimate_tokens
+from mdex.tokens import estimate_tokens
 
 FRONTMATTER_BOUNDARY_RE = re.compile(r"^\s*---\s*$")
 H1_RE = re.compile(r"^#\s+(.+?)\s*$")

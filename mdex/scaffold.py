@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from runtime.dbresolve import RuntimeContext, resolve_decision_dir, resolve_task_dir
-from runtime.reader import NodePathError, validate_node_id
-from runtime.store import get_node, get_scan_root
+from mdex.dbresolve import RuntimeContext, resolve_decision_dir, resolve_task_dir
+from mdex.reader import NodePathError, validate_node_id
+from mdex.store import get_node, get_scan_root
 
 FRONTMATTER_BOUNDARY = "---"
 UPDATED_RE = re.compile(r"^updated\s*:\s*.+$", re.IGNORECASE)

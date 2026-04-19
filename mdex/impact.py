@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from runtime.store import list_nodes, list_stale_nodes
+from mdex.store import list_nodes, list_stale_nodes
 
 
 @dataclass

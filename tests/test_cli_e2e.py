@@ -17,7 +17,7 @@ def _run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.Comple
     if env:
         merged_env.update(env)
     return subprocess.run(
-        [sys.executable, "-m", "runtime.cli", *args],
+        [sys.executable, "-m", "mdex.cli", *args],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,

@@ -22,7 +22,7 @@ AI エージェントが作業開始 (`start`) と作業終了 (`finish`) を定
 
 ## 設計原則
 
-1. CLI は薄く、ロジックは `runtime/` へ分離する。
+1. CLI は薄く、ロジックは `mdex/` へ分離する。
 2. 全コマンドは JSON を返す（成功: stdout / 失敗: stderr）。
 3. SQLite を正本とし、`node_overrides` を scan と分離して保持する。
 4. 入口 (`start`) と出口 (`finish`) を最優先で安定化する。
@@ -62,7 +62,7 @@ index_metadata
 ## モジュール責務
 
 ```
-runtime/
+mdex/
   cli.py         コマンド入口
   dbresolve.py   repo/config/db 解決
   scanner.py     対象ファイル列挙

@@ -4,13 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from runtime.builder import build_index
-from runtime.dbresolve import RuntimeContext, resolve_scan_config_path, resolve_scan_roots
-from runtime.enrich import enrich_node
-from runtime.gittools import GitError, collect_changed_files
-from runtime.impact import build_impact_report
-from runtime.indexer import write_sqlite
-from runtime.store import get_node, list_nodes
+from mdex.builder import build_index
+from mdex.dbresolve import RuntimeContext, resolve_scan_config_path, resolve_scan_roots
+from mdex.enrich import enrich_node
+from mdex.gittools import GitError, collect_changed_files
+from mdex.impact import build_impact_report
+from mdex.indexer import write_sqlite
+from mdex.store import get_node, list_nodes
 
 
 class FinishError(RuntimeError):

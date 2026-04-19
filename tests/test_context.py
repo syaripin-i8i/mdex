@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from runtime.builder import build_index
-from runtime.context import select_context
-from runtime.indexer import write_sqlite
+from mdex.builder import build_index
+from mdex.context import select_context
+from mdex.indexer import write_sqlite
 
 
 def _build_db(root: Path, config: dict[str, object], db_path: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from runtime.store import get_node, resolve_node_id_from_path, update_node_summary
+from mdex.store import get_node, resolve_node_id_from_path, update_node_summary
 
 def resolve_node_id(node_or_path: str, db_path: str, *, path_mode: bool = False) -> str | None:
     if path_mode:
