@@ -3,6 +3,7 @@
 `AGENT.md` は実行時の判断規則だけを置くファイルです。  
 `README.md` は workflow contract の短縮版で、このファイルが execution heuristics の正本です。  
 役割説明や詳細仕様は `README.md` / `docs/design.md` / `docs/convention.md` を読んでください。
+本プロジェクトのライセンスは Apache-2.0 です（`LICENSE` / `NOTICE`）。
 
 ## If-Then Rules
 

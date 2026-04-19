@@ -20,7 +20,7 @@ from runtime.finish import FinishError, run_finish
 from runtime.gittools import GitError, collect_changed_files
 from runtime.impact import build_impact_report
 from runtime.indexer import write_json, write_sqlite
-from runtime.reader import read_node_text
+from runtime.reader import NodePathError, read_node_text, validate_node_id
 from runtime.scaffold import create_decision_file, create_task_file, stamp_updated
 from runtime.start import build_start_payload
 from runtime.store import (
@@ -173,12 +173,25 @@ def _cmd_open(args: argparse.Namespace) -> int:
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
+    node_id = str(args.node or "").strip().replace("\\", "/")
+    try:
+        validate_node_id(node_id)
+    except NodePathError as exc:
+        _emit_error(exc.error, node_id=exc.node_id, detail=exc.detail)
+        return 2
+
+    if get_node(db_path, node_id) is None:
+        _emit_error("node not indexed", node_id=node_id)
+        return 2
     root = get_scan_root(db_path, default=args.root)
 
     try:
-        text = read_node_text(root, args.node)
+        text = read_node_text(root, node_id)
+    except NodePathError as exc:
+        _emit_error(exc.error, node_id=exc.node_id, detail=exc.detail)
+        return 2
     except FileNotFoundError:
-        _emit_error("node file not found", node_id=args.node)
+        _emit_error("node file not found", node_id=node_id)
         return 2
 
     if text.endswith("\n"):
@@ -570,26 +583,11 @@ def _cmd_new(args: argparse.Namespace) -> int:
     return 0
 
 
-def _target_exists_as_path(target: str) -> bool:
-    candidate = Path(target)
-    if candidate.is_absolute():
-        return candidate.exists() and candidate.is_file()
-    return (Path.cwd() / candidate).exists()
-
-
 def _cmd_stamp(args: argparse.Namespace) -> int:
-    db_path: str | None = None
-    try:
-        db_info = resolve_db_path(args.db, cwd=Path.cwd(), must_exist=True)
-        db_path = str(Path(str(db_info["path"])))
-    except DbResolutionError as exc:
-        if not _target_exists_as_path(args.target):
-            _emit_payload(exc.payload, stderr=True)
-            return 2
-    except Exception as exc:
-        if not _target_exists_as_path(args.target):
-            _emit_error("db resolution failed", detail=str(exc))
-            return 2
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
 
     result = stamp_updated(args.target, db_path=db_path)
     if result.get("status") == "error":
@@ -728,8 +726,8 @@ def _build_parser() -> argparse.ArgumentParser:
     new_decision.add_argument("title", help="Decision title")
     new_decision.set_defaults(func=_cmd_new, kind="decision")
 
-    stamp_parser = subparsers.add_parser("stamp", help="Update frontmatter updated date for node/path")
-    stamp_parser.add_argument("target", help="Node id or path")
+    stamp_parser = subparsers.add_parser("stamp", help="Update frontmatter updated date for an indexed node id")
+    stamp_parser.add_argument("target", help="Indexed node id")
     stamp_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     stamp_parser.set_defaults(func=_cmd_stamp)
 

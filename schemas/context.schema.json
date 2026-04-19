@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/context.schema.json",
+  "title": "mdex context output",
+  "description": "Contract for mdex context JSON output",
+  "type": "object",
+  "required": [
+    "query",
+    "nodes",
+    "total_tokens",
+    "budget"
+  ],
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/contextNode"
+      }
+    },
+    "total_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "budget": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "recommended_read_order": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/readOrderItem"
+      }
+    },
+    "recommended_next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deferred_nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/deferredItem"
+      }
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "why_this_set": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "readOrderItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "priority",
+        "source",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "deferredItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "contextNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "priority",
+        "score",
+        "score_breakdown",
+        "estimated_tokens"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "score": {
+          "type": "number"
+        },
+        "score_breakdown": {
+          "type": "object"
+        },
+        "estimated_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

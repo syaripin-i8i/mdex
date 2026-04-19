@@ -3,24 +3,63 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def _candidate_paths(root: Path, node_id: str) -> list[Path]:
-    target = Path(node_id)
-    candidates: list[Path] = []
+class NodePathError(ValueError):
+    def __init__(self, *, error: str, detail: str, node_id: str) -> None:
+        super().__init__(detail)
+        self.error = error
+        self.detail = detail
+        self.node_id = node_id
 
+
+def _normalize_node_id(node_id: str) -> str:
+    return str(node_id or "").strip().replace("\\", "/")
+
+
+def validate_node_id(node_id: str) -> Path:
+    normalized = _normalize_node_id(node_id)
+    if not normalized:
+        raise NodePathError(
+            error="invalid node id",
+            detail="node id is required",
+            node_id=normalized,
+        )
+
+    target = Path(normalized)
     if target.is_absolute():
-        candidates.append(target)
-    else:
-        candidates.append((root / target).resolve())
-        candidates.append((Path.cwd() / target).resolve())
+        raise NodePathError(
+            error="invalid node id",
+            detail="absolute paths are not allowed",
+            node_id=normalized,
+        )
 
-    return candidates
+    if any(part == ".." for part in target.parts):
+        raise NodePathError(
+            error="invalid node id",
+            detail="path traversal ('..') is not allowed",
+            node_id=normalized,
+        )
+    return target
+
+
+def _resolve_in_scan_root(root: Path, target: Path, *, node_id: str) -> Path:
+    candidate = (root / target).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise NodePathError(
+            error="path containment violation",
+            detail="resolved path escapes scan_root",
+            node_id=node_id,
+        ) from exc
+    return candidate
 
 
 def resolve_node_path(root: str, node_id: str) -> Path | None:
     root_path = Path(root).resolve()
-    for candidate in _candidate_paths(root_path, node_id):
-        if candidate.exists() and candidate.is_file():
-            return candidate
+    target = validate_node_id(node_id)
+    candidate = _resolve_in_scan_root(root_path, target, node_id=_normalize_node_id(node_id))
+    if candidate.exists() and candidate.is_file():
+        return candidate
     return None
 
 

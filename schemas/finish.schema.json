@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/finish.schema.json",
+  "title": "mdex finish output",
+  "description": "Contract for mdex finish JSON output",
+  "type": "object",
+  "required": [
+    "task",
+    "dry_run",
+    "db",
+    "changed_files",
+    "impact",
+    "enrich_candidates",
+    "applied_enrichments",
+    "scan",
+    "recommended_next_actions",
+    "requires_manual_targeting"
+  ],
+  "properties": {
+    "task": {
+      "type": "string"
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "db": {
+      "type": "object",
+      "required": [
+        "path",
+        "source"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/changedFileItem"
+      }
+    },
+    "impact": {
+      "type": "object",
+      "required": [
+        "inputs",
+        "read_first",
+        "related_tasks",
+        "decision_records",
+        "stale_watch"
+      ],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "read_first": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        },
+        "related_tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        },
+        "decision_records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        },
+        "stale_watch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "enrich_candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/enrichCandidate"
+      }
+    },
+    "applied_enrichments": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "scan": {
+      "type": "object",
+      "required": [
+        "requested",
+        "ran"
+      ],
+      "properties": {
+        "requested": {
+          "type": "boolean"
+        },
+        "ran": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "recommended_next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requires_manual_targeting": {
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "changedFileItem": {
+      "type": "object",
+      "required": [
+        "path",
+        "source"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "impactItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "reason",
+        "score"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "enrichCandidate": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "reason",
+        "score"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "secondary"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

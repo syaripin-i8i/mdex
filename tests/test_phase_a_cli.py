@@ -371,7 +371,15 @@ def test_new_task_decision_and_stamp_path(tmp_path: Path) -> None:
 
     note = repo / "note.md"
     note.write_text("# note\n", encoding="utf-8")
-    stamped = _run_cli("stamp", str(note.resolve()), cwd=repo)
+    scan_config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"], "decision": ["decision"]},
+        "summary_max_sentences": 2,
+        "summary_max_chars": 120,
+    }
+    _build_db(repo, scan_config, repo / "mdex_index.db")
+    stamped = _run_cli("stamp", "note.md", cwd=repo)
     assert stamped.returncode == 0
     stamped_text = note.read_text(encoding="utf-8")
     assert "updated: " in stamped_text
@@ -390,3 +398,99 @@ def test_stamp_node_id_resolution_uses_auto_db(
     assert stamped.returncode == 0
     after = target.read_text(encoding="utf-8")
     assert f"updated: {_today_utc()}" in after
+
+
+def test_open_rejects_non_indexed_absolute_and_parent_inputs(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+) -> None:
+    db_path = quality_repo / "mdex_index.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    absolute = _run_cli("open", str((quality_repo / "design" / "root.md").resolve()), cwd=quality_repo)
+    assert absolute.returncode == 2
+    absolute_payload = json.loads(absolute.stderr)
+    assert absolute_payload["error"] == "invalid node id"
+    assert "absolute paths are not allowed" in absolute_payload["detail"]
+
+    parent = _run_cli("open", "../outside.md", cwd=quality_repo)
+    assert parent.returncode == 2
+    parent_payload = json.loads(parent.stderr)
+    assert parent_payload["error"] == "invalid node id"
+    assert "path traversal" in parent_payload["detail"]
+
+    not_indexed = _run_cli("open", "design/no_such.md", cwd=quality_repo)
+    assert not_indexed.returncode == 2
+    not_indexed_payload = json.loads(not_indexed.stderr)
+    assert not_indexed_payload["error"] == "node not indexed"
+
+
+def test_stamp_rejects_absolute_parent_and_non_indexed_inputs(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+) -> None:
+    db_path = quality_repo / "mdex_index.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    absolute = _run_cli("stamp", str((quality_repo / "design" / "root.md").resolve()), cwd=quality_repo)
+    assert absolute.returncode == 2
+    absolute_payload = json.loads(absolute.stderr)
+    assert absolute_payload["error"] == "invalid node id"
+    assert "absolute paths are not allowed" in absolute_payload["detail"]
+
+    parent = _run_cli("stamp", "../outside.md", cwd=quality_repo)
+    assert parent.returncode == 2
+    parent_payload = json.loads(parent.stderr)
+    assert parent_payload["error"] == "invalid node id"
+    assert "path traversal" in parent_payload["detail"]
+
+    not_indexed = _run_cli("stamp", "design/no_such.md", cwd=quality_repo)
+    assert not_indexed.returncode == 2
+    not_indexed_payload = json.loads(not_indexed.stderr)
+    assert not_indexed_payload["error"] == "node not indexed"
+
+
+def test_open_and_stamp_reject_scan_root_escape_even_if_node_is_indexed(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+) -> None:
+    db_path = quality_repo / "mdex_index.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO nodes (
+                id, title, type, project, status, summary, summary_source, summary_updated,
+                tags_json, updated, links_to_json, depends_on_json, relates_to_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "escape/../../outside.md",
+                "escape",
+                "design",
+                "quality",
+                "active",
+                "escape",
+                "seed",
+                "2026-01-01",
+                "[]",
+                "2026-01-01",
+                "[]",
+                "[]",
+                "[]",
+            ),
+        )
+        conn.commit()
+
+    opened = _run_cli("open", "escape/../../outside.md", cwd=quality_repo)
+    assert opened.returncode == 2
+    open_payload = json.loads(opened.stderr)
+    assert open_payload["error"] == "invalid node id"
+    assert "path traversal" in open_payload["detail"]
+
+    stamped = _run_cli("stamp", "escape/../../outside.md", cwd=quality_repo)
+    assert stamped.returncode == 2
+    stamp_payload = json.loads(stamped.stderr)
+    assert stamp_payload["error"] == "invalid node id"
+    assert "path traversal" in stamp_payload["detail"]

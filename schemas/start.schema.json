@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/start.schema.json",
+  "title": "mdex start output",
+  "description": "Contract for mdex start JSON output",
+  "type": "object",
+  "required": [
+    "task",
+    "db",
+    "index_status",
+    "recommended_read_order",
+    "recommended_next_actions",
+    "deferred_nodes",
+    "confidence",
+    "why_this_set",
+    "total_tokens",
+    "budget",
+    "nodes"
+  ],
+  "properties": {
+    "task": {
+      "type": "string"
+    },
+    "db": {
+      "type": "object",
+      "required": [
+        "path",
+        "source"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "index_status": {
+      "type": "object",
+      "required": [
+        "ready",
+        "generated"
+      ],
+      "properties": {
+        "ready": {
+          "type": "boolean"
+        },
+        "generated": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "recommended_read_order": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/readOrderItem"
+      }
+    },
+    "recommended_next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deferred_nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/deferredItem"
+      }
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "why_this_set": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "total_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "budget": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/contextNode"
+      }
+    }
+  },
+  "$defs": {
+    "readOrderItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "priority",
+        "source",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "deferredItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "contextNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "priority",
+        "score",
+        "score_breakdown",
+        "estimated_tokens"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "score": {
+          "type": "number"
+        },
+        "score_breakdown": {
+          "type": "object"
+        },
+        "estimated_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

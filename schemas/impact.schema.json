@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/impact.schema.json",
+  "title": "mdex impact output",
+  "description": "Contract for mdex impact JSON output",
+  "type": "object",
+  "required": [
+    "inputs",
+    "read_first",
+    "related_tasks",
+    "decision_records",
+    "stale_watch"
+  ],
+  "properties": {
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "read_first": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "related_tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "decision_records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "stale_watch": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    }
+  },
+  "$defs": {
+    "impactItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "reason",
+        "score"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

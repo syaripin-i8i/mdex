@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from runtime.dbresolve import RuntimeContext, resolve_decision_dir, resolve_task_dir
-from runtime.store import get_scan_root
+from runtime.reader import NodePathError, validate_node_id
+from runtime.store import get_node, get_scan_root
 
 FRONTMATTER_BOUNDARY = "---"
 UPDATED_RE = re.compile(r"^updated\s*:\s*.+$", re.IGNORECASE)
@@ -137,29 +138,84 @@ def _update_frontmatter_updated(text: str, today: str) -> str:
     return f"---\nupdated: {today}\n---{body}\n"
 
 
-def _resolve_stamp_path(target: str, db_path: str | None) -> Path | None:
-    candidate = Path(target)
-    if candidate.is_absolute():
-        if candidate.exists() and candidate.is_file():
-            return candidate.resolve()
-        return None
+class StampTargetError(ValueError):
+    def __init__(
+        self,
+        *,
+        error: str,
+        detail: str,
+        target: str,
+        node_id: str | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.error = error
+        self.detail = detail
+        self.target = target
+        self.node_id = node_id
 
-    relative = (Path.cwd() / candidate).resolve()
-    if relative.exists() and relative.is_file():
-        return relative
 
-    if db_path:
-        scan_root = Path(get_scan_root(db_path, default=".")).resolve()
-        node_path = (scan_root / candidate).resolve()
-        if node_path.exists() and node_path.is_file():
-            return node_path
-    return None
+def _resolve_stamp_path(target: str, db_path: str | None) -> tuple[Path, str]:
+    if not db_path:
+        raise StampTargetError(
+            error="db required",
+            detail="stamp requires an index database",
+            target=target,
+        )
+
+    normalized = str(target or "").strip().replace("\\", "/")
+    try:
+        relative_node = validate_node_id(normalized)
+    except NodePathError as exc:
+        raise StampTargetError(
+            error=exc.error,
+            detail=exc.detail,
+            target=target,
+            node_id=exc.node_id,
+        ) from exc
+
+    if get_node(db_path, normalized) is None:
+        raise StampTargetError(
+            error="node not indexed",
+            detail="stamp accepts only indexed node ids",
+            target=target,
+            node_id=normalized,
+        )
+
+    scan_root = Path(get_scan_root(db_path, default=".")).resolve()
+    node_path = (scan_root / relative_node).resolve()
+    try:
+        node_path.relative_to(scan_root)
+    except ValueError as exc:
+        raise StampTargetError(
+            error="path containment violation",
+            detail="resolved path escapes scan_root",
+            target=target,
+            node_id=normalized,
+        ) from exc
+
+    if not node_path.exists() or not node_path.is_file():
+        raise StampTargetError(
+            error="node file not found",
+            detail="indexed node does not resolve to an existing file under scan_root",
+            target=target,
+            node_id=normalized,
+        )
+    return node_path, normalized
 
 
 def stamp_updated(target: str, *, db_path: str | None = None) -> dict[str, Any]:
-    resolved = _resolve_stamp_path(target, db_path)
-    if resolved is None:
-        return {"status": "error", "error": "node file not found", "target": target}
+    try:
+        resolved, node_id = _resolve_stamp_path(target, db_path)
+    except StampTargetError as exc:
+        payload: dict[str, Any] = {
+            "status": "error",
+            "error": exc.error,
+            "detail": exc.detail,
+            "target": exc.target,
+        }
+        if exc.node_id:
+            payload["node_id"] = exc.node_id
+        return payload
 
     today = _utc_today()
     original = resolved.read_text(encoding="utf-8")
@@ -167,6 +223,7 @@ def stamp_updated(target: str, *, db_path: str | None = None) -> dict[str, Any]:
     resolved.write_text(updated, encoding="utf-8")
     return {
         "status": "stamped",
+        "node_id": node_id,
         "path": resolved.as_posix(),
         "updated": today,
     }

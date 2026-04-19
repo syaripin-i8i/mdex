@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/scan.schema.json",
+  "title": "mdex scan output",
+  "description": "Contract for mdex scan JSON output",
+  "type": "object",
+  "required": [
+    "nodes",
+    "edges",
+    "output"
+  ],
+  "properties": {
+    "nodes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "edges": {
+      "type": "object",
+      "required": [
+        "total",
+        "resolved",
+        "unresolved",
+        "resolution_rate"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolution_rate": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "json",
+        "db"
+      ],
+      "properties": {
+        "json": {
+          "type": "string",
+          "minLength": 1
+        },
+        "db": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
