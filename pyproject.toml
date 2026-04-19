@@ -9,9 +9,6 @@ description = "Markdown/JSON indexer and lightweight graph-based explorer"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-classifiers = [
-  "License :: OSI Approved :: Apache Software License",
-]
 dependencies = [
   "PyYAML>=6.0",
 ]
