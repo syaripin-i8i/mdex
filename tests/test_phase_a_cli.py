@@ -141,6 +141,76 @@ scan default output test
     assert (repo / ".mdex" / "mdex_index.json").exists()
 
 
+def test_new_rejects_task_dir_outside_repo_from_config(tmp_path: Path) -> None:
+    repo = tmp_path / "task_dir_outside_repo"
+    repo.mkdir()
+    outside_dir = tmp_path / "outside_tasks"
+    outside_dir.mkdir()
+    _write_json(
+        repo / ".mdex" / "config.json",
+        {
+            "task_dir": str(outside_dir.resolve()),
+        },
+    )
+
+    result = _run_cli("new", "task", "outside task dir", cwd=repo)
+    assert result.returncode == 2
+    payload = json.loads(result.stderr)
+    assert payload["error"] == "new failed"
+    assert "task_dir must stay within repo" in payload["detail"]
+
+
+def test_scan_rejects_scan_root_outside_repo_from_config(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_root_outside_repo"
+    repo.mkdir()
+    (repo / "inside.md").write_text("# inside\n", encoding="utf-8")
+
+    outside = tmp_path / "outside_scan_root"
+    outside.mkdir()
+    (outside / "outside.md").write_text("# outside\n", encoding="utf-8")
+    _write_json(
+        repo / ".mdex" / "config.json",
+        {
+            "scan_root": str(outside.resolve()),
+        },
+    )
+
+    result = _run_cli("scan", cwd=repo)
+    assert result.returncode == 2
+    payload = json.loads(result.stderr)
+    assert payload["error"] == "scan failed"
+    assert "scan_root must stay within repo" in payload["detail"]
+
+
+def test_scan_skips_outside_symlink_target(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_symlink_repo"
+    repo.mkdir()
+    (repo / "inside.md").write_text("# inside\n", encoding="utf-8")
+
+    outside = tmp_path / "scan_symlink_outside"
+    outside.mkdir()
+    outside_target = outside / "secret.md"
+    outside_target.write_text("# secret\n", encoding="utf-8")
+
+    link_path = repo / "linked.md"
+    try:
+        link_path.symlink_to(outside_target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation not available in this environment")
+
+    scanned = _run_cli("scan", "--root", ".", cwd=repo)
+    assert scanned.returncode == 0
+    scan_payload = json.loads(scanned.stdout)
+    assert scan_payload["nodes"] == 1
+
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    listed_payload = json.loads(listed.stdout)
+    ids = {row["id"] for row in listed_payload}
+    assert "inside.md" in ids
+    assert "linked.md" not in ids
+
+
 def test_db_resolution_prefers_dot_mdex_over_repo_fallback(
     quality_repo: Path,
     quality_config: dict[str, object],

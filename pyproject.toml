@@ -3,15 +3,24 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mdex"
+name = "mdex-cli"
 version = "0.1.0"
 description = "Markdown/JSON indexer and lightweight graph-based explorer"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
+maintainers = [
+  { name = "syaripin-i8i" },
+]
 dependencies = [
   "PyYAML>=6.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/syaripin-i8i/mdex"
+Issues = "https://github.com/syaripin-i8i/mdex/issues"
+Changelog = "https://github.com/syaripin-i8i/mdex/blob/main/CHANGELOG.md"
+Security = "https://github.com/syaripin-i8i/mdex/security/policy"
 
 [project.optional-dependencies]
 dev = [

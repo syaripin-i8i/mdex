@@ -71,6 +71,8 @@ def list_indexable_files(
 
     indexed_files: list[str] = []
     for file_path in root_path.rglob("*"):
+        if file_path.is_symlink():
+            continue
         if not file_path.is_file():
             continue
         if file_path.suffix.lower() not in allowed_extensions:

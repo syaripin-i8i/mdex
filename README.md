@@ -266,11 +266,21 @@ read order と source of truth は同義ではありません。
 ## Setup
 
 ```bash
+python -m pip install mdex-cli
 python -m pip install -e .
 python -m pip install -e ".[dev]"
 ```
 
 依存: Python 3.10+, PyYAML
+
+`pip install mdex-cli` は PyPI 公開後の利用を想定した手順です。`pip install -e .` は開発用のローカル編集モードです。
+
+## Privacy Note
+
+`scan` の生成物（`.mdex/mdex_index.json`, `.mdex/mdex_index.db`）には、scan 対象ファイルから抽出された summary が含まれます。  
+chat log や secret を含むファイルを scan 対象に入れると、その内容が index 側にも要約として残る可能性があります。  
+公開前に index を必ず確認し、必要に応じて `control/scan_config.json` の `exclude_patterns` で機微ディレクトリを除外してください。  
+この repo では `.gitignore` で `.mdex/` を除外し、生成物の追跡を避けています。
 
 ## Artifact Hygiene
 

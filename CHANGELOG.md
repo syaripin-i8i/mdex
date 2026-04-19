@@ -13,11 +13,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - JSON Schema contracts for `scan`, `start`, `context`, `impact`, and `finish`.
 - GitHub Actions CI workflow for tests, dependency audit, and dependency review.
 - Public project governance docs: security policy, contributing guide, and support matrix.
+- Privacy note for scan-generated artifacts and sensitive source handling in README.
 
 ### Changed
 
 - `open` and `stamp` now enforce indexed node-id usage with scan-root containment checks.
 - License metadata and repository licensing documents aligned to Apache-2.0.
+- Distribution package name changed to `mdex-cli` (CLI command remains `mdex`).
+- `pyproject.toml` now includes maintainer and project URLs metadata for repository operations.
+- Runtime config-derived paths are now constrained to stay inside the repository boundary.
 
 ### Security
 

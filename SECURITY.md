@@ -19,7 +19,9 @@ Please use GitHub Security Advisories (private reporting):
 2. Choose "Report a vulnerability".
 3. Include reproduction steps, affected command(s), and expected impact.
 
-If GitHub private reporting is unavailable, contact the maintainer privately and include:
+Direct link: https://github.com/syaripin-i8i/mdex/security/advisories/new
+
+If GitHub private reporting is unavailable, use X (Twitter) DM: `@syaripin_i8i`, and include:
 
 - affected version/commit
 - proof-of-concept input

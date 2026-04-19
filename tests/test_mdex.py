@@ -183,6 +183,39 @@ def test_target_resolution_and_unresolved_marking(
     assert unresolved
 
 
+def test_external_absolute_targets_are_not_added_to_edges(tmp_path: Path) -> None:
+    repo = tmp_path / "external_target_repo"
+    repo.mkdir()
+    outside = tmp_path / "outside_target.md"
+    outside.write_text("# outside\n", encoding="utf-8")
+
+    source = repo / "source.md"
+    source.write_text(
+        (
+            "---\n"
+            "links_to:\n"
+            f'  - "{outside.resolve().as_posix()}"\n'
+            "---\n"
+            "# Source\n\n"
+            "absolute external link test\n"
+        ),
+        encoding="utf-8",
+    )
+
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {},
+        "summary_max_sentences": 2,
+        "summary_max_chars": 120,
+    }
+    index = build_index(str(repo), config)
+    edges = _edges(index)
+
+    assert any(node.get("id") == "source.md" for node in index.get("nodes", []))
+    assert edges == []
+
+
 def test_query_direction_preserved(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:
     index = build_index(str(fixture_repo), build_config)
     db_path = tmp_path / "mdex_test.db"

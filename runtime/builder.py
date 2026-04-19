@@ -21,15 +21,20 @@ def _to_posix(path_value: str) -> str:
 def _node_id_for_path(file_path: Path, root_path: Path) -> str:
     resolved = file_path.resolve()
     root_resolved = root_path.resolve()
-    cwd = Path.cwd().resolve()
+    return _to_posix(str(resolved.relative_to(root_resolved)))
 
-    try:
-        return _to_posix(str(resolved.relative_to(root_resolved)))
-    except ValueError:
+
+def _resolve_indexed_files(root_path: Path, relative_files: list[str]) -> list[Path]:
+    root_resolved = root_path.resolve()
+    indexed_files: list[Path] = []
+    for relative in relative_files:
+        candidate = (root_resolved / relative).resolve()
         try:
-            return _to_posix(str(resolved.relative_to(cwd)))
+            candidate.relative_to(root_resolved)
         except ValueError:
-            return _to_posix(str(resolved))
+            continue
+        indexed_files.append(candidate)
+    return indexed_files
 
 
 def _normalize_str_list(value: Any) -> list[str]:
@@ -264,20 +269,22 @@ def _resolve_target_id(
     source_dir = source_file.parent.resolve()
     target_path = Path(target)
 
+    root_resolved = root_path.resolve()
+
     if target_path.is_absolute():
         absolute_target = target_path.resolve()
         if absolute_target in path_to_id:
             return path_to_id[absolute_target], True
         try:
-            return _to_posix(str(absolute_target.relative_to(root_path.resolve()))), False
+            return _to_posix(str(absolute_target.relative_to(root_resolved))), False
         except ValueError:
-            return _to_posix(str(target_path)), False
+            return "", False
 
     absolute_from_source = (source_dir / target_path).resolve()
     if absolute_from_source in path_to_id:
         return path_to_id[absolute_from_source], True
 
-    absolute_from_root = (root_path.resolve() / target_path).resolve()
+    absolute_from_root = (root_resolved / target_path).resolve()
     if absolute_from_root in path_to_id:
         return path_to_id[absolute_from_root], True
 
@@ -353,8 +360,14 @@ def build_index(root: str, config: dict[str, Any]) -> dict[str, Any]:
     }
 
     relative_files = list_indexable_files(str(root_path), include_extensions, exclude_patterns)
-    indexed_files = [(root_path / relative).resolve() for relative in relative_files]
-    path_to_id = {file_path: _node_id_for_path(file_path, root_path) for file_path in indexed_files}
+    indexed_files = _resolve_indexed_files(root_path, relative_files)
+    path_to_id: dict[Path, str] = {}
+    for file_path in indexed_files:
+        try:
+            path_to_id[file_path] = _node_id_for_path(file_path, root_path)
+        except ValueError:
+            continue
+    indexed_files = list(path_to_id.keys())
     stem_to_ids, name_to_ids = _build_lookup_maps(path_to_id)
 
     nodes: list[dict[str, Any]] = []

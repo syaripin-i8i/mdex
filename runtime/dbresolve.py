@@ -41,6 +41,18 @@ def _read_config(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def _ensure_within_repo(repo_root: Path, candidate: Path, *, key: str) -> Path:
+    repo_resolved = repo_root.resolve()
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(repo_resolved)
+    except ValueError as exc:
+        raise ValueError(
+            f"{key} must stay within repo: {_to_display_path(resolved)}"
+        ) from exc
+    return resolved
+
+
 def _walk_parents(start: Path) -> list[Path]:
     current = start.resolve()
     parents = [current]
@@ -72,11 +84,21 @@ def load_runtime_context(start_dir: str | Path | None = None) -> RuntimeContext:
     return RuntimeContext(repo_root=repo_root, config_path=config_path, config=config)
 
 
-def _as_path(repo_root: Path, value: str) -> Path:
+def _as_path(
+    repo_root: Path,
+    value: str,
+    *,
+    key: str,
+    allow_outside_repo: bool = False,
+) -> Path:
     candidate = Path(value)
     if candidate.is_absolute():
-        return candidate.resolve()
-    return (repo_root / candidate).resolve()
+        resolved = candidate.resolve()
+    else:
+        resolved = (repo_root / candidate).resolve()
+    if allow_outside_repo:
+        return resolved
+    return _ensure_within_repo(repo_root, resolved, key=key)
 
 
 def resolve_config_path(
@@ -87,8 +109,8 @@ def resolve_config_path(
 ) -> Path:
     raw_value = context.config.get(key)
     if isinstance(raw_value, str) and raw_value.strip():
-        return _as_path(context.repo_root, raw_value.strip())
-    return _as_path(context.repo_root, default_relative)
+        return _as_path(context.repo_root, raw_value.strip(), key=key)
+    return _as_path(context.repo_root, default_relative, key=key)
 
 
 def resolve_task_dir(context: RuntimeContext) -> Path:
@@ -98,12 +120,12 @@ def resolve_task_dir(context: RuntimeContext) -> Path:
 def resolve_decision_dir(context: RuntimeContext) -> Path:
     raw_value = context.config.get("decision_dir")
     if isinstance(raw_value, str) and raw_value.strip():
-        return _as_path(context.repo_root, raw_value.strip())
+        return _as_path(context.repo_root, raw_value.strip(), key="decision_dir")
 
-    preferred = (context.repo_root / "decision").resolve()
+    preferred = _as_path(context.repo_root, "decision", key="decision_dir")
     if preferred.exists():
         return preferred
-    alternative = (context.repo_root / "decisions").resolve()
+    alternative = _as_path(context.repo_root, "decisions", key="decision_dir")
     if alternative.exists():
         return alternative
     return preferred
@@ -124,19 +146,39 @@ def _candidate_rows(
     candidates: list[tuple[str, Path]] = []
 
     if explicit_db is not None and explicit_db.strip():
-        candidates.append(("arg", _as_path(context.repo_root, explicit_db.strip())))
+        candidates.append(
+            (
+                "arg",
+                _as_path(
+                    context.repo_root,
+                    explicit_db.strip(),
+                    key="db",
+                    allow_outside_repo=True,
+                ),
+            )
+        )
         return candidates
 
     env_db = os.environ.get("MDEX_DB", "").strip()
     if env_db:
-        candidates.append(("env", _as_path(context.repo_root, env_db)))
+        candidates.append(
+            (
+                "env",
+                _as_path(
+                    context.repo_root,
+                    env_db,
+                    key="db",
+                    allow_outside_repo=True,
+                ),
+            )
+        )
 
     config_db = context.config.get("db")
     if isinstance(config_db, str) and config_db.strip():
-        candidates.append(("config", _as_path(context.repo_root, config_db.strip())))
+        candidates.append(("config", _as_path(context.repo_root, config_db.strip(), key="db")))
 
-    candidates.append(("repo_default", _as_path(context.repo_root, DEFAULT_DB_RELATIVE)))
-    candidates.append(("repo_default", _as_path(context.repo_root, FALLBACK_DB_RELATIVE)))
+    candidates.append(("repo_default", _as_path(context.repo_root, DEFAULT_DB_RELATIVE, key="db")))
+    candidates.append(("repo_default", _as_path(context.repo_root, FALLBACK_DB_RELATIVE, key="db")))
     return candidates
 
 
@@ -203,7 +245,7 @@ def resolve_db_path(
                 "resolution_attempts": attempts,
             }
 
-    hint_db = _to_display_path(_as_path(context.repo_root, DEFAULT_DB_RELATIVE))
+    hint_db = _to_display_path(_as_path(context.repo_root, DEFAULT_DB_RELATIVE, key="db"))
     payload = {
         "error": "db not found",
         "resolution_attempts": attempts,
