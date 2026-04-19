@@ -1,0 +1,18 @@
+{
+  "include_extensions": [".json", ".jsonl"],
+  "exclude_patterns": [
+    "quarantine/**"
+  ],
+  "node_type_map": {
+    "raw_log": ["raw_logs"],
+    "session_summary": ["session_summaries"],
+    "episodic": ["episodic_memory"],
+    "fact": ["semantic_facts"],
+    "profile": ["user_profiles"],
+    "graph": ["character_graph"],
+    "self_model": ["self_model"],
+    "style": ["style_corpus"]
+  },
+  "summary_max_sentences": 3,
+  "summary_max_chars": 220
+}

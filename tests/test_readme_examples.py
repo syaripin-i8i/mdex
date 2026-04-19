@@ -17,10 +17,10 @@ def _quality_repo_section() -> str:
 def test_readme_quality_repo_commands_are_in_sync() -> None:
     section = _quality_repo_section()
     commands = [
-        "mdex scan --root tests/fixtures/quality_repo --db .tmp_quality.db",
-        'mdex start "root decision" --db .tmp_quality.db --limit 5',
-        "mdex impact design/root.md --db .tmp_quality.db",
-        'mdex finish --task "root fix" --db .tmp_quality.db --dry-run',
+        "mdex scan --root tests/fixtures/quality_repo --db .mdex/quality_example.db --output .mdex/quality_example.json",
+        'mdex start "root decision" --db .mdex/quality_example.db --limit 5',
+        "mdex impact design/root.md --db .mdex/quality_example.db",
+        'mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run',
     ]
     for command in commands:
         assert command in section

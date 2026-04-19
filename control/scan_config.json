@@ -1,9 +1,10 @@
 {
-  "scan_roots": ["<repo-root>"],
+  "scan_roots": ["."],
   "include_extensions": [".md", ".json", ".jsonl"],
   "exclude_patterns": [
     ".git/**",
     "node_modules/**",
+    ".mdex/**",
     "*.min.md",
     "mdex/**",
     "workspace/**",
@@ -24,5 +25,5 @@
   },
   "summary_max_sentences": 3,
   "summary_max_chars": 200,
-  "output_file": "mdex_index.json"
+  "output_file": ".mdex/mdex_index.json"
 }

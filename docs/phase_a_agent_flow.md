@@ -232,7 +232,7 @@ mdex start "<task>" [--db <sqlite>] [--budget <n>] [--limit <n>] [--include-cont
 {
   "task": "emotion bug fix",
   "db": {
-    "path": "<repo-root>/mdex_index.db",
+    "path": "<repo-root>/.mdex/mdex_index.db",
     "source": "repo_default"
   },
   "index_status": {
@@ -355,7 +355,7 @@ mdex finish --task "<task>" [--db <sqlite>] [--changed-files-from-git] [--scan] 
   "task": "emotion fix",
   "dry_run": true,
   "db": {
-    "path": "<repo-root>/mdex_index.db",
+    "path": "<repo-root>/.mdex/mdex_index.db",
     "source": "repo_default"
   },
   "changed_files": [

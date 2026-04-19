@@ -43,6 +43,7 @@ def test_schema_files_are_valid_draft_2020_12() -> None:
         "context.schema.json",
         "impact.schema.json",
         "finish.schema.json",
+        "error.schema.json",
     ):
         schema = _load_schema(name)
         Draft202012Validator.check_schema(schema)
@@ -88,3 +89,44 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     assert finish.returncode == 0
     finish_payload = json.loads(finish.stdout)
     _validate_payload(finish_payload, "finish.schema.json")
+
+
+def test_cli_error_outputs_match_error_schema(quality_repo: Path, tmp_path: Path) -> None:
+    db_path = tmp_path / "contract_error.db"
+    config_path = PROJECT_ROOT / "control" / "scan_config.json"
+
+    scan = _run_cli(
+        "scan",
+        "--root",
+        str(quality_repo),
+        "--config",
+        str(config_path),
+        "--db",
+        str(db_path),
+        "--output",
+        str(tmp_path / "scan.json"),
+        cwd=PROJECT_ROOT,
+    )
+    assert scan.returncode == 0
+
+    missing_db_dir = tmp_path / "missing-db-dir"
+    missing_db_dir.mkdir()
+    missing_db = _run_cli("list", cwd=missing_db_dir)
+    assert missing_db.returncode == 2
+    missing_db_payload = json.loads(missing_db.stderr)
+    _validate_payload(missing_db_payload, "error.schema.json")
+
+    open_absolute = _run_cli("open", str((quality_repo / "design" / "root.md").resolve()), "--db", str(db_path), cwd=quality_repo)
+    assert open_absolute.returncode == 2
+    open_absolute_payload = json.loads(open_absolute.stderr)
+    _validate_payload(open_absolute_payload, "error.schema.json")
+
+    open_parent = _run_cli("open", "../outside.md", "--db", str(db_path), cwd=quality_repo)
+    assert open_parent.returncode == 2
+    open_parent_payload = json.loads(open_parent.stderr)
+    _validate_payload(open_parent_payload, "error.schema.json")
+
+    stamp_not_indexed = _run_cli("stamp", "design/not_indexed.md", "--db", str(db_path), cwd=quality_repo)
+    assert stamp_not_indexed.returncode == 2
+    stamp_not_indexed_payload = json.loads(stamp_not_indexed.stderr)
+    _validate_payload(stamp_not_indexed_payload, "error.schema.json")

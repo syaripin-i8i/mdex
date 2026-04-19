@@ -7,10 +7,12 @@ from typing import Any
 
 def write_json(index: dict[str, Any], output_path: str) -> None:
     output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def write_sqlite(index: dict[str, Any], db_path: str) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     nodes = index.get("nodes", [])
     edges = index.get("edges", [])
     if not isinstance(nodes, list):

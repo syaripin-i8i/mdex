@@ -1,11 +1,16 @@
 # Support Matrix
 
-## Runtime Targets
+## Runtime and Platform Support
 
-| Dimension | Supported | Notes |
+| Tier | Target | Notes |
 |---|---|---|
-| Python | 3.10, 3.11, 3.12 | CI covers all three versions |
-| OS | Linux, macOS, Windows | Path behavior is tested with normalized node ids |
+| Primary (maintained and CI-tested) | `ubuntu-latest` + Python 3.10/3.11/3.12 | Maintainer baseline for release decisions |
+| Best-effort (CI-tested, community issues welcome) | `macos-latest`, `windows-latest` + Python 3.10/3.11/3.12 | Fixes are prioritized after primary-tier stability |
+
+## Python Support
+
+- Supported Python versions: 3.10, 3.11, 3.12
+- CI matrix runs all supported Python versions across all supported OS tiers
 
 ## Compatibility Scope
 
@@ -18,6 +23,12 @@
 - Deprecations are announced in `CHANGELOG.md` before removal.
 - Minimum deprecation window: one minor release cycle.
 - Deprecated fields keep type/meaning stable during the window.
+
+## Support Response Targets
+
+- Primary tier issue acknowledgment: within 3 business days (best effort)
+- Best-effort tier issue acknowledgment: within 7 business days (best effort)
+- Fix timing depends on severity and maintainer capacity
 
 ## Out-of-Scope Guarantees
 

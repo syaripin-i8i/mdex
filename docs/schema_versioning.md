@@ -9,6 +9,7 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - `context.schema.json`
 - `impact.schema.json`
 - `finish.schema.json`
+- `error.schema.json` (stderr error payloads)
 
 ## Versioning Model
 
@@ -31,7 +32,7 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - Existing required fields keep name and type within the same MAJOR line.
 - Optional fields may be added in MINOR releases.
 - Consumers should ignore unknown fields for forward compatibility.
-- Error payloads remain JSON, but this schema set currently defines success payloads only.
+- The same semver/deprecation guarantees apply to both success and error schemas.
 
 ## Deprecation Policy
 

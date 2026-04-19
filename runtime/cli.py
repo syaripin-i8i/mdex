@@ -116,9 +116,16 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         context = load_runtime_context(Path.cwd())
         root_path = Path(args.root).resolve() if args.root else resolve_scan_root(context)
         config_path = Path(args.config).resolve() if args.config else resolve_scan_config_path(context)
-        output_path = Path(args.output).resolve() if args.output else (context.repo_root / "mdex_index.json").resolve()
-
         config = _load_json(str(config_path), optional=not bool(args.config))
+        if args.output:
+            output_path = Path(args.output).resolve()
+        else:
+            output_setting = config.get("output_file")
+            if isinstance(output_setting, str) and output_setting.strip():
+                output_path = (context.repo_root / output_setting.strip()).resolve()
+            else:
+                output_path = (context.repo_root / ".mdex" / "mdex_index.json").resolve()
+
         index = build_index(str(root_path), config)
         write_json(index, str(output_path))
         write_sqlite(index, db_path)

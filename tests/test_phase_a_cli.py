@@ -96,6 +96,91 @@ def test_db_resolution_repo_default_list(
     assert "design/root.md" in ids
 
 
+def test_scan_default_outputs_to_dot_mdex(tmp_path: Path) -> None:
+    repo = tmp_path / "scan_default_repo"
+    repo.mkdir()
+    (repo / "design.md").write_text(
+        """---
+type: design
+status: active
+updated: 2026-01-01
+---
+# Design
+
+scan default output test
+""",
+        encoding="utf-8",
+    )
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["."],
+            "include_extensions": [".md", ".json", ".jsonl"],
+            "exclude_patterns": [".mdex/**"],
+            "node_type_map": {"design": ["design"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+            "output_file": ".mdex/mdex_index.json",
+        },
+    )
+
+    result = _run_cli("scan", "--root", ".", cwd=repo)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    db_path = str(payload["output"]["db"]).replace("\\", "/")
+    json_path = str(payload["output"]["json"]).replace("\\", "/")
+    assert db_path.endswith(".mdex/mdex_index.db")
+    assert json_path.endswith(".mdex/mdex_index.json")
+    assert (repo / ".mdex" / "mdex_index.db").exists()
+    assert (repo / ".mdex" / "mdex_index.json").exists()
+
+
+def test_db_resolution_prefers_dot_mdex_over_repo_fallback(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+) -> None:
+    fallback_db = quality_repo / "mdex_index.db"
+    _build_db(quality_repo, quality_config, fallback_db)
+
+    dot_mdex_db = quality_repo / ".mdex" / "mdex_index.db"
+    dot_mdex_db.parent.mkdir(parents=True, exist_ok=True)
+    _build_db(quality_repo, quality_config, dot_mdex_db)
+    with sqlite3.connect(str(dot_mdex_db)) as conn:
+        conn.execute("DELETE FROM nodes")
+        conn.execute(
+            """
+            INSERT INTO nodes (
+                id, title, type, project, status, summary, summary_source, summary_updated,
+                tags_json, updated, links_to_json, depends_on_json, relates_to_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "custom/only.md",
+                "Only DotMdex",
+                "design",
+                "quality",
+                "active",
+                "dot-mdex preferred",
+                "seed",
+                "2026-01-01",
+                "[]",
+                "2026-01-01",
+                "[]",
+                "[]",
+                "[]",
+            ),
+        )
+        conn.commit()
+
+    result = _run_cli("list", cwd=quality_repo)
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    ids = {row["id"] for row in payload}
+    assert "custom/only.md" in ids
+    assert "design/root.md" not in ids
+
+
 def test_db_resolution_env_var_list(
     quality_repo: Path,
     quality_config: dict[str, object],
