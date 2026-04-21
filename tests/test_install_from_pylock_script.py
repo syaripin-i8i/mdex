@@ -7,6 +7,9 @@ import textwrap
 from pathlib import Path
 from types import ModuleType
 
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.version import Version
 import pytest
 
 
@@ -206,6 +209,55 @@ def test_requirements_from_pylock_uses_supplemental_hashes(
     ]
 
 
+def test_requirements_from_pylock_closes_transitive_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_script_module()
+    lock = tmp_path / "pylock.toml"
+    _write_lock(
+        lock,
+        """
+        lock-version = "1.0"
+        created-by = "pip"
+
+        [[packages]]
+        name = "cyclonedx-python-lib"
+        version = "11.7.0"
+        """,
+    )
+
+    supplemental = tmp_path / "hashes.json"
+    supplemental.write_text(
+        json.dumps(
+            {
+                "cyclonedx-python-lib": {
+                    "version": "11.7.0",
+                    "hashes": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+                    "requires_dist": ['typing_extensions<5.0,>=4.6; python_version < "3.13"'],
+                },
+                "typing-extensions": {
+                    "version": "4.15.0",
+                    "hashes": ["sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+                    "requires_dist": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "SUPPLEMENTAL_HASH_PATH", supplemental)
+    monkeypatch.setattr(
+        module,
+        "default_environment",
+        lambda: {"python_version": "3.12", "python_full_version": "3.12.0"},
+    )
+    requirements = module._requirements_from_pylock(lock)
+    assert requirements == [
+        "cyclonedx-python-lib==11.7.0 --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "typing-extensions==4.15.0 --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]
+
+
 def test_real_pylock_is_covered_by_supplemental_release_hash_catalog() -> None:
     module = _load_script_module()
     repo_root = Path(__file__).resolve().parents[1]
@@ -218,7 +270,7 @@ def test_real_pylock_is_covered_by_supplemental_release_hash_catalog() -> None:
     for package in packages:
         if not isinstance(package, dict):
             continue
-        name = str(package.get("name", "")).strip().lower()
+        name = module._normalize_name(str(package.get("name", "")))
         version = str(package.get("version", "")).strip()
         if not name or not version:
             continue
@@ -236,3 +288,110 @@ def test_real_pylock_is_covered_by_supplemental_release_hash_catalog() -> None:
             missing.append(f"{name}=={version} (empty hashes)")
 
     assert not missing, f"supplemental release hash catalog missing coverage: {missing}"
+
+
+def test_supplemental_catalog_closes_transitives_for_ci_matrix() -> None:
+    module = _load_script_module()
+    repo_root = Path(__file__).resolve().parents[1]
+    lock_data = tomllib.loads((repo_root / "pylock.toml").read_text(encoding="utf-8"))
+    packages = lock_data.get("packages", [])
+    assert isinstance(packages, list)
+
+    supplemental = module._load_supplemental_hashes()
+    assert supplemental
+    assert any(
+        isinstance(row.get("requires_dist"), list) and bool(row.get("requires_dist"))
+        for row in supplemental.values()
+        if isinstance(row, dict)
+    ), "supplemental hash catalog is missing requires_dist metadata"
+
+    roots: dict[str, str] = {}
+    for package in packages:
+        if not isinstance(package, dict):
+            continue
+        name = module._normalize_name(str(package.get("name", "")))
+        version = str(package.get("version", "")).strip()
+        if not name or not version or name in module.SKIP_PACKAGES:
+            continue
+        roots[name] = version
+
+    base_env = default_environment()
+    target_envs: list[dict[str, str]] = []
+    for pyver, sys_platform, platform_system, os_name in (
+        ("3.10", "linux", "Linux", "posix"),
+        ("3.11", "linux", "Linux", "posix"),
+        ("3.12", "linux", "Linux", "posix"),
+        ("3.10", "darwin", "Darwin", "posix"),
+        ("3.11", "darwin", "Darwin", "posix"),
+        ("3.12", "darwin", "Darwin", "posix"),
+        ("3.10", "win32", "Windows", "nt"),
+        ("3.11", "win32", "Windows", "nt"),
+        ("3.12", "win32", "Windows", "nt"),
+    ):
+        env = dict(base_env)
+        env["python_version"] = pyver
+        env["python_full_version"] = f"{pyver}.0"
+        env["sys_platform"] = sys_platform
+        env["platform_system"] = platform_system
+        env["os_name"] = os_name
+        env["extra"] = ""
+        target_envs.append(env)
+
+    missing: list[str] = []
+    for env in target_envs:
+        queue = list(sorted(roots))
+        seen = set(queue)
+        while queue:
+            name = queue.pop(0)
+            row = supplemental.get(name)
+            if row is None:
+                missing.append(
+                    f"{name} missing metadata for env py{env['python_version']}:{env['sys_platform']}"
+                )
+                continue
+
+            if name in roots and str(row.get("version", "")).strip() != roots[name]:
+                missing.append(
+                    f"{name} version mismatch for env py{env['python_version']}:{env['sys_platform']}"
+                )
+
+            requires_dist = row.get("requires_dist", [])
+            if not isinstance(requires_dist, list):
+                continue
+
+            for raw_requirement in requires_dist:
+                requirement_text = str(raw_requirement).strip()
+                if not requirement_text:
+                    continue
+                requirement = Requirement(requirement_text)
+                if requirement.marker is not None and not requirement.marker.evaluate(env):
+                    continue
+
+                dependency_name = module._normalize_name(requirement.name)
+                if dependency_name in module.SKIP_PACKAGES:
+                    continue
+                dependency = supplemental.get(dependency_name)
+                if dependency is None:
+                    missing.append(
+                        f"{name} -> {dependency_name} missing for env "
+                        f"py{env['python_version']}:{env['sys_platform']}"
+                    )
+                    continue
+                dependency_version = str(dependency.get("version", "")).strip()
+                if not dependency_version:
+                    missing.append(
+                        f"{name} -> {dependency_name} missing version for env "
+                        f"py{env['python_version']}:{env['sys_platform']}"
+                    )
+                    continue
+                if requirement.specifier and Version(dependency_version) not in requirement.specifier:
+                    missing.append(
+                        f"{name} -> {dependency_name}=={dependency_version} violates '{requirement.specifier}' "
+                        f"for env py{env['python_version']}:{env['sys_platform']}"
+                    )
+                    continue
+                if dependency_name not in seen:
+                    seen.add(dependency_name)
+                    queue.append(dependency_name)
+
+    assert not missing, f"supplemental release hash catalog is not fully closed: {missing}"

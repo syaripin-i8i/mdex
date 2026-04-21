@@ -9,6 +9,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.version import Version
+
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - exercised in py3.10 runtime
@@ -20,7 +24,13 @@ ALLOWED_HASH_ALGORITHMS = {"sha256"}
 PACKAGE_BLOCK_RE = re.compile(r"(?ms)^\s*\[\[packages\]\]\s*(.*?)(?=^\s*\[\[packages\]\]|\Z)")
 TOP_LEVEL_KV_RE = re.compile(r'^([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"')
 SHA256_RE = re.compile(r'(?m)^\s*sha256\s*=\s*"([^"]+)"\s*$')
+NAME_NORMALIZE_RE = re.compile(r"[-_.]+")
 SUPPLEMENTAL_HASH_PATH = Path(__file__).resolve().parent.parent / "locks" / "pypi_release_hashes.json"
+
+
+def _normalize_name(name: str) -> str:
+    stripped = name.strip().lower()
+    return NAME_NORMALIZE_RE.sub("-", stripped)
 
 
 def _parse_top_level_kv(block: str) -> dict[str, str]:
@@ -47,8 +57,23 @@ def _load_supplemental_hashes() -> dict[str, dict[str, Any]]:
     for raw_name, raw_entry in loaded.items():
         if not isinstance(raw_entry, dict):
             continue
-        output[str(raw_name).strip().lower()] = raw_entry
+        normalized = _normalize_name(str(raw_name))
+        if normalized:
+            output[normalized] = raw_entry
     return output
+
+
+def _supplemental_hash_set(entry: dict[str, Any], *, package_name: str) -> set[str]:
+    hashes: set[str] = set()
+    raw_hashes = entry.get("hashes", [])
+    if isinstance(raw_hashes, list):
+        for raw_hash in raw_hashes:
+            value = str(raw_hash).strip().lower()
+            if value.startswith("sha256:"):
+                hashes.add(value)
+    if not hashes:
+        raise RuntimeError(f"supplemental hash set is empty for package '{package_name}'")
+    return hashes
 
 
 def _extract_hashes(
@@ -81,7 +106,7 @@ def _extract_hashes(
     if isinstance(sdist, dict):
         _collect_from_hash_map(sdist.get("hashes"))
 
-    package_name = str(package.get("name", "")).strip().lower()
+    package_name = _normalize_name(str(package.get("name", "")))
     package_version = str(package.get("version", "")).strip()
     supplemental = supplemental_hashes.get(package_name)
     if supplemental is not None:
@@ -91,12 +116,7 @@ def _extract_hashes(
                 f"supplemental hash version mismatch for package '{package_name}': "
                 f"expected {package_version}, found {supplemental_version}"
             )
-        extra_hashes = supplemental.get("hashes", [])
-        if isinstance(extra_hashes, list):
-            for raw_hash in extra_hashes:
-                value = str(raw_hash).strip().lower()
-                if value.startswith("sha256:"):
-                    hashes.add(value)
+        hashes.update(_supplemental_hash_set(supplemental, package_name=package_name))
 
     if not hashes:
         package_name = package_name or "<unknown>"
@@ -106,6 +126,113 @@ def _extract_hashes(
         )
 
     return hashes
+
+
+def _close_transitive_requirements(
+    pinned: dict[str, dict[str, Any]],
+    *,
+    supplemental_hashes: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if not supplemental_hashes:
+        return pinned
+
+    resolved: dict[str, dict[str, Any]] = {
+        name: {
+            "version": str(row.get("version", "")).strip(),
+            "hashes": set(row.get("hashes", set())),
+        }
+        for name, row in pinned.items()
+    }
+    marker_env = default_environment()
+    marker_env["extra"] = ""
+
+    queue = list(resolved.keys())
+    while queue:
+        package_name = queue.pop(0)
+        metadata = supplemental_hashes.get(package_name)
+        if not isinstance(metadata, dict):
+            continue
+        requires_dist = metadata.get("requires_dist", [])
+        if not isinstance(requires_dist, list):
+            continue
+
+        for raw_requirement in requires_dist:
+            requirement_text = str(raw_requirement).strip()
+            if not requirement_text:
+                continue
+            requirement = Requirement(requirement_text)
+            if requirement.marker is not None and not requirement.marker.evaluate(marker_env):
+                continue
+
+            dependency_name = _normalize_name(requirement.name)
+            if dependency_name in SKIP_PACKAGES:
+                continue
+
+            dependency_entry = supplemental_hashes.get(dependency_name)
+            if not isinstance(dependency_entry, dict):
+                raise RuntimeError(
+                    f"supplemental metadata missing for transitive dependency '{dependency_name}' "
+                    f"required by '{package_name}'"
+                )
+
+            dependency_version = str(dependency_entry.get("version", "")).strip()
+            if not dependency_version:
+                raise RuntimeError(f"missing version for transitive dependency '{dependency_name}'")
+            dependency_parsed = Version(dependency_version)
+            if requirement.specifier and dependency_parsed not in requirement.specifier:
+                raise RuntimeError(
+                    f"supplemental dependency version mismatch: {dependency_name}=={dependency_version} "
+                    f"does not satisfy '{requirement.specifier}' required by '{package_name}'"
+                )
+
+            dependency_hashes = _supplemental_hash_set(
+                dependency_entry,
+                package_name=dependency_name,
+            )
+
+            current = resolved.get(dependency_name)
+            if current is None:
+                resolved[dependency_name] = {
+                    "version": dependency_version,
+                    "hashes": set(dependency_hashes),
+                }
+                queue.append(dependency_name)
+                continue
+
+            current_version = str(current.get("version", "")).strip()
+            if current_version != dependency_version:
+                raise RuntimeError(
+                    f"conflicting versions for transitive dependency '{dependency_name}': "
+                    f"'{current_version}' vs '{dependency_version}'"
+                )
+            if requirement.specifier and Version(current_version) not in requirement.specifier:
+                raise RuntimeError(
+                    f"resolved dependency version mismatch: {dependency_name}=={current_version} "
+                    f"does not satisfy '{requirement.specifier}' required by '{package_name}'"
+                )
+            current["hashes"].update(dependency_hashes)
+
+    return resolved
+
+
+def _requirements_from_pinned(
+    pinned: dict[str, dict[str, Any]],
+    *,
+    supplemental_hashes: dict[str, dict[str, Any]],
+    lock_path: Path,
+) -> list[str]:
+    closed = _close_transitive_requirements(
+        pinned,
+        supplemental_hashes=supplemental_hashes,
+    )
+    requirements: list[str] = []
+    for name, package in sorted(closed.items()):
+        version = str(package["version"])
+        hash_args = " ".join(f"--hash={value}" for value in sorted(package["hashes"]))
+        requirements.append(f"{name}=={version} {hash_args}".rstrip())
+    if not requirements:
+        raise RuntimeError(f"no installable pinned packages found in {lock_path}")
+    return requirements
 
 
 def _requirements_from_pylock_with_tomllib(
@@ -128,7 +255,7 @@ def _requirements_from_pylock_with_tomllib(
         version = str(package.get("version", "")).strip()
         if not name or not version:
             continue
-        normalized = name.lower()
+        normalized = _normalize_name(name)
         if normalized in SKIP_PACKAGES:
             continue
         hashes = _extract_hashes(
@@ -147,14 +274,11 @@ def _requirements_from_pylock_with_tomllib(
         else:
             existing["hashes"].update(hashes)
 
-    requirements: list[str] = []
-    for name, package in sorted(pinned.items()):
-        version = str(package["version"])
-        hash_args = " ".join(f"--hash={value}" for value in sorted(package["hashes"]))
-        requirements.append(f"{name}=={version} {hash_args}".rstrip())
-    if not requirements:
-        raise RuntimeError(f"no installable pinned packages found in {lock_path}")
-    return requirements
+    return _requirements_from_pinned(
+        pinned,
+        supplemental_hashes=supplemental_hashes,
+        lock_path=lock_path,
+    )
 
 
 def _requirements_from_pylock_regex_fallback(
@@ -172,7 +296,7 @@ def _requirements_from_pylock_regex_fallback(
         version = fields.get("version", "").strip()
         if not name or not version:
             continue
-        normalized = name.lower()
+        normalized = _normalize_name(name)
         if normalized in SKIP_PACKAGES:
             continue
 
@@ -207,14 +331,11 @@ def _requirements_from_pylock_regex_fallback(
         else:
             existing["hashes"].update(hashes)
 
-    requirements: list[str] = []
-    for name, package in sorted(pinned.items()):
-        version = str(package["version"])
-        hash_args = " ".join(f"--hash={value}" for value in sorted(package["hashes"]))
-        requirements.append(f"{name}=={version} {hash_args}".rstrip())
-    if not requirements:
-        raise RuntimeError(f"no installable pinned packages found in {lock_path}")
-    return requirements
+    return _requirements_from_pinned(
+        pinned,
+        supplemental_hashes=supplemental_hashes,
+        lock_path=lock_path,
+    )
 
 
 def _requirements_from_pylock(lock_path: Path) -> list[str]:
