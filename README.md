@@ -243,7 +243,11 @@ python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
 
 ```bash
 python -m pip lock -e ".[dev]" -o pylock.toml
+python .github/scripts/export_release_hashes.py --lock pylock.toml --output .github/locks/pypi_release_hashes.json
 ```
+
+matrix (`ubuntu/macos/windows x 3.10/3.11/3.12`) で hash install を維持するため、`pylock.toml` 更新時は  
+`.github/locks/pypi_release_hashes.json` も同時更新してください。
 
 ## Privacy Note
 
