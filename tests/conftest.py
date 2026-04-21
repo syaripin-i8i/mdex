@@ -1,9 +1,20 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+
+# Pytest loads conftest before importing test modules, so expose a consistent
+# tomllib module name across Python 3.10-3.12.
+sys.modules.setdefault("tomllib", tomllib)
 
 
 @pytest.fixture()

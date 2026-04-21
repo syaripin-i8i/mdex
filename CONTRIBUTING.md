@@ -28,6 +28,11 @@ python -m pip lock -e ".[dev]" -o pylock.toml
 python -m pytest -q
 ```
 
+## Compatibility Guardrails
+
+- Primary CI includes Python 3.10, so Python 3.11+ stdlib imports such as `tomllib` must use a `tomli` fallback or a preloaded shim in test-only code.
+- Bootstrap scripts that run before lockfile dependencies are installed must not require packages provided by that same lockfile. Prefer stdlib modules first, then tightly scoped vendored fallbacks when unavoidable.
+
 ## Contribution Scope
 
 - Keep `README.md` as workflow contract.
@@ -51,6 +56,7 @@ It is not a contribution style guide for this codebase.
 ## Pull Request Checklist
 
 - [ ] tests pass (`python -m pytest -q`)
+- [ ] Python 3.10 compatibility and bootstrap-safe imports still hold for touched files
 - [ ] contract changes reflected in `schemas/` and docs
 - [ ] README/AGENT links remain valid
 - [ ] security-sensitive behavior is covered by tests

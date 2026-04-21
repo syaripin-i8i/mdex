@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import builtins
 import importlib.util
 import json
@@ -11,11 +12,7 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.version import Version
 import pytest
-
-try:
-    import tomllib  # type: ignore[attr-defined]
-except ModuleNotFoundError:
-    import tomli as tomllib
+import tomllib
 
 
 def _load_script_module() -> ModuleType:
@@ -30,6 +27,51 @@ def _load_script_module() -> ModuleType:
 
 def _write_lock(path: Path, body: str) -> None:
     path.write_text(textwrap.dedent(body).strip() + "\n", encoding="utf-8")
+
+
+def _build_parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    return parents
+
+
+def _imports_module(node: ast.AST, module_name: str) -> bool:
+    if isinstance(node, ast.Import):
+        return any(alias.name == module_name for alias in node.names)
+    if isinstance(node, ast.ImportFrom):
+        return node.module == module_name
+    return False
+
+
+def _handler_catches_module_not_found(handler: ast.ExceptHandler) -> bool:
+    handler_type = handler.type
+    if handler_type is None:
+        return False
+    if isinstance(handler_type, ast.Name):
+        return handler_type.id == "ModuleNotFoundError"
+    if isinstance(handler_type, ast.Tuple):
+        return any(isinstance(item, ast.Name) and item.id == "ModuleNotFoundError" for item in handler_type.elts)
+    return False
+
+
+def _imports_are_guarded(path: Path, module_name: str) -> bool:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    parents = _build_parent_map(tree)
+    for node in ast.walk(tree):
+        if not _imports_module(node, module_name):
+            continue
+        current = parents.get(node)
+        while current is not None:
+            if isinstance(current, ast.Try) and any(
+                _handler_catches_module_not_found(handler) for handler in current.handlers
+            ):
+                break
+            current = parents.get(current)
+        else:
+            return False
+    return True
 
 
 def test_script_imports_with_pip_vendored_packaging(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,6 +91,16 @@ def test_script_imports_with_pip_vendored_packaging(monkeypatch: pytest.MonkeyPa
     requirement = namespace["Requirement"]('typing_extensions<5.0,>=4.6; python_version < "3.13"')
     assert requirement.name == "typing_extensions"
     assert callable(namespace["default_environment"])
+
+
+def test_bootstrap_scripts_guard_tomllib_imports() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    targets = [
+        repo_root / ".github" / "scripts" / "export_release_hashes.py",
+        repo_root / ".github" / "scripts" / "install_from_pylock.py",
+    ]
+    missing_guards = [str(path) for path in targets if not _imports_are_guarded(path, "tomllib")]
+    assert not missing_guards, f"unguarded tomllib imports found: {missing_guards}"
 
 
 def test_requirements_from_pylock_includes_hashes(tmp_path: Path) -> None:
