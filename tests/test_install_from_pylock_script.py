@@ -3,7 +3,6 @@ from __future__ import annotations
 import builtins
 import importlib.util
 import json
-import tomllib
 import textwrap
 from pathlib import Path
 from types import ModuleType
@@ -12,6 +11,11 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.version import Version
 import pytest
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 
 def _load_script_module() -> ModuleType:
