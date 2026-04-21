@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -185,22 +187,36 @@ def _create_indexes(cur: sqlite3.Cursor) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status)")
 
 
+def _load_existing_overrides(db_path: Path) -> list[tuple[str, str, str, str]]:
+    if not db_path.exists():
+        return []
+    db = sqlite3.connect(str(db_path))
+    try:
+        cur = db.cursor()
+        return _fetch_node_overrides(cur)
+    finally:
+        db.close()
+
+
 def write_sqlite(index: dict[str, Any], db_path: str) -> None:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    output = Path(db_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
     nodes = _normalize_nodes(index)
     edges = _normalize_edges(index)
+    overrides = _load_existing_overrides(output)
 
-    db = sqlite3.connect(db_path)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{output.stem}.",
+        suffix=".tmp",
+        dir=str(output.parent),
+    )
+    os.close(fd)
+    temp_path = Path(temp_name)
+
+    db = sqlite3.connect(str(temp_path))
     try:
         cur = db.cursor()
         cur.execute("BEGIN")
-        overrides = _fetch_node_overrides(cur)
-
-        cur.execute("DROP TABLE IF EXISTS nodes")
-        cur.execute("DROP TABLE IF EXISTS edges")
-        cur.execute("DROP TABLE IF EXISTS index_metadata")
-        cur.execute("DROP TABLE IF EXISTS node_overrides")
-
         _create_schema(cur)
         _restore_node_overrides(cur, overrides)
         _insert_nodes(cur, nodes)
@@ -214,3 +230,8 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
         raise
     finally:
         db.close()
+
+    try:
+        os.replace(temp_path, output)
+    finally:
+        temp_path.unlink(missing_ok=True)

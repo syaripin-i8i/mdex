@@ -2,56 +2,66 @@
 type: spec
 project: mdex
 status: active
-updated: 2026-04-19
+updated: 2026-04-22
 ---
 
 # mdex 記録規約
 
-AI エージェントが残す Markdown / JSON を `mdex` で安定して索引化するための規約。
+AI エージェントが残す Markdown / JSON を `mdex` で安定して索引化するための入力契約。
 
 ## Scope
 
-- この文書は `mdex` の input note contract の正本です
-- `start` / `context` / `finish` の安定性は、この規約への準拠度に強く依存します
-- `mdex` は記録規律が高いほど強く効きます
+- この文書は **input note contract** の正本
+- `start` / `context` / `impact` / `finish` の精度はこの規約への準拠度に依存
+- workflow 手順は `README.md`、分岐判断は `AGENT.md` が正本
+
+## Responsibility Boundary
+
+### 書いてよい内容
+
+- frontmatter の必須/推奨キー
+- `depends_on` / `relates_to` の使い分け
+- summary の書式
+
+### 書いてはいけない内容
+
+- workflow の標準手順 (`scan -> start -> ... -> finish`)  
+  `README.md` を参照
+- `start` と `context --actionable` の判断ロジック  
+  `AGENT.md` を参照
 
 ## 基本ルール
 
-1. `type` / `status` / `updated` を frontmatter に入れる
-2. 前提は `depends_on`、関連は `relates_to` に分ける
-3. 先頭段落で 1〜2 文の summary を書く
+1. frontmatter に `type` / `status` / `updated` を置く
+2. 前提は `depends_on`、関連は `relates_to` に分離
+3. 本文先頭に 1〜2 文 summary を置く
 4. 可能な限り `mdex new` と `mdex stamp` を使う
-
-## 推奨ワークフロー
-
-```bash
-# 新規作成
-mdex new task "Phase A DB resolver"
-mdex new decision "adopt start/finish workflow"
-
-# 変更したら updated を更新
-mdex stamp tasks/pending/T20260412190917.md
-
-# 作業完了時
-mdex finish --task "Phase A DB resolver" --dry-run
-mdex finish --task "Phase A DB resolver" --summary-file ./summary.txt --scan
-```
 
 ## frontmatter 最小構成
 
 ```yaml
 ---
 type: decision
-project: mdex
+project: <project>
 status: active
-updated: 2026-04-13
-tags: [phase-a, workflow]
+updated: 2026-04-19
 depends_on:
   - docs/design.md
 relates_to:
   - tasks/pending/T20260412190917.md
 ---
 ```
+
+## `depends_on` と `relates_to`
+
+- `depends_on`: この文書が成立するための前提（読まないと誤読しうる）
+- `relates_to`: 関連はあるが前提ではない近傍文書
+
+## summary の書き方
+
+- 何を決めた/定義した文書か
+- どの作業で参照すべきか
+- 主な制約・前提は何か
 
 ## type
 
@@ -73,71 +83,6 @@ relates_to:
 | `pending` | 開始前タスク |
 | `done` | 完了 |
 | `archived` | 参照のみ |
-
-## ディレクトリ推奨
-
-```text
-project/
-  decision/
-  design/
-  spec/
-  tasks/
-    pending/
-    done/
-  logs/
-```
-
-## summary の書き方
-
-他エージェントが「読む価値」を判定できるように書く。
-
-- 何を決めた/定義した文書か
-- どの作業で参照すべきか
-- どんな制約があるか
-
-## テンプレート
-
-### decision
-
-```markdown
----
-type: decision
-project: <project>
-status: active
-updated: <today>
----
-
-<この決定の要点を1〜2文で>
-
-## 決定内容
-
-## 理由
-
-## 却下した代替案
-
-## 影響範囲
-```
-
-### task
-
-```markdown
----
-type: task
-project: <project>
-status: pending
-updated: <today>
-relates_to:
-  - <関連設計>
----
-
-<このタスクの目的を1〜2文で>
-
-## 実施内容
-
-## 結果
-
-## 残課題
-```
 
 ## コマンド対応
 

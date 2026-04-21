@@ -253,3 +253,39 @@ def test_write_sqlite_rolls_back_on_insert_failure(
 
     assert nodes_after == original_nodes
     assert overrides_after == original_overrides
+
+
+def test_write_sqlite_keeps_existing_db_when_replace_fails(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "quality_store_atomic_replace.db"
+    _build_quality_db(quality_repo, quality_config, db_path)
+
+    enriched = enrich_node("design/root.md", str(db_path), "keep override", force=False)
+    assert enriched["status"] == "enriched"
+
+    with sqlite3.connect(str(db_path)) as conn:
+        original_nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+        original_overrides = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+
+    replace_calls: list[tuple[object, object]] = []
+
+    def _fail_replace(src: object, dst: object) -> None:
+        replace_calls.append((src, dst))
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(indexer.os, "replace", _fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        write_sqlite(build_index(str(quality_repo), quality_config), str(db_path))
+
+    assert replace_calls
+    with sqlite3.connect(str(db_path)) as conn:
+        nodes_after = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+        overrides_after = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+    assert nodes_after == original_nodes
+    assert overrides_after == original_overrides
+    assert not list(tmp_path.glob(f".{db_path.stem}.*.tmp"))

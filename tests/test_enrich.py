@@ -106,8 +106,11 @@ def test_enrich_persists_across_scan_via_node_overrides(
     assert before_rescan["summary_source"] == "agent"
     assert before_rescan["summary"] == persisted_summary
 
-    with sqlite3.connect(str(db_path)) as conn:
+    conn = sqlite3.connect(str(db_path))
+    try:
         count_before = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+    finally:
+        conn.close()
     assert count_before == 1
 
     rescanned_index = build_index(str(quality_repo), quality_config)
@@ -122,6 +125,9 @@ def test_enrich_persists_across_scan_via_node_overrides(
     assert untouched is not None
     assert untouched["summary_source"] == "seed"
 
-    with sqlite3.connect(str(db_path)) as conn:
+    conn = sqlite3.connect(str(db_path))
+    try:
         count_after = int(conn.execute("SELECT COUNT(*) FROM node_overrides").fetchone()[0])
+    finally:
+        conn.close()
     assert count_after == 1

@@ -1,0 +1,42 @@
+rules:
+  - id: mdex.python.yaml.unsafe-load
+    message: Avoid unsafe YAML deserialization. Use yaml.safe_load for untrusted input.
+    severity: ERROR
+    languages:
+      - python
+    metadata:
+      category: security
+      cwe:
+        - "CWE-502: Deserialization of Untrusted Data"
+    patterns:
+      - pattern-either:
+          - pattern: yaml.load(...)
+          - pattern: yaml.unsafe_load(...)
+      - pattern-not: yaml.load(..., Loader=yaml.SafeLoader)
+      - pattern-not: yaml.load(..., Loader=SafeLoader)
+
+  - id: mdex.python.pickle.loads
+    message: Avoid pickle.loads on untrusted input.
+    severity: ERROR
+    languages:
+      - python
+    metadata:
+      category: security
+      cwe:
+        - "CWE-502: Deserialization of Untrusted Data"
+    patterns:
+      - pattern: pickle.loads(...)
+
+  - id: mdex.python.path-traversal.open-join
+    message: Validate and normalize user-controlled paths before opening files.
+    severity: WARNING
+    languages:
+      - python
+    metadata:
+      category: security
+      cwe:
+        - "CWE-22: Improper Limitation of a Pathname to a Restricted Directory"
+    patterns:
+      - pattern-either:
+          - pattern: open(os.path.join(...), ...)
+          - pattern: Path(...).open(...)

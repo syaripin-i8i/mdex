@@ -1,52 +1,87 @@
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
+import tomllib
 
 
-PACKAGE_BLOCK_RE = re.compile(r"(?ms)^\[\[packages\]\]\s*(.*?)(?=^\[\[packages\]\]|\Z)")
-KV_RE = re.compile(r'^([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"')
 SKIP_PACKAGES = {"mdex-cli", "pip", "setuptools", "wheel"}
+ALLOWED_HASH_ALGORITHMS = {"sha256"}
 
 
-def _parse_top_level_kv(block: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in block.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("["):
-            break
-        match = KV_RE.match(stripped)
-        if match:
-            result[match.group(1)] = match.group(2)
-    return result
+def _extract_hashes(package: dict[str, Any], *, lock_path: Path) -> set[str]:
+    hashes: set[str] = set()
+
+    def _collect_from_hash_map(hash_map: object) -> None:
+        if not isinstance(hash_map, dict):
+            return
+        for raw_algorithm, raw_value in hash_map.items():
+            algorithm = str(raw_algorithm).strip().lower()
+            if algorithm not in ALLOWED_HASH_ALGORITHMS:
+                continue
+            value = str(raw_value).strip().lower()
+            if value:
+                hashes.add(f"{algorithm}:{value}")
+
+    wheels = package.get("wheels")
+    if isinstance(wheels, list):
+        for wheel in wheels:
+            if not isinstance(wheel, dict):
+                continue
+            _collect_from_hash_map(wheel.get("hashes"))
+
+    sdist = package.get("sdist")
+    if isinstance(sdist, dict):
+        _collect_from_hash_map(sdist.get("hashes"))
+
+    if not hashes:
+        package_name = str(package.get("name", "")).strip() or "<unknown>"
+        raise RuntimeError(
+            f"missing supported artifact hashes for package '{package_name}' in {lock_path}; "
+            "cannot use --require-hashes safely"
+        )
+
+    return hashes
 
 
 def _requirements_from_pylock(lock_path: Path) -> list[str]:
-    text = lock_path.read_text(encoding="utf-8")
-    pinned: dict[str, str] = {}
-    for match in PACKAGE_BLOCK_RE.finditer(text):
-        fields = _parse_top_level_kv(match.group(1))
-        name = fields.get("name", "").strip()
-        version = fields.get("version", "").strip()
+    loaded = tomllib.loads(lock_path.read_text(encoding="utf-8"))
+    packages = loaded.get("packages", [])
+    if not isinstance(packages, list):
+        raise RuntimeError(f"invalid pylock format (packages must be a list): {lock_path}")
+
+    pinned: dict[str, dict[str, Any]] = {}
+    for package in packages:
+        if not isinstance(package, dict):
+            continue
+        name = str(package.get("name", "")).strip()
+        version = str(package.get("version", "")).strip()
         if not name or not version:
             continue
         normalized = name.lower()
         if normalized in SKIP_PACKAGES:
             continue
-        existing = pinned.get(normalized)
-        if existing is not None and existing != version:
-            raise RuntimeError(
-                f"conflicting versions for package '{name}': '{existing}' vs '{version}' in {lock_path}"
-            )
-        pinned[normalized] = version
+        hashes = _extract_hashes(package, lock_path=lock_path)
 
-    requirements = [f"{name}=={version}" for name, version in sorted(pinned.items())]
+        existing = pinned.get(normalized)
+        if existing is not None and existing["version"] != version:
+            raise RuntimeError(
+                f"conflicting versions for package '{name}': '{existing['version']}' vs '{version}' in {lock_path}"
+            )
+        if existing is None:
+            pinned[normalized] = {"version": version, "hashes": set(hashes)}
+        else:
+            existing["hashes"].update(hashes)
+
+    requirements: list[str] = []
+    for name, package in sorted(pinned.items()):
+        version = str(package["version"])
+        hash_args = " ".join(f"--hash={value}" for value in sorted(package["hashes"]))
+        requirements.append(f"{name}=={version} {hash_args}".rstrip())
     if not requirements:
         raise RuntimeError(f"no installable pinned packages found in {lock_path}")
     return requirements
@@ -77,7 +112,17 @@ def main() -> int:
         req_path = Path(req_file.name)
 
     try:
-        _run([sys.executable, "-m", "pip", "install", "--requirement", str(req_path)])
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "--requirement",
+                str(req_path),
+            ]
+        )
         editable = (args.editable or "").strip()
         if editable:
             _run([sys.executable, "-m", "pip", "install", "--editable", editable, "--no-deps"])

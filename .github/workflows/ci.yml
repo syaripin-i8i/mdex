@@ -33,7 +33,7 @@ jobs:
           python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
 
       - name: Run tests with coverage gate
-        run: python -m pytest -q --cov=mdex --cov-report=term --cov-fail-under=40
+        run: python -m pytest -q --cov=mdex --cov-report=term-missing --cov-fail-under=60
 
   build-smoke:
     name: build smoke (ubuntu, py3.12)
@@ -91,14 +91,42 @@ jobs:
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        uses: gitleaks/gitleaks-action@bf2dc8e55639c1e091e9b45970152e4313705814 # master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install semgrep
+
+      - name: Run Semgrep security checks
+        run: |
+          semgrep \
+            --config .semgrep/mdex-python.yml \
+            --error \
+            --severity ERROR \
+            --metrics=off \
+            --exclude tests/fixtures
 
   dependency-review:
     name: Dependency Review

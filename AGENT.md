@@ -1,9 +1,36 @@
 # mdex Agent Rules
 
-`AGENT.md` は実行時の判断規則だけを置くファイルです。  
-`README.md` は workflow contract の短縮版で、このファイルが execution heuristics の正本です。  
-役割説明や詳細仕様は `README.md` / `docs/design.md` / `docs/convention.md` を読んでください。
-本プロジェクトのライセンスは Apache-2.0 です（`LICENSE` / `NOTICE`）。
+`AGENT.md` は **execution heuristics の正本** です。  
+`README.md` の手順を再掲せず、ここでは分岐判断だけを定義します。
+
+## Responsibility Boundary
+
+### 書いてよい内容
+
+- 実行順序の判断基準（`start` / `context --actionable` / `impact` の使い分け）
+- 迷ったときの優先順位
+- エッジケースの扱い（例: changed files が既にある）
+
+### 書いてはいけない内容
+
+- コマンド契約の正本（`stdout/stderr JSON` 契約、primary keys）  
+  `README.md` を参照
+- frontmatter / `depends_on` / `relates_to` の入力規約  
+  `docs/convention.md` を参照
+- 実装・永続化の詳細  
+  `docs/design.md` を参照
+
+## Entry Decision: `start` vs `context --actionable`
+
+| 状況 | 先に使うコマンド | 次にやること | 意図 |
+|---|---|---|---|
+| 入口候補が未確定（初回着手、探索範囲が広い） | `mdex start "<task>"` | 必要なら `mdex context "<task>" --actionable` | まず推奨入口を狭める |
+| 入口候補が既にあるが、実行可能な次アクションを広く欲しい | `mdex context "<task>" --actionable` | `mdex first` / `mdex related` で局所深掘り | `start` を省略して時短 |
+| changed files が既にある | `mdex impact <path...>` | `context --actionable` か `finish --dry-run` | 変更起点で読む順を再計算 |
+| タスクを閉じる前 | `mdex finish --dry-run` | summary があるなら `--summary-file --scan` | 出口契約を先に確認 |
+
+標準は `start -> context --actionable`。  
+ただし入口が明確な場合は `context --actionable` から始めてよい。
 
 ## If-Then Rules
 

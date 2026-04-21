@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -51,10 +52,14 @@ def _as_json_list(value: Any) -> list[str]:
     return []
 
 
-def _connect(db_path: str) -> sqlite3.Connection:
+@contextmanager
+def _connect(db_path: str) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:

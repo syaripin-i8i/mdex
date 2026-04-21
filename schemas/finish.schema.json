@@ -18,35 +18,42 @@
   ],
   "properties": {
     "task": {
-      "type": "string"
+      "type": "string",
+      "description": "Task label passed to mdex finish."
     },
     "dry_run": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "True when finish runs in preview mode and does not apply enrich updates."
     },
     "db": {
       "type": "object",
+      "description": "Resolved database info used for this finish invocation.",
       "required": [
         "path",
         "source"
       ],
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "Resolved path of the SQLite index database."
         },
         "source": {
-          "type": "string"
+          "type": "string",
+          "description": "Resolution source for db path (arg/env/config/default)."
         }
       },
       "additionalProperties": true
     },
     "changed_files": {
       "type": "array",
+      "description": "Changed files considered by impact. Empty array means no changed files were detected and this is still a successful run.",
       "items": {
         "$ref": "#/$defs/changedFileItem"
       }
     },
     "impact": {
       "type": "object",
+      "description": "Impact analysis result for changed files. Arrays may be empty on successful runs.",
       "required": [
         "inputs",
         "read_first",
@@ -57,30 +64,35 @@
       "properties": {
         "inputs": {
           "type": "array",
+          "description": "Normalized changed-file inputs used for impact scoring.",
           "items": {
             "type": "string"
           }
         },
         "read_first": {
           "type": "array",
+          "description": "Non-task, non-decision nodes to read first.",
           "items": {
             "$ref": "#/$defs/impactItem"
           }
         },
         "related_tasks": {
           "type": "array",
+          "description": "Task nodes related to the current change set.",
           "items": {
             "$ref": "#/$defs/impactItem"
           }
         },
         "decision_records": {
           "type": "array",
+          "description": "Decision records related to the current change set.",
           "items": {
             "$ref": "#/$defs/impactItem"
           }
         },
         "stale_watch": {
           "type": "array",
+          "description": "Potentially stale nodes to review. Empty array is valid.",
           "items": {
             "$ref": "#/$defs/impactItem"
           }
@@ -90,61 +102,72 @@
     },
     "enrich_candidates": {
       "type": "array",
+      "description": "Ranked nodes considered for enrich. Empty array is valid and indicates no enrich target was found.",
       "items": {
         "$ref": "#/$defs/enrichCandidate"
       }
     },
     "applied_enrichments": {
       "type": "array",
+      "description": "Enrich operation results that were actually applied. Usually empty when dry_run is true.",
       "items": {
         "type": "object"
       }
     },
     "scan": {
       "type": "object",
+      "description": "Scan follow-up status after finish.",
       "required": [
         "requested",
         "ran"
       ],
       "properties": {
         "requested": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when --scan was requested."
         },
         "ran": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "True when scan actually ran. Can be false in dry-run mode or when scan fails."
         }
       },
       "additionalProperties": true
     },
     "recommended_next_actions": {
       "type": "array",
+      "description": "Action suggestions generated from impact and enrich analysis.",
       "items": {
         "type": "string"
       }
     },
     "requires_manual_targeting": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "True when finish cannot safely choose a single enrich target and requires explicit mdex enrich <node-id>."
     }
   },
   "$defs": {
     "changedFileItem": {
       "type": "object",
+      "description": "One changed file row with its origin.",
       "required": [
         "path",
         "source"
       ],
       "properties": {
         "path": {
-          "type": "string"
+          "type": "string",
+          "description": "Changed file path in posix format."
         },
         "source": {
-          "type": "string"
+          "type": "string",
+          "description": "Source of changed-file detection (for example git)."
         }
       },
       "additionalProperties": true
     },
     "impactItem": {
       "type": "object",
+      "description": "One ranked impact row.",
       "required": [
         "id",
         "reason",
@@ -152,19 +175,23 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Node id."
         },
         "reason": {
-          "type": "string"
+          "type": "string",
+          "description": "Short rationale for why this node was selected."
         },
         "score": {
-          "type": "number"
+          "type": "number",
+          "description": "Relative relevance score; higher means more relevant."
         }
       },
       "additionalProperties": true
     },
     "enrichCandidate": {
       "type": "object",
+      "description": "Candidate node for enrich suggestion.",
       "required": [
         "id",
         "kind",
@@ -173,20 +200,24 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Node id."
         },
         "kind": {
           "type": "string",
+          "description": "primary means best auto-target candidate; secondary means review candidate.",
           "enum": [
             "primary",
             "secondary"
           ]
         },
         "reason": {
-          "type": "string"
+          "type": "string",
+          "description": "Why the node is a candidate."
         },
         "score": {
-          "type": "number"
+          "type": "number",
+          "description": "Rounded candidate relevance score."
         }
       },
       "additionalProperties": true

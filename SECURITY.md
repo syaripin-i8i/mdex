@@ -36,6 +36,16 @@ If GitHub private reporting is unavailable, use X (Twitter) DM: `@syaripin_i8i`,
 
 These are best-effort goals, not guarantees.
 
+## Automated Security Scanning
+
+`mdex` uses multiple automated checks in CI:
+
+- Semgrep: custom Python security rules in `.semgrep/mdex-python.yml` (YAML deserialization, pickle deserialization, path handling hotspots)
+- Dependency review: GitHub Dependency Review Action on pull requests
+- Secret scanning in CI: `gitleaks/gitleaks-action`
+
+If GitHub CodeQL default setup is enabled at the repository level, alerts are also reviewed as part of security triage.
+
 ## Disclosure Process
 
 - Reports are triaged privately.
