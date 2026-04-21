@@ -9,9 +9,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from packaging.markers import default_environment
-from packaging.requirements import Requirement
-from packaging.version import Version
+try:
+    from packaging.markers import default_environment
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+except ModuleNotFoundError:
+    # The lock installer runs before project dependencies are installed.
+    # Fall back to pip's vendored packaging so clean CI runners can bootstrap.
+    from pip._vendor.packaging.markers import default_environment
+    from pip._vendor.packaging.requirements import Requirement
+    from pip._vendor.packaging.version import Version
 
 try:
     import tomllib  # type: ignore[attr-defined]

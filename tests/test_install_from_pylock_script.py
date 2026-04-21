@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import json
 import tomllib
@@ -25,6 +26,25 @@ def _load_script_module() -> ModuleType:
 
 def _write_lock(path: Path, body: str) -> None:
     path.write_text(textwrap.dedent(body).strip() + "\n", encoding="utf-8")
+
+
+def test_script_imports_with_pip_vendored_packaging(monkeypatch: pytest.MonkeyPatch) -> None:
+    script_path = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "install_from_pylock.py"
+    source = script_path.read_text(encoding="utf-8")
+    original_import = builtins.__import__
+
+    def fake_import(name: str, globals=None, locals=None, fromlist=(), level: int = 0):
+        if name == "packaging" or name.startswith("packaging."):
+            raise ModuleNotFoundError("No module named 'packaging'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    namespace = {"__file__": str(script_path), "__name__": "install_from_pylock_fallback_test"}
+    exec(compile(source, str(script_path), "exec"), namespace)
+
+    requirement = namespace["Requirement"]('typing_extensions<5.0,>=4.6; python_version < "3.13"')
+    assert requirement.name == "typing_extensions"
+    assert callable(namespace["default_environment"])
 
 
 def test_requirements_from_pylock_includes_hashes(tmp_path: Path) -> None:
