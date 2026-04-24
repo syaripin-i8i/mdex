@@ -17,8 +17,10 @@ until PyPI Trusted Publisher registration is complete.
 
 1. Update `pylock.toml`:
    - `python -m pip lock -e ".[dev]" -o pylock.toml`
-2. Update `CHANGELOG.md`.
-3. Run local verification:
+2. Update release hash catalog:
+   - `python .github/scripts/export_release_hashes.py --lock pylock.toml --output .github/locks/pypi_release_hashes.json`
+3. Update `CHANGELOG.md`.
+4. Run local verification:
    - `python -m pytest -q`
    - `python -m build`
    - `python -m twine check dist/*`
@@ -33,11 +35,12 @@ gh workflow run release.yml
 
 The workflow performs:
 
-1. build (`python -m build`)
-2. metadata validation (`python -m twine check dist/*`)
-3. sdist install smoke (`pip install dist/*.tar.gz` then `mdex --help`)
-4. wheel install smoke (`pip install dist/*.whl` then `mdex --help`)
-5. Trusted Publishing upload with attestation
+1. lockfile-driven install (`python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .`)
+2. build (`python -m build`)
+3. metadata validation (`python -m twine check dist/*`)
+4. sdist install smoke (`pip install dist/*.tar.gz` then `mdex --help`)
+5. wheel install smoke (`pip install dist/*.whl` then `mdex --help`)
+6. Trusted Publishing upload with attestation
 
 ## Future Automation
 

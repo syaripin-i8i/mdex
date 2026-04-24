@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from mdex.builder import build_index
-from mdex.context import select_context
+from mdex.context import resolve_context_scoring_config, select_context
 from mdex.dbresolve import (
     DbResolutionError,
+    RuntimeContext,
     load_runtime_context,
     resolve_db_path,
     resolve_scan_config_path,
@@ -48,8 +49,11 @@ def _force_utf8_stdio() -> None:
             continue
 
 
-def _emit_payload(payload: dict[str, Any], *, stderr: bool) -> None:
-    output = json.dumps(payload, ensure_ascii=False)
+def _emit_payload(payload: Any, *, stderr: bool = False, pretty: bool = False) -> None:
+    if pretty:
+        output = json.dumps(payload, ensure_ascii=False, indent=2)
+    else:
+        output = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if stderr:
         print(output, file=sys.stderr)
     else:
@@ -104,7 +108,36 @@ def _print_nodes(nodes: list[dict[str, Any]], output_format: str) -> None:
     if output_format == "table":
         _print_node_table(sorted_nodes)
     else:
-        print(json.dumps(sorted_nodes, ensure_ascii=False, indent=2))
+        _emit_payload(sorted_nodes, pretty=True)
+
+
+def _resolve_context_scoring(
+    db_info: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    runtime_config = db_info.get("config", {})
+    if not isinstance(runtime_config, dict):
+        runtime_config = {}
+
+    scan_config: dict[str, Any] = {}
+    repo_root_raw = str(db_info.get("repo_root", "") or "").strip()
+    config_path_raw = str(db_info.get("config_path", "") or "").strip()
+    if repo_root_raw:
+        repo_root = Path(repo_root_raw)
+        runtime_context = RuntimeContext(
+            repo_root=repo_root,
+            config_path=Path(config_path_raw) if config_path_raw else (repo_root / ".mdex" / "config.json"),
+            config=runtime_config,
+        )
+        try:
+            scan_config_path = resolve_scan_config_path(runtime_context)
+            scan_config = _load_json(str(scan_config_path), optional=True)
+        except Exception:
+            scan_config = {}
+
+    return resolve_context_scoring_config(
+        runtime_config=runtime_config,
+        scan_config=scan_config,
+    )
 
 
 def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any] | None:
@@ -181,7 +214,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         },
         "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    _emit_payload(payload, pretty=True)
     return 0
 
 
@@ -328,7 +361,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
         "incoming": incoming,
         "stats": stats,
     }
-    print(json.dumps(output, ensure_ascii=False, indent=2))
+    _emit_payload(output, pretty=True)
     return 0
 
 
@@ -350,7 +383,7 @@ def _cmd_related(args: argparse.Namespace) -> int:
         "node": node,
         "related": results,
     }
-    print(json.dumps(output, ensure_ascii=False, indent=2))
+    _emit_payload(output, pretty=True)
     return 0
 
 
@@ -372,7 +405,7 @@ def _cmd_first(args: argparse.Namespace) -> int:
         "node": node,
         "prerequisites": prerequisites,
     }
-    print(json.dumps(output, ensure_ascii=False, indent=2))
+    _emit_payload(output, pretty=True)
     return 0
 
 
@@ -429,7 +462,7 @@ def _cmd_stale(args: argparse.Namespace) -> int:
     if args.format == "table":
         _print_stale_table(rows)
     else:
-        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        _emit_payload(rows, pretty=True)
     return 0
 
 
@@ -438,6 +471,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
+    scoring_config, scoring_source = _resolve_context_scoring(db_info)
 
     try:
         result = select_context(
@@ -447,12 +481,14 @@ def _cmd_context(args: argparse.Namespace) -> int:
             limit=int(args.limit),
             include_content=bool(args.include_content),
             actionable=bool(args.actionable),
+            scoring_config=scoring_config,
+            scoring_config_source=scoring_source,
         )
     except Exception as exc:
         _emit_error("context selection failed", detail=str(exc))
         return 2
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _emit_payload(result, pretty=True)
     return 0
 
 
@@ -461,6 +497,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
+    scoring_config, scoring_source = _resolve_context_scoring(db_info)
 
     try:
         payload = build_start_payload(
@@ -470,12 +507,14 @@ def _cmd_start(args: argparse.Namespace) -> int:
             budget=int(args.budget),
             limit=int(args.limit),
             include_content=bool(args.include_content),
+            scoring_config=scoring_config,
+            scoring_config_source=scoring_source,
         )
     except Exception as exc:
         _emit_error("start failed", detail=str(exc))
         return 2
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    _emit_payload(payload, pretty=True)
     return 0
 
 
@@ -525,7 +564,7 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
         _emit_error(str(result.get("error", "enrich failed")), **details)
         return 2
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _emit_payload(result, pretty=True)
     return 0
 
 
@@ -562,7 +601,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
         _emit_error("impact failed", detail=str(exc))
         return 2
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    _emit_payload(payload, pretty=True)
     return 0
 
 
@@ -592,7 +631,7 @@ def _cmd_finish(args: argparse.Namespace) -> int:
         _emit_error("finish failed", detail=str(exc))
         return 2
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    _emit_payload(payload, pretty=True)
     return 0
 
 
@@ -617,7 +656,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
         _emit_error("new failed", detail=str(exc))
         return 2
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    _emit_payload(payload, pretty=True)
     return 0
 
 
@@ -632,7 +671,7 @@ def _cmd_stamp(args: argparse.Namespace) -> int:
         details = {key: value for key, value in result.items() if key not in {"status", "error"}}
         _emit_error(str(result.get("error", "stamp failed")), **details)
         return 2
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _emit_payload(result, pretty=True)
     return 0
 
 

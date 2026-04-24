@@ -5,6 +5,9 @@
   "description": "Contract for mdex finish JSON output",
   "type": "object",
   "required": [
+    "status",
+    "noop",
+    "noop_reason",
     "task",
     "dry_run",
     "db",
@@ -17,6 +20,18 @@
     "requires_manual_targeting"
   ],
   "properties": {
+    "status": {
+      "type": "string",
+      "description": "Execution status for the finish command. success indicates JSON payload contract completed."
+    },
+    "noop": {
+      "type": "boolean",
+      "description": "True when finish completes successfully without detected changes or apply operations."
+    },
+    "noop_reason": {
+      "type": "string",
+      "description": "Machine-readable reason for noop classification."
+    },
     "task": {
       "type": "string",
       "description": "Task label passed to mdex finish."

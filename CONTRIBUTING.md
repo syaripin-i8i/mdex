@@ -32,6 +32,8 @@ python -m pytest -q
 
 - Primary CI includes Python 3.10, so Python 3.11+ stdlib imports such as `tomllib` must use a `tomli` fallback or a preloaded shim in test-only code.
 - Bootstrap scripts that run before lockfile dependencies are installed must not require packages provided by that same lockfile. Prefer stdlib modules first, then tightly scoped vendored fallbacks when unavoidable.
+- `pip._vendor.packaging` fallback is currently accepted **only** for bootstrap (`.github/scripts/install_from_pylock.py`) so clean runners can install lock dependencies; do not expand this dependency to runtime modules.
+- `tests/conftest.py` の `tomli -> tomllib` shim は Python 3.10 test collection の互換層として維持する。互換層を移設する場合も、3.10 collection error を再発させないこと。
 
 ## Contribution Scope
 

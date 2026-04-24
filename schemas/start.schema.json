@@ -8,8 +8,10 @@
     "task",
     "db",
     "index_status",
+    "entrypoint_reason",
     "recommended_read_order",
     "recommended_next_actions",
+    "recommended_next_actions_v2",
     "deferred_nodes",
     "confidence",
     "why_this_set",
@@ -55,6 +57,9 @@
       },
       "additionalProperties": true
     },
+    "entrypoint_reason": {
+      "type": "string"
+    },
     "recommended_read_order": {
       "type": "array",
       "items": {
@@ -65,6 +70,12 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "recommended_next_actions_v2": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/actionV2Item"
       }
     },
     "deferred_nodes": {
@@ -136,6 +147,29 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "actionV2Item": {
+      "type": "object",
+      "required": [
+        "command",
+        "args",
+        "reason"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "reason": {
           "type": "string"

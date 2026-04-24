@@ -50,5 +50,8 @@ def test_readme_quality_repo_expected_outputs_are_in_sync() -> None:
     assert '"id": "decision/a.md"' in impact_block
 
     assert '"task": "root fix"' in section
+    assert '"status": "success"' in section
     assert '"dry_run": true' in section
+    assert '"noop": true' in section
+    assert '"noop_reason": "dry-run completed with no changed files and no enrich candidates"' in section
     assert '"requires_manual_targeting": false' in section

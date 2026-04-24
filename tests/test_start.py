@@ -12,6 +12,9 @@ def test_build_start_payload_uses_context_and_metadata(monkeypatch: pytest.Monke
         lambda *_args, **_kwargs: {
             "recommended_read_order": [{"id": "design/root.md"}],
             "recommended_next_actions": ["open design/root.md"],
+            "recommended_next_actions_v2": [
+                {"command": "open", "args": ["design/root.md"], "reason": "read first"}
+            ],
             "deferred_nodes": [{"id": "notes/later.md"}],
             "confidence": 0.88,
             "why_this_set": ["dependency chain"],
@@ -35,6 +38,10 @@ def test_build_start_payload_uses_context_and_metadata(monkeypatch: pytest.Monke
     assert payload["db"] == {"path": "tmp.db", "source": "arg"}
     assert payload["index_status"]["ready"] is True
     assert payload["index_status"]["generated"] == "2026-04-19T00:00:00Z"
+    assert payload["index_status"]["fresh"] is False
+    assert payload["entrypoint_reason"] == "stale_index_refresh_recommended"
     assert payload["recommended_read_order"][0]["id"] == "design/root.md"
+    assert payload["recommended_next_actions_v2"][0]["command"] == "open"
+    assert "run mdex scan" in payload["recommended_next_actions"]
     assert payload["confidence"] == 0.88
     assert payload["budget"] == 456

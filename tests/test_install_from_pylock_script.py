@@ -91,6 +91,12 @@ def test_script_imports_with_pip_vendored_packaging(monkeypatch: pytest.MonkeyPa
     requirement = namespace["Requirement"]('typing_extensions<5.0,>=4.6; python_version < "3.13"')
     assert requirement.name == "typing_extensions"
     assert callable(namespace["default_environment"])
+    assert namespace["PACKAGING_IMPORT_SOURCE"] == "pip._vendor.packaging"
+
+
+def test_packaging_import_source_marker_is_defined() -> None:
+    module = _load_script_module()
+    assert module.PACKAGING_IMPORT_SOURCE in {"packaging", "pip._vendor.packaging"}
 
 
 def test_bootstrap_scripts_guard_tomllib_imports() -> None:

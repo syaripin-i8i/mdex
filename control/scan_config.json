@@ -25,5 +25,38 @@
   },
   "summary_max_sentences": 3,
   "summary_max_chars": 200,
+  "context_scoring": {
+    "keyword": {
+      "title": 3.0,
+      "summary": 1.5,
+      "tags": 2.2
+    },
+    "type_bonus": {
+      "design": 1.2,
+      "decision": 1.2,
+      "reference": 0.9,
+      "spec": 0.9,
+      "task": 0.4
+    },
+    "status_bonus": {
+      "active": 0.8,
+      "draft": 0.4,
+      "pending": 0.2,
+      "done": -0.5,
+      "archived": -0.7
+    },
+    "graph_boost_by_edge_type": {
+      "depends_on": 0.6,
+      "links_to": 0.35,
+      "relates_to": 0.2
+    },
+    "graph_default_boost": 0.15,
+    "recency_weight": 1.0,
+    "primary_keyword_search_multiplier": 5,
+    "secondary_keyword_search_multiplier": 2,
+    "primary_keyword_search_floor": 20,
+    "secondary_keyword_search_floor": 10,
+    "soft_budget_multiplier": 1.2
+  },
   "output_file": ".mdex/mdex_index.json"
 }

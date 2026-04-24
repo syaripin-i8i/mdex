@@ -97,6 +97,10 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 ```json
 {
   "task": "root decision",
+  "index_status": {
+    "fresh": true
+  },
+  "entrypoint_reason": "ranked_entrypoint_available",
   "recommended_read_order": [
     { "id": "spec/b.md" },
     { "id": "decision/a.md" },
@@ -106,6 +110,9 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
     "open spec/b.md",
     "open decision/a.md",
     "search code for root decision"
+  ],
+  "recommended_next_actions_v2": [
+    { "command": "open", "args": ["spec/b.md"], "reason": "read the recommended node first" }
   ]
 }
 ```
@@ -129,8 +136,11 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 
 ```json
 {
+  "status": "success",
   "task": "root fix",
   "dry_run": true,
+  "noop": true,
+  "noop_reason": "dry-run completed with no changed files and no enrich candidates",
   "changed_files": [],
   "enrich_candidates": [],
   "requires_manual_targeting": false
@@ -146,15 +156,16 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | command | primary keys |
 |---|---|
 | `scan` | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
-| `start` | `task`, `recommended_read_order`, `recommended_next_actions`, `confidence` |
-| `context` | `task`, `recommended_read_order`, `recommended_next_actions`, `deferred_nodes`, `confidence` |
+| `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `confidence` |
+| `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `deferred_nodes`, `confidence` |
 | `impact` | `inputs`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
-| `finish` | `task`, `dry_run`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
+| `finish` | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
 | db resolution error | `error`, `resolution_attempts` |
 
 `finish --dry-run` の成功判定:
 
 - `dry_run: true` は preview 実行（DB 更新なし）
+- `status: "success"` かつ `noop: true` は「正常な no-op 完了」
 - `changed_files`, `enrich_candidates` が空でも成功
 - `requires_manual_targeting: true` のときは `mdex enrich <node-id> --summary-file <path>` を明示ターゲットで実行
 
@@ -248,6 +259,8 @@ python .github/scripts/export_release_hashes.py --lock pylock.toml --output .git
 
 matrix (`ubuntu/macos/windows x 3.10/3.11/3.12`) で hash install を維持するため、`pylock.toml` 更新時は  
 `.github/locks/pypi_release_hashes.json` も同時更新してください。
+
+Python 3.13 は support matrix で「未サポート / 未検証」として扱います。詳細は `docs/support_matrix.md` を参照してください。
 
 ## Privacy Note
 

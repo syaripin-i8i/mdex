@@ -13,12 +13,16 @@ try:
     from packaging.markers import default_environment
     from packaging.requirements import Requirement
     from packaging.version import Version
+    PACKAGING_IMPORT_SOURCE = "packaging"
 except ModuleNotFoundError:
     # The lock installer runs before project dependencies are installed.
-    # Fall back to pip's vendored packaging so clean CI runners can bootstrap.
+    # Keep this fallback scoped to bootstrap scripts only; pip internals are
+    # not a stable public API, but clean CI runners need this guardrail before
+    # lockfile-managed dependencies are available.
     from pip._vendor.packaging.markers import default_environment
     from pip._vendor.packaging.requirements import Requirement
     from pip._vendor.packaging.version import Version
+    PACKAGING_IMPORT_SOURCE = "pip._vendor.packaging"
 
 try:
     import tomllib  # type: ignore[attr-defined]

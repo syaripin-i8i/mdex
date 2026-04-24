@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mdex.builder import build_index
-from mdex.context import select_context
+from mdex.context import resolve_context_scoring_config, select_context
 from mdex.indexer import write_sqlite
 
 
@@ -125,3 +125,77 @@ def test_select_context_skips_file_read_when_content_not_requested(
     monkeypatch.setattr(Path, "read_text", _blocked_read_text)
     result = select_context("root decision", str(db_path), budget=4000, limit=5, include_content=False)
     assert result["nodes"]
+
+
+def test_select_context_actionable_includes_structured_actions(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_context_actions_v2.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    result = select_context("root decision", str(db_path), budget=4000, limit=5, actionable=True)
+    assert result["recommended_next_actions"]
+    assert result["recommended_next_actions_v2"]
+    first = result["recommended_next_actions_v2"][0]
+    assert first["command"] == "open"
+    assert isinstance(first["args"], list)
+    assert isinstance(first["reason"], str)
+
+
+def test_resolve_context_scoring_prefers_runtime_config_over_scan_config() -> None:
+    scan_config = {
+        "context_scoring": {
+            "keyword": {"title": 9.9},
+            "soft_budget_multiplier": 1.1,
+        }
+    }
+    runtime_config = {
+        "context_scoring": {
+            "keyword": {"title": 4.4},
+            "soft_budget_multiplier": 1.5,
+        }
+    }
+
+    scoring, source = resolve_context_scoring_config(runtime_config=runtime_config, scan_config=scan_config)
+    assert source == "runtime_config"
+    assert scoring["keyword"]["title"] == 4.4
+    assert scoring["soft_budget_multiplier"] == 1.5
+
+
+def test_select_context_score_breakdown_records_config_source(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_context_config_source.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    scoring, source = resolve_context_scoring_config(
+        runtime_config={"context_scoring": {"keyword": {"title": 5.0}}},
+        scan_config={"context_scoring": {"keyword": {"title": 2.0}}},
+    )
+    result = select_context(
+        "root decision",
+        str(db_path),
+        budget=4000,
+        limit=5,
+        scoring_config=scoring,
+        scoring_config_source=source,
+    )
+    assert result["nodes"]
+    assert result["nodes"][0]["score_breakdown"]["config_source"] == "runtime_config"
+
+
+def test_select_context_ranking_regression_on_quality_fixture(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_context_regression.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    result = select_context("root decision", str(db_path), budget=4000, limit=5)
+    ranked = [row["id"] for row in result["nodes"][:3]]
+    assert ranked == ["decision/a.md", "design/root.md", "design/tie.md"]

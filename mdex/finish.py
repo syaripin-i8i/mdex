@@ -179,6 +179,35 @@ def _next_actions(
     return actions[:5]
 
 
+def _noop_state(
+    *,
+    dry_run: bool,
+    changed_rows: list[dict[str, Any]],
+    enrich_candidates: list[dict[str, Any]],
+    applied_enrichments: list[dict[str, Any]],
+    scan_payload: dict[str, Any],
+) -> tuple[bool, str]:
+    has_changed_files = bool(changed_rows)
+    has_candidates = bool(enrich_candidates)
+    has_applied = bool(applied_enrichments)
+    scan_ran = bool(scan_payload.get("ran", False))
+
+    if not has_changed_files and not has_candidates and not has_applied and not scan_ran:
+        if dry_run:
+            return True, "dry-run completed with no changed files and no enrich candidates"
+        return True, "no changes were detected and no follow-up actions were applied"
+
+    if has_candidates:
+        return False, "impact produced enrich candidates"
+    if has_changed_files:
+        return False, "changed files were detected"
+    if has_applied:
+        return False, "enrich updates were applied"
+    if scan_ran:
+        return False, "scan follow-up was executed"
+    return False, "non-noop finish path"
+
+
 def run_finish(
     *,
     task: str,
@@ -246,7 +275,17 @@ def run_finish(
 
     recommended = _next_actions(task, changed_files, enrich_candidates, requires_manual_targeting)
     changed_rows = [{"path": path, "source": "git"} for path in changed_files]
+    noop, noop_reason = _noop_state(
+        dry_run=bool(dry_run),
+        changed_rows=changed_rows,
+        enrich_candidates=enrich_candidates,
+        applied_enrichments=applied_enrichments,
+        scan_payload=scan_payload,
+    )
     return {
+        "status": "success",
+        "noop": bool(noop),
+        "noop_reason": noop_reason,
         "task": task,
         "dry_run": bool(dry_run),
         "db": {

@@ -9,16 +9,19 @@ from mdex.resolver import prerequisite_order, related_nodes
 from mdex.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
 
 KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"']+")
+MDEX_FIND_ACTION_RE = re.compile(r'^run mdex find "(?P<query>.*)"$')
 
-# Title is strongest lexical signal because it usually expresses scope succinctly.
-KEYWORD_TITLE_WEIGHT = 3.0
-# Summary is curated but shorter than body; keep medium importance.
-KEYWORD_SUMMARY_WEIGHT = 1.5
-# Tags are explicit intent markers; weight slightly above summary.
-KEYWORD_TAG_WEIGHT = 2.2
+DEFAULT_KEYWORD_WEIGHTS = {
+    # Title is strongest lexical signal because it usually expresses scope succinctly.
+    "title": 3.0,
+    # Summary is curated but shorter than body; keep medium importance.
+    "summary": 1.5,
+    # Tags are explicit intent markers; weight slightly above summary.
+    "tags": 2.2,
+}
 
-# Design/decision documents usually contain constraints and rationale needed before editing.
-TYPE_BONUS = {
+DEFAULT_TYPE_BONUS = {
+    # Design/decision documents usually contain constraints and rationale needed before editing.
     "design": 1.2,
     "decision": 1.2,
     # Reference/spec often explain interfaces and invariants.
@@ -28,8 +31,8 @@ TYPE_BONUS = {
     "task": 0.4,
 }
 
-# Active/draft work is more likely to influence current tasks.
-STATUS_BONUS = {
+DEFAULT_STATUS_BONUS = {
+    # Active/draft work is more likely to influence current tasks.
     "active": 0.8,
     "draft": 0.4,
     "pending": 0.2,
@@ -39,8 +42,8 @@ STATUS_BONUS = {
     "archived": -0.7,
 }
 
-# Graph proximity is useful, but weaker than direct lexical match.
-GRAPH_BOOST_BY_EDGE_TYPE = {
+DEFAULT_GRAPH_BOOST_BY_EDGE_TYPE = {
+    # Graph proximity is useful, but weaker than direct lexical match.
     # dependencies are strongest because they imply prerequisites.
     "depends_on": 0.6,
     # links_to is informative but looser than explicit dependency.
@@ -49,17 +52,31 @@ GRAPH_BOOST_BY_EDGE_TYPE = {
     "relates_to": 0.2,
 }
 
-# Fallback boost for unknown edge types. Keep it small to avoid overfitting.
-GRAPH_DEFAULT_BOOST = 0.15
+DEFAULT_GRAPH_DEFAULT_BOOST = 0.15
 
-# search_nodes limit multipliers used to gather candidates before graph expansion.
-PRIMARY_KEYWORD_SEARCH_MULTIPLIER = 5
-SECONDARY_KEYWORD_SEARCH_MULTIPLIER = 2
-PRIMARY_KEYWORD_SEARCH_FLOOR = 20
-SECONDARY_KEYWORD_SEARCH_FLOOR = 10
+DEFAULT_PRIMARY_KEYWORD_SEARCH_MULTIPLIER = 5
+DEFAULT_SECONDARY_KEYWORD_SEARCH_MULTIPLIER = 2
+DEFAULT_PRIMARY_KEYWORD_SEARCH_FLOOR = 20
+DEFAULT_SECONDARY_KEYWORD_SEARCH_FLOOR = 10
 
-# Context selection allows a soft overrun to avoid returning an empty set too often.
-SOFT_BUDGET_MULTIPLIER = 1.2
+DEFAULT_SOFT_BUDGET_MULTIPLIER = 1.2
+DEFAULT_RECENCY_WEIGHT = 1.0
+
+
+def _copy_default_scoring_config() -> dict[str, Any]:
+    return {
+        "keyword": dict(DEFAULT_KEYWORD_WEIGHTS),
+        "type_bonus": dict(DEFAULT_TYPE_BONUS),
+        "status_bonus": dict(DEFAULT_STATUS_BONUS),
+        "graph_boost_by_edge_type": dict(DEFAULT_GRAPH_BOOST_BY_EDGE_TYPE),
+        "graph_default_boost": float(DEFAULT_GRAPH_DEFAULT_BOOST),
+        "recency_weight": float(DEFAULT_RECENCY_WEIGHT),
+        "primary_keyword_search_multiplier": int(DEFAULT_PRIMARY_KEYWORD_SEARCH_MULTIPLIER),
+        "secondary_keyword_search_multiplier": int(DEFAULT_SECONDARY_KEYWORD_SEARCH_MULTIPLIER),
+        "primary_keyword_search_floor": int(DEFAULT_PRIMARY_KEYWORD_SEARCH_FLOOR),
+        "secondary_keyword_search_floor": int(DEFAULT_SECONDARY_KEYWORD_SEARCH_FLOOR),
+        "soft_budget_multiplier": float(DEFAULT_SOFT_BUDGET_MULTIPLIER),
+    }
 
 
 def _coerce_positive_int(value: Any, default: int) -> int:
@@ -70,6 +87,140 @@ def _coerce_positive_int(value: Any, default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_positive_float(value: Any, default: float) -> float:
+    parsed = _coerce_float(value, default)
+    if parsed <= 0:
+        return default
+    return parsed
+
+
+def _extract_scoring_section(config: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        return {}
+    section = config.get("context_scoring")
+    if isinstance(section, dict):
+        return section
+    return {}
+
+
+def _apply_scoring_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> bool:
+    if not isinstance(overrides, dict):
+        return False
+
+    changed = False
+
+    keyword = overrides.get("keyword")
+    if isinstance(keyword, dict):
+        keyword_map = dict(base["keyword"])
+        for key in ("title", "summary", "tags"):
+            if key not in keyword:
+                continue
+            next_value = _coerce_float(keyword.get(key), float(keyword_map[key]))
+            if next_value != float(keyword_map[key]):
+                keyword_map[key] = next_value
+                changed = True
+        base["keyword"] = keyword_map
+
+    type_bonus = overrides.get("type_bonus")
+    if isinstance(type_bonus, dict):
+        type_map = dict(base["type_bonus"])
+        for raw_key, raw_value in type_bonus.items():
+            key = str(raw_key).strip().lower()
+            if not key:
+                continue
+            prev_value = float(type_map.get(key, 0.0))
+            next_value = _coerce_float(raw_value, prev_value)
+            if key not in type_map or next_value != prev_value:
+                type_map[key] = next_value
+                changed = True
+        base["type_bonus"] = type_map
+
+    status_bonus = overrides.get("status_bonus")
+    if isinstance(status_bonus, dict):
+        status_map = dict(base["status_bonus"])
+        for raw_key, raw_value in status_bonus.items():
+            key = str(raw_key).strip().lower()
+            if not key:
+                continue
+            prev_value = float(status_map.get(key, 0.0))
+            next_value = _coerce_float(raw_value, prev_value)
+            if key not in status_map or next_value != prev_value:
+                status_map[key] = next_value
+                changed = True
+        base["status_bonus"] = status_map
+
+    graph_boost = overrides.get("graph_boost_by_edge_type")
+    if isinstance(graph_boost, dict):
+        graph_map = dict(base["graph_boost_by_edge_type"])
+        for raw_key, raw_value in graph_boost.items():
+            key = str(raw_key).strip().lower()
+            if not key:
+                continue
+            prev_value = float(graph_map.get(key, 0.0))
+            next_value = _coerce_float(raw_value, prev_value)
+            if key not in graph_map or next_value != prev_value:
+                graph_map[key] = next_value
+                changed = True
+        base["graph_boost_by_edge_type"] = graph_map
+
+    scalar_float_keys = (
+        "graph_default_boost",
+        "recency_weight",
+        "soft_budget_multiplier",
+    )
+    for key in scalar_float_keys:
+        if key not in overrides:
+            continue
+        prev_value = float(base[key])
+        next_value = _coerce_positive_float(overrides.get(key), prev_value)
+        if next_value != prev_value:
+            base[key] = next_value
+            changed = True
+
+    scalar_int_keys = (
+        "primary_keyword_search_multiplier",
+        "secondary_keyword_search_multiplier",
+        "primary_keyword_search_floor",
+        "secondary_keyword_search_floor",
+    )
+    for key in scalar_int_keys:
+        if key not in overrides:
+            continue
+        prev_value = int(base[key])
+        next_value = _coerce_positive_int(overrides.get(key), prev_value)
+        if next_value != prev_value:
+            base[key] = next_value
+            changed = True
+
+    return changed
+
+
+def resolve_context_scoring_config(
+    *,
+    runtime_config: dict[str, Any] | None = None,
+    scan_config: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str]:
+    resolved = _copy_default_scoring_config()
+    source = "defaults"
+
+    scan_section = _extract_scoring_section(scan_config)
+    if _apply_scoring_overrides(resolved, scan_section):
+        source = "scan_config"
+
+    runtime_section = _extract_scoring_section(runtime_config)
+    if _apply_scoring_overrides(resolved, runtime_section):
+        source = "runtime_config"
+
+    return resolved, source
 
 
 def _extract_keywords(query: str) -> list[str]:
@@ -124,21 +275,31 @@ def _recency_score(value: str) -> float:
     return 0.0
 
 
-def _keyword_match_breakdown(node: dict[str, Any], keywords: list[str]) -> dict[str, float]:
+def _keyword_match_breakdown(
+    node: dict[str, Any],
+    keywords: list[str],
+    *,
+    scoring: dict[str, Any],
+) -> dict[str, float]:
     title = str(node.get("title", "")).lower()
     summary = str(node.get("summary", "")).lower()
     tags = {str(item).strip().lower() for item in node.get("tags", []) if str(item).strip()}
+
+    keyword_weights = scoring.get("keyword", DEFAULT_KEYWORD_WEIGHTS)
+    title_weight = float(keyword_weights.get("title", DEFAULT_KEYWORD_WEIGHTS["title"]))
+    summary_weight = float(keyword_weights.get("summary", DEFAULT_KEYWORD_WEIGHTS["summary"]))
+    tags_weight = float(keyword_weights.get("tags", DEFAULT_KEYWORD_WEIGHTS["tags"]))
 
     title_score = 0.0
     summary_score = 0.0
     tags_score = 0.0
     for keyword in keywords:
         if keyword in title:
-            title_score += KEYWORD_TITLE_WEIGHT
+            title_score += title_weight
         if keyword in summary:
-            summary_score += KEYWORD_SUMMARY_WEIGHT
+            summary_score += summary_weight
         if keyword in tags:
-            tags_score += KEYWORD_TAG_WEIGHT
+            tags_score += tags_weight
 
     total = title_score + summary_score + tags_score
     return {
@@ -149,11 +310,17 @@ def _keyword_match_breakdown(node: dict[str, Any], keywords: list[str]) -> dict[
     }
 
 
-def _type_status_breakdown(node: dict[str, Any]) -> dict[str, float]:
+def _type_status_breakdown(
+    node: dict[str, Any],
+    *,
+    scoring: dict[str, Any],
+) -> dict[str, float]:
     node_type = str(node.get("type", "")).strip().lower()
     status = str(node.get("status", "")).strip().lower()
-    type_bonus = TYPE_BONUS.get(node_type, 0.0)
-    status_bonus = STATUS_BONUS.get(status, 0.0)
+    type_bonus_map = scoring.get("type_bonus", DEFAULT_TYPE_BONUS)
+    status_bonus_map = scoring.get("status_bonus", DEFAULT_STATUS_BONUS)
+    type_bonus = float(type_bonus_map.get(node_type, 0.0))
+    status_bonus = float(status_bonus_map.get(status, 0.0))
     total = type_bonus + status_bonus
     return {
         "type_bonus": round(type_bonus, 3),
@@ -352,6 +519,42 @@ def _next_actions(
     return actions[:5]
 
 
+def _structured_action(command: str, args: list[str], reason: str) -> dict[str, Any]:
+    return {
+        "command": command,
+        "args": [item for item in args if str(item).strip()],
+        "reason": reason,
+    }
+
+
+def _action_v2_from_legacy(action: str) -> dict[str, Any]:
+    text = action.strip()
+    if text.startswith("open "):
+        node_id = text[5:].strip()
+        return _structured_action("open", [node_id], "read the recommended node first")
+
+    if text.startswith("search code for "):
+        query = text[len("search code for ") :].strip()
+        return _structured_action("search_code", [query], "expand evidence from source code")
+
+    find_match = MDEX_FIND_ACTION_RE.match(text)
+    if find_match:
+        query = str(find_match.group("query")).strip()
+        return _structured_action("mdex", ["find", query], "collect broader candidates when confidence is low")
+
+    if text == "run mdex context with a more specific query":
+        return _structured_action("mdex", ["context"], "retry with a narrower query for better ranking")
+
+    if text == "run mdex scan":
+        return _structured_action("mdex", ["scan"], "refresh index metadata before selecting an entrypoint")
+
+    return _structured_action("note", [text], "manual follow-up action")
+
+
+def _next_actions_v2(actions: list[str]) -> list[dict[str, Any]]:
+    return [_action_v2_from_legacy(action) for action in actions if str(action).strip()]
+
+
 def select_context(
     query: str,
     db_path: str,
@@ -360,7 +563,13 @@ def select_context(
     *,
     include_content: bool = False,
     actionable: bool = False,
+    scoring_config: dict[str, Any] | None = None,
+    scoring_config_source: str = "defaults",
 ) -> dict[str, Any]:
+    active_scoring = _copy_default_scoring_config()
+    if isinstance(scoring_config, dict):
+        _apply_scoring_overrides(active_scoring, scoring_config)
+
     keywords = _extract_keywords(query)
     if not keywords:
         return {
@@ -370,6 +579,7 @@ def select_context(
             "budget": int(budget),
             "recommended_read_order": [],
             "recommended_next_actions": [],
+            "recommended_next_actions_v2": [],
             "deferred_nodes": [],
             "confidence": 0.0,
             "why_this_set": [],
@@ -381,12 +591,29 @@ def select_context(
     all_nodes = list_nodes(db_path)
     all_node_map = {str(node.get("id", "")).strip(): node for node in all_nodes if str(node.get("id", "")).strip()}
     candidate_map: dict[str, dict[str, Any]] = {}
+    primary_multiplier = _coerce_positive_int(
+        active_scoring.get("primary_keyword_search_multiplier"),
+        DEFAULT_PRIMARY_KEYWORD_SEARCH_MULTIPLIER,
+    )
+    secondary_multiplier = _coerce_positive_int(
+        active_scoring.get("secondary_keyword_search_multiplier"),
+        DEFAULT_SECONDARY_KEYWORD_SEARCH_MULTIPLIER,
+    )
+    primary_floor = _coerce_positive_int(
+        active_scoring.get("primary_keyword_search_floor"),
+        DEFAULT_PRIMARY_KEYWORD_SEARCH_FLOOR,
+    )
+    secondary_floor = _coerce_positive_int(
+        active_scoring.get("secondary_keyword_search_floor"),
+        DEFAULT_SECONDARY_KEYWORD_SEARCH_FLOOR,
+    )
+
     for index, keyword in enumerate(keywords):
-        search_limit = max(PRIMARY_KEYWORD_SEARCH_FLOOR, safe_limit * PRIMARY_KEYWORD_SEARCH_MULTIPLIER)
+        search_limit = max(primary_floor, safe_limit * primary_multiplier)
         if index > 0:
             search_limit = max(
-                SECONDARY_KEYWORD_SEARCH_FLOOR,
-                safe_limit * SECONDARY_KEYWORD_SEARCH_MULTIPLIER,
+                secondary_floor,
+                safe_limit * secondary_multiplier,
             )
         for node in search_nodes(db_path, keyword, limit=search_limit, nodes=all_nodes):
             node_id = str(node.get("id", "")).strip()
@@ -401,6 +628,7 @@ def select_context(
             "budget": safe_budget,
             "recommended_read_order": [],
             "recommended_next_actions": [],
+            "recommended_next_actions_v2": [],
             "deferred_nodes": [],
             "confidence": 0.0,
             "why_this_set": [],
@@ -413,7 +641,9 @@ def select_context(
         src = str(edge.get("from", "")).strip()
         dst = str(edge.get("to", "")).strip()
         edge_type = str(edge.get("type", "")).strip() or "links_to"
-        boost = GRAPH_BOOST_BY_EDGE_TYPE.get(edge_type, GRAPH_DEFAULT_BOOST)
+        graph_boost_map = active_scoring.get("graph_boost_by_edge_type", DEFAULT_GRAPH_BOOST_BY_EDGE_TYPE)
+        default_graph_boost = float(active_scoring.get("graph_default_boost", DEFAULT_GRAPH_DEFAULT_BOOST))
+        boost = float(graph_boost_map.get(edge_type, default_graph_boost))
         if not src or not dst:
             continue
         if src in seed_ids and dst not in seed_ids:
@@ -428,10 +658,12 @@ def select_context(
             candidate_map[linked_id] = all_node_map[linked_id]
 
     scored_rows: list[tuple[float, str, dict[str, Any], dict[str, Any]]] = []
+    recency_weight = float(active_scoring.get("recency_weight", DEFAULT_RECENCY_WEIGHT))
     for node_id, node in candidate_map.items():
-        keyword_breakdown = _keyword_match_breakdown(node, keywords)
-        type_status_breakdown = _type_status_breakdown(node)
-        recency = _recency_score(str(node.get("updated", "")))
+        keyword_breakdown = _keyword_match_breakdown(node, keywords, scoring=active_scoring)
+        type_status_breakdown = _type_status_breakdown(node, scoring=active_scoring)
+        recency_raw = _recency_score(str(node.get("updated", "")))
+        recency = recency_raw * recency_weight
         graph = graph_boost.get(node_id, 0.0)
         total_score = (
             float(keyword_breakdown["total"])
@@ -443,7 +675,10 @@ def select_context(
             "keyword": keyword_breakdown,
             "type_status": type_status_breakdown,
             "recency": round(recency, 3),
+            "recency_raw": round(recency_raw, 3),
+            "recency_weight": round(recency_weight, 3),
             "graph_boost": round(graph, 3),
+            "config_source": scoring_config_source,
             "total": round(total_score, 3),
         }
         scored_rows.append((total_score, node_id, node, score_breakdown))
@@ -453,7 +688,8 @@ def select_context(
     scan_root = get_scan_root(db_path, default=".")
     selected_nodes: list[dict[str, Any]] = []
     total_tokens = 0
-    soft_cap = int(safe_budget * SOFT_BUDGET_MULTIPLIER)
+    soft_budget_multiplier = float(active_scoring.get("soft_budget_multiplier", DEFAULT_SOFT_BUDGET_MULTIPLIER))
+    soft_cap = int(safe_budget * soft_budget_multiplier)
 
     for score, node_id, node, score_breakdown in scored_rows:
         if len(selected_nodes) >= safe_limit:
@@ -474,6 +710,7 @@ def select_context(
                 "token_cost": {
                     "estimated_tokens": estimated_tokens,
                     "soft_cap": soft_cap,
+                    "soft_budget_multiplier": round(soft_budget_multiplier, 3),
                 },
             },
             "estimated_tokens": estimated_tokens,
@@ -500,11 +737,13 @@ def select_context(
     confidence = _confidence(selected_nodes)
     why_this_set = _why_this_set(selected_nodes, confidence, node_map)
     next_actions = _next_actions(query, read_order, confidence, node_map)
+    next_actions_v2 = _next_actions_v2(next_actions)
 
     payload.update(
         {
             "recommended_read_order": read_order,
             "recommended_next_actions": next_actions,
+            "recommended_next_actions_v2": next_actions_v2,
             "deferred_nodes": deferred,
             "confidence": confidence,
             "why_this_set": why_this_set,

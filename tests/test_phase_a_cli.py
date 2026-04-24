@@ -576,6 +576,7 @@ def test_context_actionable_and_start_contract(
     assert "nodes" in actionable_payload
     assert actionable_payload["recommended_read_order"]
     assert actionable_payload["recommended_next_actions"]
+    assert actionable_payload["recommended_next_actions_v2"]
     assert "confidence" in actionable_payload
     assert "why_this_set" in actionable_payload
 
@@ -583,8 +584,56 @@ def test_context_actionable_and_start_contract(
     assert start.returncode == 0
     start_payload = json.loads(start.stdout)
     assert start_payload["task"] == "root decision"
+    assert "entrypoint_reason" in start_payload
     assert start_payload["recommended_read_order"]
     assert start_payload["recommended_next_actions"]
+    assert start_payload["recommended_next_actions_v2"]
+
+
+def test_context_scoring_prefers_runtime_config_source_in_cli(tmp_path: Path) -> None:
+    repo = tmp_path / "context_scoring_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    (repo / "docs" / "root.md").write_text(
+        """---
+type: design
+status: active
+updated: 2026-04-24
+---
+# Root
+
+root decision context
+""",
+        encoding="utf-8",
+    )
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["."],
+            "include_extensions": [".md"],
+            "exclude_patterns": [],
+            "node_type_map": {"design": ["docs"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+            "context_scoring": {"keyword": {"title": 1.0}},
+        },
+    )
+    _write_json(
+        repo / ".mdex" / "config.json",
+        {
+            "context_scoring": {"keyword": {"title": 9.0}},
+        },
+    )
+
+    scan = _run_cli("scan", "--root", ".", cwd=repo)
+    assert scan.returncode == 0
+
+    context_result = _run_cli("context", "root decision", "--actionable", cwd=repo)
+    assert context_result.returncode == 0
+    payload = json.loads(context_result.stdout)
+    assert payload["nodes"]
+    assert payload["nodes"][0]["score_breakdown"]["config_source"] == "runtime_config"
 
 
 def test_finish_dry_run_uses_git_changed_files_without_writes(
@@ -607,6 +656,8 @@ def test_finish_dry_run_uses_git_changed_files_without_writes(
     assert finish.returncode == 0
     payload = json.loads(finish.stdout)
     assert payload["dry_run"] is True
+    assert payload["status"] == "success"
+    assert payload["noop"] in {True, False}
     assert payload["changed_files"]
     assert isinstance(payload["enrich_candidates"], list)
     assert payload["applied_enrichments"] == []
@@ -671,6 +722,8 @@ def test_finish_apply_and_scan(
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["requires_manual_targeting"] is False
+    assert payload["status"] == "success"
+    assert payload["noop"] is False
     assert payload["applied_enrichments"]
     assert payload["scan"]["requested"] is True
     assert payload["scan"]["ran"] is True
@@ -710,6 +763,8 @@ def test_finish_requires_manual_targeting_when_multiple_primary(
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert payload["requires_manual_targeting"] is True
+    assert payload["status"] == "success"
+    assert payload["noop"] is False
     assert payload["applied_enrichments"] == []
 
 

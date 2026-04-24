@@ -19,7 +19,7 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/syaripin-i8i/mdex"
 Issues = "https://github.com/syaripin-i8i/mdex/issues"
-Changelog = "https://github.com/syaripin-i8i/mdex/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/syaripin-i8i/mdex/blob/master/CHANGELOG.md"
 Security = "https://github.com/syaripin-i8i/mdex/security/policy"
 
 [project.optional-dependencies]

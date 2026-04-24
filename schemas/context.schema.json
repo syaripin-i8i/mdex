@@ -40,6 +40,12 @@
         "type": "string"
       }
     },
+    "recommended_next_actions_v2": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/actionV2Item"
+      }
+    },
     "deferred_nodes": {
       "type": "array",
       "items": {
@@ -95,6 +101,29 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "actionV2Item": {
+      "type": "object",
+      "required": [
+        "command",
+        "args",
+        "reason"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "reason": {
           "type": "string"

@@ -21,3 +21,5 @@ venv/
 /*_index*.db
 /*_index*.sqlite
 /*_index*.sqlite3
+**/*.tmp.md
+**/.tmp/

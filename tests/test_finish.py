@@ -158,6 +158,9 @@ def test_run_finish_dry_run_keeps_scan_not_ran(
         scan=True,
     )
     assert payload["dry_run"] is True
+    assert payload["status"] == "success"
+    assert payload["noop"] is True
+    assert "no changed files" in payload["noop_reason"]
     assert payload["scan"]["requested"] is True
     assert payload["scan"]["ran"] is False
     assert payload["requires_manual_targeting"] is False
@@ -213,6 +216,8 @@ def test_run_finish_sets_manual_targeting_for_multiple_primaries(
     )
 
     assert payload["requires_manual_targeting"] is True
+    assert payload["status"] == "success"
+    assert payload["noop"] is False
     assert payload["applied_enrichments"] == []
     assert enrich_calls == []
 
@@ -263,6 +268,8 @@ def test_run_finish_applies_enrich_and_runs_scan(
         summary_file=str(summary_file),
         scan=True,
     )
+    assert payload["status"] == "success"
+    assert payload["noop"] is False
     assert payload["requires_manual_targeting"] is False
     assert payload["applied_enrichments"][0]["status"] == "enriched"
     assert payload["scan"]["ran"] is True
