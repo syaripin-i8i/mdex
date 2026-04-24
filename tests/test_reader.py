@@ -44,5 +44,8 @@ def test_resolve_node_path_rejects_symlink_escape(tmp_path: Path) -> None:
     except (OSError, NotImplementedError):
         pytest.skip("symlink creation is not available in this environment")
 
-    with pytest.raises(NodePathError, match="path containment violation"):
+    with pytest.raises(NodePathError) as exc_info:
         resolve_node_path(str(root), "linked.md")
+
+    assert exc_info.value.error == "path containment violation"
+    assert exc_info.value.detail == "resolved path escapes scan_root"
