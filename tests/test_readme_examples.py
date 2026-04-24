@@ -38,9 +38,15 @@ def test_readme_quality_repo_expected_outputs_are_in_sync() -> None:
     start_block_start = section.index('"task": "root decision"')
     start_block_end = section.index("```", start_block_start)
     start_block = section[start_block_start:start_block_end]
+    assert '"index_status": {' in start_block
+    assert '"fresh": true' in start_block
+    assert '"entrypoint_reason": "ranked_entrypoint_available"' in start_block
     assert start_block.index('"id": "spec/b.md"') < start_block.index('"id": "decision/a.md"')
     assert '"id": "design/root.md"' in start_block
     assert '"recommended_next_actions": [' in start_block
+    assert '"recommended_next_actions_v2": [' in start_block
+    assert '"command": "open"' in start_block
+    assert '"args": ["spec/b.md"]' in start_block
 
     impact_start = section.index('"inputs": ["design/root.md"]')
     impact_end = section.index("```", impact_start)

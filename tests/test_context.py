@@ -164,6 +164,25 @@ def test_resolve_context_scoring_prefers_runtime_config_over_scan_config() -> No
     assert scoring["soft_budget_multiplier"] == 1.5
 
 
+def test_resolve_context_scoring_invalid_values_fall_back_to_defaults() -> None:
+    scoring, source = resolve_context_scoring_config(
+        runtime_config={
+            "context_scoring": {
+                "keyword": {"title": "not-a-number"},
+                "graph_default_boost": 0,
+                "soft_budget_multiplier": -1,
+                "primary_keyword_search_multiplier": "oops",
+            }
+        }
+    )
+
+    assert source == "defaults"
+    assert scoring["keyword"]["title"] == 3.0
+    assert scoring["graph_default_boost"] == 0.15
+    assert scoring["soft_budget_multiplier"] == 1.2
+    assert scoring["primary_keyword_search_multiplier"] == 5
+
+
 def test_select_context_score_breakdown_records_config_source(
     quality_repo: Path,
     quality_config: dict[str, object],
