@@ -15,6 +15,7 @@ README_PATH = PROJECT_ROOT / "README.md"
 SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 GITIGNORE_PATH = PROJECT_ROOT / ".gitignore"
 SCAN_CONFIG_PATH = PROJECT_ROOT / "control" / "scan_config.json"
+TASKS_DIR = PROJECT_ROOT / "tasks"
 
 
 def _markdown_docs_outside_archive() -> list[Path]:
@@ -244,3 +245,29 @@ def test_repo_local_tasks_are_flattened_to_status_managed_root() -> None:
     legacy_dirs = [PROJECT_ROOT / "tasks" / "pending", PROJECT_ROOT / "tasks" / "done"]
     present = [path.relative_to(PROJECT_ROOT).as_posix() for path in legacy_dirs if path.exists()]
     assert not present, f"repo-local tasks should live under tasks/ and use frontmatter status: {present}"
+
+
+def test_repo_local_tasks_do_not_keep_duplicate_frontmatter_blocks() -> None:
+    offenders: list[str] = []
+    for path in sorted(TASKS_DIR.glob("T*.md")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if not lines or lines[0].strip() != "---":
+            continue
+
+        try:
+            frontmatter_end = next(
+                index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"
+            )
+        except StopIteration:
+            continue
+
+        next_content = ""
+        for line in lines[frontmatter_end + 1 :]:
+            if line.strip():
+                next_content = line.strip()
+                break
+
+        if next_content == "---":
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert not offenders, f"repo-local task files contain duplicate frontmatter blocks: {offenders}"
