@@ -14,6 +14,7 @@ ARCHIVE_DIR = DOCS_DIR / "archive"
 README_PATH = PROJECT_ROOT / "README.md"
 SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 GITIGNORE_PATH = PROJECT_ROOT / ".gitignore"
+SCAN_CONFIG_PATH = PROJECT_ROOT / "control" / "scan_config.json"
 
 
 def _markdown_docs_outside_archive() -> list[Path]:
@@ -230,6 +231,13 @@ def test_local_only_autonomous_artifacts_are_gitignored() -> None:
     assert result.returncode == 0, result.stderr
     tracked = [line for line in result.stdout.splitlines() if line.strip()]
     assert not tracked, f"local-only autonomous artifacts must not be tracked: {tracked}"
+
+
+def test_local_only_autonomous_reports_are_excluded_from_public_scan_config() -> None:
+    scan_config = json.loads(SCAN_CONFIG_PATH.read_text(encoding="utf-8"))
+    exclude_patterns = scan_config.get("exclude_patterns", [])
+    assert isinstance(exclude_patterns, list)
+    assert "docs/autonomous_reports/**" in exclude_patterns
 
 
 def test_repo_local_tasks_are_flattened_to_status_managed_root() -> None:

@@ -10,6 +10,7 @@
     "workspace/**",
     "infra/logs/**",
     "infra/tasks/**",
+    "docs/autonomous_reports/**",
     "**/*.tmp.md",
     "**/.tmp/**",
     "**/.pytest_cache/**",
