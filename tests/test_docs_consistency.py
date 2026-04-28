@@ -230,3 +230,9 @@ def test_local_only_autonomous_artifacts_are_gitignored() -> None:
     assert result.returncode == 0, result.stderr
     tracked = [line for line in result.stdout.splitlines() if line.strip()]
     assert not tracked, f"local-only autonomous artifacts must not be tracked: {tracked}"
+
+
+def test_repo_local_tasks_are_flattened_to_status_managed_root() -> None:
+    legacy_dirs = [PROJECT_ROOT / "tasks" / "pending", PROJECT_ROOT / "tasks" / "done"]
+    present = [path.relative_to(PROJECT_ROOT).as_posix() for path in legacy_dirs if path.exists()]
+    assert not present, f"repo-local tasks should live under tasks/ and use frontmatter status: {present}"

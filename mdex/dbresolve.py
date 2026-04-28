@@ -11,7 +11,7 @@ DEFAULT_DB_RELATIVE = ".mdex/mdex_index.db"
 FALLBACK_DB_RELATIVE = "mdex_index.db"
 DEFAULT_SCAN_ROOT = "."
 DEFAULT_SCAN_CONFIG = "control/scan_config.json"
-DEFAULT_TASK_DIR = "tasks/pending"
+DEFAULT_TASK_DIR = "tasks"
 DEFAULT_DECISION_DIR = "decision"
 
 

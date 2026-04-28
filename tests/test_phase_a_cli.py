@@ -374,6 +374,19 @@ def test_new_rejects_task_dir_outside_repo_from_config(tmp_path: Path) -> None:
     assert "task_dir must stay within repo" in payload["detail"]
 
 
+def test_new_task_defaults_to_tasks_root(tmp_path: Path) -> None:
+    repo = tmp_path / "new_task_default_repo"
+    repo.mkdir()
+    _write_json(repo / ".mdex" / "config.json", {})
+
+    result = _run_cli("new", "task", "root task", cwd=repo)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert str(payload["node_id"]).startswith("tasks/T")
+    assert Path(payload["path"]).parent == (repo / "tasks").resolve()
+
+
 def test_scan_rejects_scan_root_outside_repo_from_config(tmp_path: Path) -> None:
     repo = tmp_path / "scan_root_outside_repo"
     repo.mkdir()

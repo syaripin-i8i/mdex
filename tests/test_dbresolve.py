@@ -99,6 +99,16 @@ def test_resolve_paths_from_config_values(tmp_path: Path) -> None:
     assert resolve_scan_config_path(context) == (repo / "control" / "custom_scan.json").resolve()
 
 
+def test_resolve_task_dir_defaults_to_tasks_root(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, {})
+
+    context = load_runtime_context(repo)
+
+    assert resolve_task_dir(context) == (repo / "tasks").resolve()
+
+
 def test_resolve_db_path_prefers_explicit_and_allows_outside_repo(
     tmp_path: Path,
 ) -> None:

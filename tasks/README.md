@@ -22,13 +22,14 @@ updated: 2026-04-28
 
 ## Migration Note
 
-`tasks/pending/` と `tasks/done/` は歴史的レイアウトとして残っている。既存ファイルを整理目的だけで移動しない。  
-`tasks/done/` の歴史的タスクは `C:\Codex\infra\tasks\` から移設した。本文中の絶対パスや完了手順は、当時の運用パスを指している場合がある。
+過去の `tasks/pending/` と `tasks/done/` レイアウトは廃止し、既存タスクは `tasks/` 直下へ平坦化した。
+本文中の絶対パスや完了手順は、当時の運用パスを指している場合がある。
 
 ## Authoring Note
 
 - 新規タスクは frontmatter を付け、`type: task`, `project: mdex`, `status: pending`, `updated` を入れる
 - 新規タスクファイルは `tasks/TYYYYMMDDHHMMSS.md` のように `tasks/` 直下へ作る
 - 完了時は同じファイルの `status` を `done` に更新し、Result / Verification / PR などを追記する
+- `mdex new task` の既定出力先も `tasks/` 直下
 - 公開 PR にタスク記録を必ず載せる必要はない。PR 本文はレビューに必要な変更要約と検証に絞る
 - 一時メモは `*.tmp.md` または `.tmp/` 配下に置くと Git 追跡対象外になる

@@ -48,7 +48,7 @@ updated: 2026-04-19
 depends_on:
   - docs/design.md
 relates_to:
-  - tasks/pending/T20260412190917.md
+  - tasks/T20260412190917.md
 ---
 ```
 
