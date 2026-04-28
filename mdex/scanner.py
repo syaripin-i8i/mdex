@@ -18,6 +18,8 @@ def _pattern_variants(pattern: str) -> list[str]:
         return []
 
     variants = {normalized}
+    if normalized.startswith("**/"):
+        variants.add(normalized[len("**/") :])
     if not normalized.startswith("**/"):
         variants.add(f"**/{normalized}")
 
@@ -25,6 +27,8 @@ def _pattern_variants(pattern: str) -> list[str]:
         base = normalized[: -len("/**")].rstrip("/")
         if base:
             variants.add(base)
+            if base.startswith("**/"):
+                variants.add(base[len("**/") :])
             if not base.startswith("**/"):
                 variants.add(f"**/{base}")
 

@@ -53,6 +53,10 @@ def _strip_code_ticks(value: str) -> str:
     return value.strip().strip("`").strip()
 
 
+def _code_paths(value: str) -> list[str]:
+    return [match.strip() for match in re.findall(r"`([^`]+)`", value)]
+
+
 def _schema_for_contract_command(command_cell: str) -> Path | None:
     normalized = _strip_code_ticks(command_cell)
     if normalized == "scan":
@@ -176,10 +180,8 @@ def test_readme_source_of_truth_paths_exist() -> None:
         if len(cells) < 2:
             continue
         source_cell = cells[1]
-        if "`" not in source_cell:
-            continue
-        raw_path = _strip_code_ticks(source_cell)
-        candidate = PROJECT_ROOT / raw_path
-        if not candidate.exists():
-            missing.append(raw_path)
+        for raw_path in _code_paths(source_cell):
+            candidate = PROJECT_ROOT / raw_path
+            if not candidate.exists():
+                missing.append(raw_path)
     assert not missing, f"README Source of Truth contains missing files: {missing}"

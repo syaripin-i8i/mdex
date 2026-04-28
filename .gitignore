@@ -23,3 +23,10 @@ venv/
 /*_index*.sqlite3
 **/*.tmp.md
 **/.tmp/
+
+# Local autonomous-agent operating notes. These may encode repo/operator-specific
+# approval boundaries and should not be published with the package.
+/BASELINE_INSTRUCTIONS.md
+/docs/autonomous_development_workflow.md
+/docs/autonomous_development_consent.md
+/docs/current_workflow.md
