@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 from mdex import cli
@@ -12,6 +13,7 @@ DOCS_DIR = PROJECT_ROOT / "docs"
 ARCHIVE_DIR = DOCS_DIR / "archive"
 README_PATH = PROJECT_ROOT / "README.md"
 SCHEMAS_DIR = PROJECT_ROOT / "schemas"
+GITIGNORE_PATH = PROJECT_ROOT / ".gitignore"
 
 
 def _markdown_docs_outside_archive() -> list[Path]:
@@ -55,6 +57,15 @@ def _strip_code_ticks(value: str) -> str:
 
 def _code_paths(value: str) -> list[str]:
     return [match.strip() for match in re.findall(r"`([^`]+)`", value)]
+
+
+def _gitignore_patterns() -> set[str]:
+    patterns: set[str] = set()
+    for raw_line in GITIGNORE_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line and not line.startswith("#"):
+            patterns.add(line)
+    return patterns
 
 
 def _schema_for_contract_command(command_cell: str) -> Path | None:
@@ -185,3 +196,37 @@ def test_readme_source_of_truth_paths_exist() -> None:
             if not candidate.exists():
                 missing.append(raw_path)
     assert not missing, f"README Source of Truth contains missing files: {missing}"
+
+
+def test_local_only_autonomous_artifacts_are_gitignored() -> None:
+    required_patterns = [
+        "/BASELINE_INSTRUCTIONS.md",
+        "/docs/autonomous_development_workflow.md",
+        "/docs/autonomous_development_consent.md",
+        "/docs/current_workflow.md",
+        "/docs/autonomous_reports/",
+    ]
+
+    gitignore_patterns = _gitignore_patterns()
+    missing = [pattern for pattern in required_patterns if pattern not in gitignore_patterns]
+    assert not missing, f"local-only autonomous artifacts must stay gitignored: {missing}"
+
+    protected_paths = [
+        "BASELINE_INSTRUCTIONS.md",
+        "docs/autonomous_development_workflow.md",
+        "docs/autonomous_development_consent.md",
+        "docs/current_workflow.md",
+        "docs/autonomous_reports/example.md",
+    ]
+    result = subprocess.run(
+        ["git", "ls-files", "--", *protected_paths],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        stdin=subprocess.DEVNULL,
+    )
+    assert result.returncode == 0, result.stderr
+    tracked = [line for line in result.stdout.splitlines() if line.strip()]
+    assert not tracked, f"local-only autonomous artifacts must not be tracked: {tracked}"
