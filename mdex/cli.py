@@ -190,8 +190,8 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         for warning in scan_root_warnings:
             index_warnings.append({"path": "scan_config", "error": warning})
         index["warnings"] = index_warnings
-        write_json(index, str(output_path))
         write_sqlite(index, db_path)
+        write_json(index, str(output_path))
     except Exception as exc:
         _emit_error("scan failed", detail=str(exc))
         return 2

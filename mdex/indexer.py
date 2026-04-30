@@ -106,8 +106,15 @@ def _create_schema(cur: sqlite3.Cursor) -> None:
     )
 
 
-def _restore_node_overrides(cur: sqlite3.Cursor, rows: list[tuple[str, str, str, str]]) -> None:
+def _restore_node_overrides(
+    cur: sqlite3.Cursor,
+    rows: list[tuple[str, str, str, str]],
+    indexed_node_ids: set[str],
+) -> None:
     for row in rows:
+        node_id = str(row[0] or "").strip()
+        if node_id not in indexed_node_ids:
+            continue
         cur.execute(
             """
             INSERT OR REPLACE INTO node_overrides (id, summary, summary_source, summary_updated)
@@ -203,6 +210,7 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     nodes = _normalize_nodes(index)
     edges = _normalize_edges(index)
+    indexed_node_ids = {str(node.get("id", "")).strip() for node in nodes if str(node.get("id", "")).strip()}
     overrides = _load_existing_overrides(output)
 
     fd, temp_name = tempfile.mkstemp(
@@ -218,7 +226,7 @@ def write_sqlite(index: dict[str, Any], db_path: str) -> None:
         cur = db.cursor()
         cur.execute("BEGIN")
         _create_schema(cur)
-        _restore_node_overrides(cur, overrides)
+        _restore_node_overrides(cur, overrides, indexed_node_ids)
         _insert_nodes(cur, nodes)
         _insert_edges(cur, edges)
         _insert_metadata(cur, index)

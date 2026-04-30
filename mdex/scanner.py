@@ -6,6 +6,27 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_INDEX_EXTENSIONS = (".md", ".json", ".jsonl")
+DEFAULT_EXCLUDE_PATTERNS = (
+    ".git/**",
+    ".mdex/**",
+    "node_modules/**",
+    "outputs/**",
+    "tmp/**",
+    "**/.tmp/**",
+    "**/.pytest_cache/**",
+    ".env*",
+    "**/.env*",
+    "*.local.md",
+    "*.local.json",
+    "*.local.jsonl",
+    "**/*.local.md",
+    "**/*.local.json",
+    "**/*.local.jsonl",
+    "secrets.*",
+    "**/secrets.*",
+    "credentials.*",
+    "**/credentials.*",
+)
 
 
 def _to_posix(path_value: str) -> str:
@@ -69,8 +90,12 @@ def list_indexable_files(
     root: str | Path | Iterable[str | Path],
     include_extensions: Iterable[str] | None = None,
     exclude_patterns: list[str] | None = None,
+    use_default_exclude_patterns: bool = True,
 ) -> list[Path]:
-    patterns = exclude_patterns or []
+    patterns = [
+        *(DEFAULT_EXCLUDE_PATTERNS if use_default_exclude_patterns else ()),
+        *(exclude_patterns or []),
+    ]
     allowed_extensions = set(_normalize_extensions(include_extensions))
 
     raw_roots: list[Any]
@@ -109,5 +134,11 @@ def list_indexable_files(
 def list_markdown_files(
     root: str | Path | Iterable[str | Path],
     exclude_patterns: list[str] | None = None,
+    use_default_exclude_patterns: bool = True,
 ) -> list[Path]:
-    return list_indexable_files(root, include_extensions=[".md"], exclude_patterns=exclude_patterns)
+    return list_indexable_files(
+        root,
+        include_extensions=[".md"],
+        exclude_patterns=exclude_patterns,
+        use_default_exclude_patterns=use_default_exclude_patterns,
+    )

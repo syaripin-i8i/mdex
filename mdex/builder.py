@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -14,6 +15,20 @@ from mdex.scanner import DEFAULT_INDEX_EXTENSIONS, list_indexable_files
 
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://")
 DEFAULT_MARKDOWN_EXTENSION = ".md"
+SUSPICIOUS_INDEXED_PATTERNS = (
+    ".env*",
+    "**/.env*",
+    "*.local.md",
+    "*.local.json",
+    "*.local.jsonl",
+    "**/*.local.md",
+    "**/*.local.json",
+    "**/*.local.jsonl",
+    "secrets.*",
+    "**/secrets.*",
+    "credentials.*",
+    "**/credentials.*",
+)
 
 
 def _to_posix(path_value: str) -> str:
@@ -76,6 +91,46 @@ def _normalize_str_list(value: Any) -> list[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
+
+
+def _config_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _pattern_variants(pattern: str) -> list[str]:
+    normalized = _to_posix(pattern.strip())
+    if not normalized:
+        return []
+
+    variants = {normalized}
+    if normalized.startswith("**/"):
+        variants.add(normalized[len("**/") :])
+    if not normalized.startswith("**/"):
+        variants.add(f"**/{normalized}")
+    return sorted(variants)
+
+
+def _matches_pattern(path_value: str, pattern: str) -> bool:
+    path = _to_posix(path_value)
+    return any(fnmatch.fnmatch(path, candidate) for candidate in _pattern_variants(pattern))
+
+
+def _suspicious_index_warning(node_id: str) -> str:
+    for pattern in SUSPICIOUS_INDEXED_PATTERNS:
+        if _matches_pattern(node_id, pattern):
+            return (
+                "suspicious indexed local or secret-like file; "
+                "add it to exclude_patterns or keep use_default_exclude_patterns enabled"
+            )
+    return ""
 
 
 def _normalize_extensions(value: Any) -> tuple[str, ...]:
@@ -397,7 +452,13 @@ def build_index(
         "linkable_extensions": list(include_extensions),
     }
 
-    indexed_paths = list_indexable_files(scan_roots, include_extensions, exclude_patterns)
+    use_default_exclude_patterns = _config_bool(config.get("use_default_exclude_patterns"), default=True)
+    indexed_paths = list_indexable_files(
+        scan_roots,
+        include_extensions,
+        exclude_patterns,
+        use_default_exclude_patterns=use_default_exclude_patterns,
+    )
     indexed_files = _resolve_indexed_files(root_path, indexed_paths)
     path_to_id: dict[Path, str] = {}
     id_to_path: dict[str, Path] = {}
@@ -419,6 +480,11 @@ def build_index(
     warnings: list[dict[str, str]] = []
 
     for file_path in indexed_files:
+        node_id = path_to_id[file_path]
+        suspicious_warning = _suspicious_index_warning(node_id)
+        if suspicious_warning:
+            warnings.append({"path": node_id, "error": suspicious_warning})
+
         try:
             parsed = parse_file(str(file_path), options=parser_options)
         except Exception as exc:
@@ -431,7 +497,6 @@ def build_index(
         if not isinstance(frontmatter, dict):
             frontmatter = {}
 
-        node_id = path_to_id[file_path]
         title = str(parsed.get("title", ""))
         node_type = _resolve_type(node_id, frontmatter, node_type_map, title)
 

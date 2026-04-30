@@ -17,6 +17,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - New CI security/quality checks: coverage gate, gitleaks, CodeQL workflow, twine check, and sdist/wheel smoke.
 - Lock-based environment install helper: `.github/scripts/install_from_pylock.py`.
 - Docs consistency test for archived planning docs and phase-complete wording drift.
+- Default scan safety excludes for local/secret-like files such as `.env*` and `*.local.{md,json,jsonl}`.
 
 ### Changed
 
@@ -27,6 +28,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `update_node_summary` now stores the caller-provided `source` value.
 - `docs/phase_a_agent_flow.md` moved to `docs/archive/phase_a_agent_flow.md` with historical disclaimer.
 - CI dependency install switched to lockfile-driven install from `pylock.toml`.
+- `scan` now warns when local/secret-like files are explicitly indexed after disabling default excludes.
+- SQLite regeneration now prunes `node_overrides` for nodes no longer present in the freshly built index.
 
 ### Removed
 

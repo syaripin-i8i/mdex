@@ -9,7 +9,7 @@ from mdex.builder import build_index
 from mdex.enrich import enrich_node
 from mdex import indexer
 from mdex.indexer import write_sqlite
-from mdex.store import list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes, update_node_summary
+from mdex.store import list_edges, list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes, update_node_summary
 
 
 def _build_quality_db(quality_repo: Path, quality_config: dict[str, object], db_path: Path) -> None:
@@ -79,6 +79,48 @@ def test_list_nodes_prefers_agent_override_after_rescan(
     assert node_map["design/root.md"]["summary_source"] == "agent"
     assert node_map["design/root.md"]["summary"] == agent_summary
     assert node_map["decision/a.md"]["summary_source"] == "seed"
+
+
+def test_rescan_prunes_removed_nodes_edges_and_overrides(tmp_path: Path) -> None:
+    repo = tmp_path / "prune_repo"
+    repo.mkdir()
+    db_path = tmp_path / "prune.db"
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+
+    keep = repo / "keep.md"
+    remove = repo / "remove.md"
+    keep.write_text(
+        """# Keep
+
+See [Remove](remove.md).
+""",
+        encoding="utf-8",
+    )
+    remove.write_text("# Remove\n\nold local summary\n", encoding="utf-8")
+
+    write_sqlite(build_index(str(repo), config), str(db_path))
+    enriched = enrich_node("remove.md", str(db_path), "stale override should be pruned", force=False)
+    assert enriched["status"] == "enriched"
+
+    remove.unlink()
+    write_sqlite(build_index(str(repo), config), str(db_path))
+
+    assert [node["id"] for node in list_nodes(str(db_path))] == ["keep.md"]
+    assert list_edges(str(db_path)) == [
+        {"from": "keep.md", "to": "remove.md", "type": "links_to", "resolved": False}
+    ]
+    with sqlite3.connect(str(db_path)) as conn:
+        override_ids = [
+            str(row[0])
+            for row in conn.execute("SELECT id FROM node_overrides ORDER BY id").fetchall()
+        ]
+    assert override_ids == []
 
 
 def test_search_nodes_uses_override_summary(

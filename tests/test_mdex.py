@@ -4,8 +4,12 @@ import json
 import os
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
+from mdex import cli
 from mdex.builder import build_index
 from mdex.indexer import write_sqlite
 from mdex.parser import parse_file
@@ -221,6 +225,29 @@ def test_external_absolute_targets_are_not_added_to_edges(tmp_path: Path) -> Non
     assert edges == []
 
 
+def test_scan_warns_when_local_config_is_explicitly_indexed(tmp_path: Path) -> None:
+    repo = tmp_path / "local_config_repo"
+    repo.mkdir()
+    (repo / "settings.local.json").write_text('{"message":"local only"}\n', encoding="utf-8")
+
+    config = {
+        "include_extensions": [".json"],
+        "exclude_patterns": [],
+        "use_default_exclude_patterns": False,
+    }
+    index = build_index(str(repo), config)
+    node_map = _node_map(index)
+    warnings = index.get("warnings", [])
+
+    assert "settings.local.json" in node_map
+    assert any(
+        isinstance(warning, dict)
+        and warning.get("path") == "settings.local.json"
+        and "suspicious indexed local" in str(warning.get("error", ""))
+        for warning in warnings
+    )
+
+
 def test_query_direction_preserved(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:
     index = build_index(str(fixture_repo), build_config)
     db_path = tmp_path / "mdex_test.db"
@@ -400,6 +427,40 @@ def test_scan_outputs_json_summary(build_config: dict[str, object], fixture_repo
     assert payload["output"]["json"] == str(output_json)
     assert payload["output"]["db"] == str(output_db)
     assert result.stderr.strip() == ""
+
+
+def test_scan_does_not_refresh_json_when_sqlite_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "scan_failure_repo"
+    repo.mkdir()
+    (repo / "keep.md").write_text("# Keep\n", encoding="utf-8")
+    config_path = tmp_path / "scan_config.json"
+    config_path.write_text(
+        json.dumps({"include_extensions": [".md"], "exclude_patterns": []}),
+        encoding="utf-8",
+    )
+    output_json = tmp_path / "scan_out.json"
+    output_db = tmp_path / "scan_out.db"
+
+    def _fail_write_sqlite(index: dict[str, object], db_path: str) -> None:
+        raise OSError("db locked")
+
+    monkeypatch.setattr(cli, "write_sqlite", _fail_write_sqlite)
+
+    result = cli._cmd_scan(
+        Namespace(
+            root=str(repo),
+            config=str(config_path),
+            output=str(output_json),
+            db=str(output_db),
+            strict=False,
+        )
+    )
+
+    assert result == 2
+    assert not output_json.exists()
 
 
 def test_context_include_content(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:
