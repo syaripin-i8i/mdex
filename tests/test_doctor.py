@@ -23,6 +23,10 @@ def test_doctor_reports_scan_warnings_and_indexed_hygiene(tmp_path: Path) -> Non
     repo.mkdir()
     (repo / "old").mkdir()
     (repo / "old" / "note.md").write_text("# Old Note\n", encoding="utf-8")
+    (repo / "fixtures").mkdir()
+    (repo / "fixtures" / "case.md").write_text("# Fixture Case\n", encoding="utf-8")
+    (repo / "eval").mkdir()
+    (repo / "eval" / "case.json").write_text('{"message":"eval"}\n', encoding="utf-8")
     (repo / "settings.local.json").write_text('{"message":"local"}\n', encoding="utf-8")
 
     config = {
@@ -53,6 +57,8 @@ def test_doctor_reports_scan_warnings_and_indexed_hygiene(tmp_path: Path) -> Non
     }
     assert "settings.local.json" in hygiene_paths
     assert "old/note.md" in hygiene_paths
+    assert "fixtures/case.md" in hygiene_paths
+    assert "eval/case.json" in hygiene_paths
 
 
 def test_doctor_reports_orphan_overrides_and_json_mismatch(tmp_path: Path) -> None:

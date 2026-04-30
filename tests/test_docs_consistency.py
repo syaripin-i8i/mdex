@@ -251,6 +251,14 @@ def test_local_config_files_are_excluded_from_public_scan_config() -> None:
         assert pattern in exclude_patterns
 
 
+def test_warehouse_paths_are_excluded_from_public_scan_config() -> None:
+    scan_config = json.loads(SCAN_CONFIG_PATH.read_text(encoding="utf-8"))
+    exclude_patterns = scan_config.get("exclude_patterns", [])
+    assert isinstance(exclude_patterns, list)
+    for pattern in ("docs/archive/**", "tests/fixtures/**", "**/eval/**", "**/logs/**", "**/dumps/**"):
+        assert pattern in exclude_patterns
+
+
 def test_repo_local_tasks_are_flattened_to_status_managed_root() -> None:
     legacy_dirs = [PROJECT_ROOT / "tasks" / "pending", PROJECT_ROOT / "tasks" / "done"]
     present = [path.relative_to(PROJECT_ROOT).as_posix() for path in legacy_dirs if path.exists()]

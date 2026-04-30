@@ -23,6 +23,21 @@ LOCAL_SECRET_PATTERNS = (
 )
 
 REVIEW_DIRECTORY_NAMES = {"old", "archive", "archives", "backup", "backups"}
+WAREHOUSE_DIRECTORY_NAMES = {
+    "dump",
+    "dumps",
+    "eval",
+    "evals",
+    "evaluation",
+    "evaluations",
+    "fixture",
+    "fixtures",
+    "log",
+    "logs",
+    "raw",
+    "raw_logs",
+    "runtime_state",
+}
 
 SEVERITY_RANK = {"ok": 0, "info": 1, "warning": 2, "error": 3}
 
@@ -56,6 +71,11 @@ def _matches_any(path_value: str, patterns: tuple[str, ...]) -> bool:
 def _has_review_directory(path_value: str) -> bool:
     parts = [part.strip().lower() for part in Path(_to_posix(path_value)).parts]
     return any(part in REVIEW_DIRECTORY_NAMES for part in parts)
+
+
+def _has_warehouse_directory(path_value: str) -> bool:
+    parts = [part.strip().lower() for part in Path(_to_posix(path_value)).parts]
+    return any(part in WAREHOUSE_DIRECTORY_NAMES for part in parts)
 
 
 def _safe_json_list(raw_value: str) -> list[dict[str, Any]]:
@@ -115,6 +135,14 @@ def _indexed_path_findings(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "severity": "warning",
                     "path": node_id,
                     "message": "old/archive-style path is indexed; verify it still belongs in active context",
+                }
+            )
+        elif _has_warehouse_directory(node_id):
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "message": "fixture/eval/log/dump-style path is indexed; prefer a separate index or direct reads",
                 }
             )
     return findings

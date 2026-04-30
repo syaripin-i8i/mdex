@@ -14,6 +14,7 @@ updated: 2026-04-19
 - workflow contract は `README.md` を参照してください
 - execution heuristics は `AGENT.md` を参照してください
 - input note contract は `docs/convention.md` を参照してください
+- context hygiene policy は `docs/context_hygiene.md` を参照してください
 
 ## 一言で言うと
 
