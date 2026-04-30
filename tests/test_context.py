@@ -200,6 +200,40 @@ Reply guardrail must check runtime/elyth_runtime.py and tests/test_elyth_thread_
     assert {"runtime", "tests"}.issubset(set(digest["suggested_rg"][0]["paths"]))
 
 
+def test_select_context_actionable_digest_detects_japanese_guardrails(tmp_path: Path) -> None:
+    repo = tmp_path / "japanese_guardrail_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    (repo / "docs" / "reply_policy.md").write_text(
+        """---
+type: design
+status: active
+tags:
+  - 返信
+---
+# 返信ポリシー
+
+返信処理の制約。注意: synthetic event は既読化禁止。前提として権限を確認する。
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"design": ["docs"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "japanese_guardrail.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("返信 制約", str(db_path), budget=4000, limit=3, actionable=True)
+    guardrails = result["actionable_digest"]["known_guardrails"]
+
+    assert [item["id"] for item in guardrails] == ["docs/reply_policy.md"]
+    assert "制約" in guardrails[0]["reason"]
+
+
 def test_select_context_suggested_rg_uses_args_for_shell_sensitive_terms(tmp_path: Path) -> None:
     repo = tmp_path / "entrypoint_repo"
     code_dir = repo / "runtime space"

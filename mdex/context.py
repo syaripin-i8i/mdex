@@ -48,6 +48,16 @@ GUARDRAIL_TERMS = {
     "prohibit",
     "rule",
     "warning",
+    "ロールバック",
+    "互換性",
+    "例外",
+    "制約",
+    "前提",
+    "注意",
+    "権限",
+    "破壊的変更",
+    "禁止",
+    "落とし穴",
 }
 
 DEFAULT_KEYWORD_WEIGHTS = {

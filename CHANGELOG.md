@@ -22,6 +22,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Context hygiene policy documenting that the main repo index is an entrypoint guide, not a fixture/eval/log warehouse.
 - Getting started, adoption guide, and before/after examples for first-time mdex evaluation.
 - `context --actionable` and `start` now include `actionable_digest` with relevant docs, task history, likely code entrypoints, known guardrails, suggested `rg`, and context gaps.
+- Japanese guardrail terms and a detailed `suggested_rg` example for the `actionable_digest` workflow.
 
 ### Changed
 
