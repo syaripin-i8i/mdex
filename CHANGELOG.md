@@ -18,6 +18,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Lock-based environment install helper: `.github/scripts/install_from_pylock.py`.
 - Docs consistency test for archived planning docs and phase-complete wording drift.
 - Default scan safety excludes for local/secret-like files such as `.env*` and `*.local.{md,json,jsonl}`.
+- `mdex doctor` command for index hygiene checks, including scan warnings, JSON/SQLite drift, orphan overrides, legacy artifacts, and `old/`/`archive/` review paths.
 
 ### Changed
 
@@ -30,6 +31,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - CI dependency install switched to lockfile-driven install from `pylock.toml`.
 - `scan` now warns when local/secret-like files are explicitly indexed after disabling default excludes.
 - SQLite regeneration now prunes `node_overrides` for nodes no longer present in the freshly built index.
+- SQLite metadata now records scan warnings so `mdex doctor` can surface them after the scan run.
 
 ### Removed
 

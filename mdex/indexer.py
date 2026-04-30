@@ -173,6 +173,7 @@ def _insert_metadata(cur: sqlite3.Cursor, index: dict[str, Any]) -> None:
         "generated": str(index.get("generated", "")),
         "scan_root": str(index.get("scan_root", "")),
         "scan_roots": json.dumps(index.get("scan_roots", []), ensure_ascii=False),
+        "warnings": json.dumps(index.get("warnings", []), ensure_ascii=False),
     }
     for key, value in metadata_rows.items():
         cur.execute(

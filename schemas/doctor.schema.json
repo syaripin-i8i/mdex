@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/doctor.schema.json",
+  "title": "mdex doctor output",
+  "description": "Contract for mdex doctor JSON output",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "checks",
+    "recommended_next_actions"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "warning", "error"]
+    },
+    "summary": {
+      "type": "object",
+      "required": ["error", "warning", "info"],
+      "properties": {
+        "error": { "type": "integer", "minimum": 0 },
+        "warning": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "findings"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["ok", "info", "warning", "error"] },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["severity", "message"],
+              "properties": {
+                "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+                "path": { "type": "string" },
+                "message": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "recommended_next_actions": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

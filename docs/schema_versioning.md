@@ -7,6 +7,7 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - `scan.schema.json`
 - `start.schema.json`
 - `context.schema.json`
+- `doctor.schema.json`
 - `impact.schema.json`
 - `finish.schema.json`
 - `error.schema.json` (stderr error payloads)

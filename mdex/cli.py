@@ -16,6 +16,7 @@ from mdex.dbresolve import (
     resolve_scan_config_path,
     resolve_scan_roots,
 )
+from mdex.doctor import build_doctor_report
 from mdex.enrich import enrich_node, resolve_node_id
 from mdex.finish import FinishError, run_finish
 from mdex.gittools import GitError, collect_changed_files
@@ -153,6 +154,37 @@ def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any]
     return resolved
 
 
+def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) -> Path | None:
+    if explicit_json and explicit_json.strip():
+        return Path(explicit_json).resolve()
+
+    repo_root_raw = str(db_info.get("repo_root", "") or "").strip()
+    if not repo_root_raw:
+        return None
+
+    repo_root = Path(repo_root_raw)
+    runtime_config = db_info.get("config", {})
+    if not isinstance(runtime_config, dict):
+        runtime_config = {}
+    config_path_raw = str(db_info.get("config_path", "") or "").strip()
+    runtime_context = RuntimeContext(
+        repo_root=repo_root,
+        config_path=Path(config_path_raw) if config_path_raw else (repo_root / ".mdex" / "config.json"),
+        config=runtime_config,
+    )
+
+    try:
+        scan_config_path = resolve_scan_config_path(runtime_context)
+        scan_config = _load_json(str(scan_config_path), optional=True)
+    except Exception:
+        scan_config = {}
+
+    output_setting = scan_config.get("output_file")
+    if isinstance(output_setting, str) and output_setting.strip():
+        return (repo_root / output_setting.strip()).resolve()
+    return (repo_root / ".mdex" / "mdex_index.json").resolve()
+
+
 def _cmd_scan(args: argparse.Namespace) -> int:
     db_info = _resolve_db(args, must_exist=False)
     if db_info is None:
@@ -214,6 +246,29 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         },
         "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
     }
+    _emit_payload(payload, pretty=True)
+    return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    db_path = str(Path(str(db_info["path"])))
+    repo_root_raw = str(db_info.get("repo_root", "") or "").strip()
+    repo_root = Path(repo_root_raw) if repo_root_raw else None
+    json_index_path = _resolve_scan_json_path(db_info, getattr(args, "json_index", None))
+
+    try:
+        payload = build_doctor_report(
+            db_path,
+            repo_root=repo_root,
+            json_index_path=json_index_path,
+        )
+    except Exception as exc:
+        _emit_error("doctor failed", detail=str(exc))
+        return 2
+
     _emit_payload(payload, pretty=True)
     return 0
 
@@ -686,6 +741,11 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--config", help="Path to scan config JSON")
     scan_parser.add_argument("--strict", action="store_true", help="Fail fast when any indexed file cannot be parsed")
     scan_parser.set_defaults(func=_cmd_scan)
+
+    doctor_parser = subparsers.add_parser("doctor", help="Inspect index hygiene and generated artifact health")
+    doctor_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
+    doctor_parser.add_argument("--json-index", help="Scan JSON output path to compare with SQLite metadata")
+    doctor_parser.set_defaults(func=_cmd_doctor)
 
     list_parser = subparsers.add_parser("list", help="List nodes with optional filters")
     list_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")

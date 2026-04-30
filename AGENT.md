@@ -38,6 +38,7 @@
 |---|---|---|
 | repo を初めて触る | `mdex scan` の後に必ず `mdex start` | 入口を推測しない |
 | 索引の新しさが怪しい | 先に `mdex scan` | 読む順序の誤判定を減らす |
+| 索引に local / old / archive ノイズが混ざった疑い | `mdex doctor` | 清掃が必要な状態を先に見える化する |
 | 作業を始める | `mdex start "<task>"` | `recommended_read_order` と `recommended_next_actions` を得る |
 | `start` より広い入口が欲しい | `mdex context "<task>" --actionable` | 入口情報を直接深掘りする |
 | 特定文書から読む順を決めたい | `mdex first <node-id>` | node 起点の read order を得る |
@@ -51,9 +52,10 @@
 ## Priority When Unsure
 
 1. `mdex scan`
-2. `mdex start`
-3. changed files があるなら `mdex impact`
-4. 終了前に `mdex finish --dry-run`
+2. index hygiene が怪しいなら `mdex doctor`
+3. `mdex start`
+4. changed files があるなら `mdex impact`
+5. 終了前に `mdex finish --dry-run`
 
 ## Prohibitions / Discouraged
 

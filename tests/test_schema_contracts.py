@@ -47,6 +47,7 @@ def test_schema_files_are_valid_draft_2020_12() -> None:
         "scan.schema.json",
         "start.schema.json",
         "context.schema.json",
+        "doctor.schema.json",
         "impact.schema.json",
         "finish.schema.json",
         "error.schema.json",
@@ -85,6 +86,11 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     assert context.returncode == 0
     context_payload = json.loads(context.stdout)
     _validate_payload(context_payload, "context.schema.json")
+
+    doctor = _run_cli("doctor", "--db", str(db_path), "--json-index", str(scan_json), cwd=quality_repo)
+    assert doctor.returncode == 0
+    doctor_payload = json.loads(doctor.stdout)
+    _validate_payload(doctor_payload, "doctor.schema.json")
 
     impact = _run_cli("impact", "design/root.md", "--db", str(db_path), cwd=quality_repo)
     assert impact.returncode == 0

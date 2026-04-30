@@ -78,6 +78,8 @@ def _schema_for_contract_command(command_cell: str) -> Path | None:
         return SCHEMAS_DIR / "start.schema.json"
     if normalized == "context":
         return SCHEMAS_DIR / "context.schema.json"
+    if normalized == "doctor":
+        return SCHEMAS_DIR / "doctor.schema.json"
     if normalized == "impact":
         return SCHEMAS_DIR / "impact.schema.json"
     if normalized == "finish":

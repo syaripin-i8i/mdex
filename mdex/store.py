@@ -483,6 +483,14 @@ def list_index_metadata(db_path: str) -> dict[str, str]:
     return metadata
 
 
+def list_node_override_ids(db_path: str) -> list[str]:
+    with _connect(db_path) as conn:
+        if not _table_exists(conn, "node_overrides"):
+            return []
+        rows = conn.execute("SELECT id FROM node_overrides ORDER BY id").fetchall()
+    return [str(row["id"] or "") for row in rows if str(row["id"] or "").strip()]
+
+
 def get_index_metadata(db_path: str, key: str, default: str | None = None) -> str | None:
     metadata = list_index_metadata(db_path)
     if key in metadata:

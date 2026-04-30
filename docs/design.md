@@ -98,6 +98,7 @@ mdex/
 
 - `start`
 - `context --actionable`
+- `doctor`
 - `impact`
 - `finish` (`--dry-run`, `--summary-file`, `--scan`)
 - `new` / `stamp`
