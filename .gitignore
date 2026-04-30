@@ -13,6 +13,7 @@ venv/
 /.mdex/
 /outputs/
 /tmp/
+/dist/
 *.db
 *.sqlite
 *.sqlite3
