@@ -14,6 +14,26 @@
 - read order と source of truth は同義ではない（正本は本 README の Source of Truth 表）
 - `start` と `context --actionable` の詳細な分岐は `AGENT.md` を正本とする
 
+## For New Adopters
+
+- 10分で試す: `docs/getting_started.md`
+- 既存 repo へ入れる: `docs/adoption_guide.md`
+- 失敗例と改善例を見る: `docs/examples_before_after.md`
+- main index に入れるものを決める: `docs/context_hygiene.md`
+
+## Where mdex Fits
+
+`mdex` は「最初に何を読むべきか」を決めるための薄い index です。
+
+| tool | best at | mdex relationship |
+|---|---|---|
+| `ripgrep` / full-text search | exact string search across source | `mdex` can recommend where to search, but does not replace it |
+| codegraph tools | symbol and dependency structure | `mdex` points to docs and decisions; codegraph explains code topology |
+| embedding/RAG systems | broad semantic recall over large corpora | `mdex` favors small, deterministic, contract-shaped context |
+| knowledge graphs | rich typed relationships | `mdex` keeps only lightweight links such as `depends_on` and `relates_to` |
+
+Use `mdex` for first-pass judgment and workflow contracts. Use the other tools for deep code search, broad recall, or detailed graph analysis.
+
 ## Protocol
 
 | phase | standard command | contract |
@@ -224,6 +244,9 @@ read order と source of truth は同義ではありません。
 |---|---|
 | workflow contract | `README.md` |
 | execution heuristics | `AGENT.md` |
+| first adoption path | `docs/getting_started.md` |
+| existing repo adoption | `docs/adoption_guide.md` |
+| before/after examples | `docs/examples_before_after.md` |
 | architecture / persistence / schema | `docs/design.md` |
 | input note contract | `docs/convention.md` |
 | context hygiene policy | `docs/context_hygiene.md` |
@@ -243,10 +266,17 @@ read order と source of truth は同義ではありません。
 
 ## Setup
 
+The current repository docs describe unreleased commands such as `mdex doctor`. Until the next package release, use editable install from this checkout for the documented verification flow:
+
 ```bash
-python -m pip install mdex-cli
 python -m pip install -e .
 python -m pip install -e ".[dev]"
+```
+
+For the latest released package only:
+
+```bash
+python -m pip install mdex-cli
 ```
 
 ロック依存で開発環境を再現する場合:

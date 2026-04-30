@@ -13,6 +13,8 @@ updated: 2026-04-19
 - historical planning doc は `docs/archive/` に隔離し、現行仕様はこの文書を正本として扱います
 - workflow contract は `README.md` を参照してください
 - execution heuristics は `AGENT.md` を参照してください
+- first adoption path は `docs/getting_started.md` を参照してください
+- existing repo adoption は `docs/adoption_guide.md` を参照してください
 - input note contract は `docs/convention.md` を参照してください
 - context hygiene policy は `docs/context_hygiene.md` を参照してください
 
