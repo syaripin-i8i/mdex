@@ -16,6 +16,7 @@
 - agents should prefer `recommended_next_actions_v2`; `recommended_next_actions` is deprecated but kept for 0.2.x compatibility
 - use `--digest minimal` on `start` / `context --actionable` to reduce context use when the full `actionable_digest` is not needed
 - JSON payloads require `contract_schema` / `contract_version`; error payloads also include machine-readable `code`
+- opt-in local telemetry is available with `MDEX_TELEMETRY=1` or `.mdex/config.json` `telemetry: true`; it appends redacted events to `.mdex/telemetry.jsonl`
 
 ## For New Adopters
 
@@ -259,6 +260,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 - `schemas/impact.schema.json`
 - `schemas/finish.schema.json`
 - `schemas/error.schema.json`
+- `schemas/telemetry_event.schema.json`
 
 schema 版運用は `docs/schema_versioning.md` を参照してください。
 Agent integration guidance, including safe argv execution for structured actions and `suggested_rg.args`, is in `docs/agent_integration.md`.
@@ -363,6 +365,10 @@ Python support policy is documented in `docs/support_matrix.md`.
 `.mdex/mdex_index.json` と `.mdex/mdex_index.db` には scan 対象ファイル由来の summary が含まれます。  
 機微情報を含むファイルは `control/scan_config.json` の `exclude_patterns` で除外してください。
 
+Telemetry is local and opt-in only. When enabled with `MDEX_TELEMETRY=1` or `.mdex/config.json` `telemetry: true`,
+`mdex` appends redacted command events to `.mdex/telemetry.jsonl`. It does not send data over the network, and events do
+not include raw task/query strings or absolute repo paths.
+
 `scan` は local/secret 寄りのファイル（例: `.env*`, `*.local.md`, `*.local.json`, `*.local.jsonl`, `secrets.*`, `credentials.*`）を
 デフォルトで除外します。特殊用途で `use_default_exclude_patterns: false` を指定して取り込む場合でも、
 local/secret らしいファイルが index に入ると `warnings` に表示されます。
@@ -375,6 +381,7 @@ local/secret らしいファイルが index に入ると `warnings` に表示さ
 公開 repo ではランタイム生成物を追跡しません。
 
 - `.mdex/`
+- `dist/`
 - `outputs/`
 - `tmp/`
 - `*.db`, `*.sqlite`, `*.sqlite3`

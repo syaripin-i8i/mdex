@@ -16,12 +16,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Error JSON payloads include required `contract_schema`, `contract_version`, and machine-readable `code`.
 - Agent integration guidance in `docs/agent_integration.md`, including safe argv execution for structured actions and `suggested_rg.args`.
 - `AGENT.md` now documents shortest safe paths and an entrypoint flowchart for low round-trip agent use.
+- Opt-in local telemetry via `MDEX_TELEMETRY=1` or `.mdex/config.json` `telemetry: true`, appending redacted JSON Lines events to `.mdex/telemetry.jsonl`.
 
 ### Changed
 
 - `recommended_next_actions` v1 is now documented and schema-annotated as deprecated; agents should prefer `recommended_next_actions_v2`.
 - `recommended_next_actions_v2` now uses executable argv-style commands such as `mdex open ...` and `rg -n ...`.
 - Parser-level argument failures now emit JSON error payloads instead of argparse prose.
+- `mdex doctor` now checks telemetry health when telemetry is enabled.
 
 ## [0.2.0] - 2026-05-01
 

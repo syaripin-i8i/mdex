@@ -11,6 +11,7 @@ htmlcov/
 venv/
 *.egg-info/
 /.mdex/
+/.mdex/telemetry.jsonl
 /outputs/
 /tmp/
 /dist/

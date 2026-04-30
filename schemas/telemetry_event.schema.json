@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/telemetry_event.schema.json",
+  "title": "mdex telemetry event",
+  "description": "Opt-in local JSON Lines event contract for mdex command observability. Events are written locally to .mdex/telemetry.jsonl and must not include raw task/query text.",
+  "type": "object",
+  "required": [
+    "event",
+    "event_schema",
+    "timestamp",
+    "command",
+    "args",
+    "exit_code",
+    "duration_ms",
+    "result_size",
+    "contract_version",
+    "summary"
+  ],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": ["command_completed"]
+    },
+    "event_schema": {
+      "type": "string",
+      "const": "https://github.com/syaripin-i8i/mdex/schemas/telemetry_event.schema.json"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "args": {
+      "type": "object",
+      "required": ["flags", "positional_count"],
+      "properties": {
+        "flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "positional_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "result_size": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "contract_version": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "suggested_rg_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "code": {
+      "type": "string"
+    },
+    "stream": {
+      "type": "string",
+      "enum": ["stdout", "stderr", "none"]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

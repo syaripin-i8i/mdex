@@ -114,3 +114,23 @@ When `confidence < 0.6`, run the structured `mdex find` action if present, or ex
 When changed files exist after edits, run `mdex impact --changed-files-from-git`.
 
 Before closing work, run `mdex finish --task "<task>" --dry-run`. Apply summaries only when an intentional summary file exists.
+
+## Local Telemetry
+
+Telemetry is opt-in and local only. Enable it with either:
+
+```bash
+MDEX_TELEMETRY=1 mdex start "<task>"
+```
+
+or:
+
+```json
+{
+  "telemetry": true
+}
+```
+
+Events append to `.mdex/telemetry.jsonl` and follow `schemas/telemetry_event.schema.json`. They are designed as eval fuel, not analytics: mdex does not send telemetry anywhere.
+
+Telemetry events avoid raw task/query text, raw argv values, absolute repo paths, and `suggested_rg.pattern`. Use fields such as `command`, `duration_ms`, `confidence`, `result_size`, `suggested_rg_count`, and `code` for aggregate analysis.

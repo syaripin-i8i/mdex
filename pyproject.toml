@@ -47,6 +47,7 @@ schemas = [
   "schemas/impact.schema.json",
   "schemas/scan.schema.json",
   "schemas/start.schema.json",
+  "schemas/telemetry_event.schema.json",
 ]
 
 [tool.pytest.ini_options]

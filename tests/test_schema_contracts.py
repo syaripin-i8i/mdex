@@ -13,10 +13,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_DIR = PROJECT_ROOT / "schemas"
 
 
-def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run_cli(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
     existing_pythonpath = merged_env.get("PYTHONPATH", "")
     merged_env["PYTHONPATH"] = str(PROJECT_ROOT) if not existing_pythonpath else f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
+    if env:
+        merged_env.update(env)
     return subprocess.run(
         [sys.executable, "-m", "mdex.cli", *args],
         cwd=cwd,
@@ -56,6 +58,7 @@ def test_schema_files_are_valid_draft_2020_12() -> None:
         "impact.schema.json",
         "finish.schema.json",
         "error.schema.json",
+        "telemetry_event.schema.json",
     ):
         schema = _load_schema(name)
         Draft202012Validator.check_schema(schema)
@@ -237,3 +240,60 @@ def test_cli_error_outputs_match_error_schema(quality_repo: Path, tmp_path: Path
     assert empty_title_payload["error"] == "title is required"
     assert empty_title_payload["code"] == "invalid_arguments"
     _validate_payload(empty_title_payload, "error.schema.json")
+
+
+def test_opt_in_telemetry_jsonl_is_local_schema_shaped_and_redacted(quality_repo: Path, tmp_path: Path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    config_path = PROJECT_ROOT / "control" / "scan_config.json"
+    scan = _run_cli(
+        "scan",
+        "--root",
+        str(quality_repo),
+        "--config",
+        str(config_path),
+        "--db",
+        str(db_path),
+        "--output",
+        str(tmp_path / "telemetry_scan.json"),
+        cwd=PROJECT_ROOT,
+    )
+    assert scan.returncode == 0
+
+    task = "root decision private task text"
+    result = _run_cli(
+        "start",
+        task,
+        "--db",
+        str(db_path),
+        cwd=quality_repo,
+        env={"MDEX_TELEMETRY": "1"},
+    )
+    assert result.returncode == 0
+    telemetry_path = quality_repo / ".mdex" / "telemetry.jsonl"
+    assert telemetry_path.exists()
+
+    lines = telemetry_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    validate(instance=event, schema=_load_schema("telemetry_event.schema.json"))
+    assert event["event"] == "command_completed"
+    assert event["command"] == "start"
+    assert event["exit_code"] == 0
+    assert event["contract_version"] == "0.3.0"
+    assert isinstance(event["duration_ms"], int)
+    assert "confidence" in event
+    assert event["suggested_rg_count"] >= 1
+    assert "--db" in event["args"]["flags"]
+    assert task not in lines[0]
+    assert str(db_path) not in lines[0]
+
+    missing_db_dir = tmp_path / "telemetry_missing_db"
+    missing_db_dir.mkdir()
+    missing = _run_cli("list", cwd=missing_db_dir, env={"MDEX_TELEMETRY": "1"})
+    assert missing.returncode == 2
+    error_event = json.loads((missing_db_dir / ".mdex" / "telemetry.jsonl").read_text(encoding="utf-8"))
+    validate(instance=error_event, schema=_load_schema("telemetry_event.schema.json"))
+    assert error_event["command"] == "list"
+    assert error_event["exit_code"] == 2
+    assert error_event["code"] == "db_not_found"
+    assert "detail" not in error_event["summary"]

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from mdex.observe import telemetry_health_findings
 from mdex.store import list_index_metadata, list_node_override_ids, list_nodes
 
 LOCAL_SECRET_PATTERNS = (
@@ -270,6 +271,7 @@ def build_doctor_report(
         _check_result("orphan_overrides", _override_findings(nodes, override_ids)),
         _check_result("json_sqlite_sync", _json_sync_findings(metadata, json_index_path)),
         _check_result("legacy_artifacts", _legacy_artifact_findings(repo_root, db_path_obj)),
+        _check_result("telemetry_health", telemetry_health_findings(repo_root)),
     ]
     summary = _summary(checks)
     status = _overall_status(checks)

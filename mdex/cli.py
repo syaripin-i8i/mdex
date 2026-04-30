@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from mdex.finish import FinishError, run_finish
 from mdex.gittools import GitError, collect_changed_files
 from mdex.impact import build_impact_report
 from mdex.indexer import write_json, write_sqlite
+from mdex.observe import record_command_event
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
 from mdex.start import build_start_payload
@@ -51,7 +53,14 @@ def _force_utf8_stdio() -> None:
             continue
 
 
+_LAST_EMITTED_PAYLOAD: Any = None
+_LAST_EMITTED_STREAM: str | None = None
+
+
 def _emit_payload(payload: Any, *, stderr: bool = False, pretty: bool = False) -> None:
+    global _LAST_EMITTED_PAYLOAD, _LAST_EMITTED_STREAM
+    _LAST_EMITTED_PAYLOAD = payload
+    _LAST_EMITTED_STREAM = "stderr" if stderr else "stdout"
     if pretty:
         output = json.dumps(payload, ensure_ascii=False, indent=2)
     else:
@@ -898,10 +907,36 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    global _LAST_EMITTED_PAYLOAD, _LAST_EMITTED_STREAM
+    started = time.perf_counter()
+    _LAST_EMITTED_PAYLOAD = None
+    _LAST_EMITTED_STREAM = None
+    command = str(sys.argv[1]) if len(sys.argv) > 1 else "unknown"
+    exit_code = 2
     _force_utf8_stdio()
-    parser = _build_parser()
-    args = parser.parse_args()
-    return int(args.func(args))
+    try:
+        parser = _build_parser()
+        args = parser.parse_args()
+        command = str(getattr(args, "command", command))
+        exit_code = int(args.func(args))
+        return exit_code
+    except SystemExit as exc:
+        try:
+            exit_code = int(exc.code or 0)
+        except (TypeError, ValueError):
+            exit_code = 2
+        raise
+    finally:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        record_command_event(
+            command=command,
+            argv=sys.argv[1:],
+            exit_code=exit_code,
+            duration_ms=duration_ms,
+            payload=_LAST_EMITTED_PAYLOAD,
+            stream=_LAST_EMITTED_STREAM,
+            cwd=Path.cwd(),
+        )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - `impact.schema.json`
 - `finish.schema.json`
 - `error.schema.json` (stderr error payloads)
+- `telemetry_event.schema.json` (opt-in local JSON Lines events)
 
 ## Versioning Model
 
@@ -67,3 +68,4 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 - Success and error schemas require `contract_schema` and `contract_version`.
 - Error schemas require machine-readable `code` alongside human-readable `error`.
 - `recommended_next_actions` remains present but deprecated; agents should prefer `recommended_next_actions_v2`.
+- `telemetry_event.schema.json` is versioned independently from command stdout/stderr schemas because telemetry is opt-in observability data.
