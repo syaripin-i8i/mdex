@@ -60,6 +60,8 @@ def build_start_payload(
         "deferred_nodes": context_payload.get("deferred_nodes", []),
         "confidence": confidence,
         "why_this_set": context_payload.get("why_this_set", []),
+        "actionable_digest": context_payload.get("actionable_digest")
+        or _fallback_actionable_digest(task),
         "total_tokens": int(context_payload.get("total_tokens", 0) or 0),
         "budget": int(context_payload.get("budget", budget) or budget),
         "nodes": context_payload.get("nodes", []),
@@ -151,3 +153,15 @@ def _append_scan_action(actions: list[str], actions_v2: list[dict[str, Any]]) ->
             "reason": "refresh stale index before deciding entrypoint",
         }
     )
+
+
+def _fallback_actionable_digest(task: str) -> dict[str, Any]:
+    return {
+        "intent": task.strip(),
+        "relevant_docs": [],
+        "relevant_task_history": [],
+        "likely_code_entrypoints": [],
+        "known_guardrails": [],
+        "suggested_rg": [],
+        "context_gaps": ["select_context did not return actionable_digest"],
+    }

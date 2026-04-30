@@ -15,6 +15,7 @@
     "deferred_nodes",
     "confidence",
     "why_this_set",
+    "actionable_digest",
     "total_tokens",
     "budget",
     "nodes"
@@ -93,6 +94,9 @@
         "type": "string"
       }
     },
+    "actionable_digest": {
+      "$ref": "#/$defs/actionableDigest"
+    },
     "total_tokens": {
       "type": "integer",
       "minimum": 0
@@ -109,6 +113,126 @@
     }
   },
   "$defs": {
+    "actionableDigest": {
+      "type": "object",
+      "required": [
+        "intent",
+        "relevant_docs",
+        "relevant_task_history",
+        "likely_code_entrypoints",
+        "known_guardrails",
+        "suggested_rg",
+        "context_gaps"
+      ],
+      "properties": {
+        "intent": {
+          "type": "string"
+        },
+        "relevant_docs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestNode"
+          }
+        },
+        "relevant_task_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestNode"
+          }
+        },
+        "likely_code_entrypoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestNode"
+          }
+        },
+        "known_guardrails": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestNode"
+          }
+        },
+        "suggested_rg": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rgSuggestion"
+          }
+        },
+        "context_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "digestNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "type",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "rgSuggestion": {
+      "type": "object",
+      "required": [
+        "command",
+        "args",
+        "pattern",
+        "paths",
+        "reason"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
     "readOrderItem": {
       "type": "object",
       "required": [

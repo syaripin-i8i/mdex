@@ -33,6 +33,7 @@
 | knowledge graphs | rich typed relationships | `mdex` keeps only lightweight links such as `depends_on` and `relates_to` |
 
 Use `mdex` for first-pass judgment and workflow contracts. Use the other tools for deep code search, broad recall, or detailed graph analysis.
+In other words: `mdex` is the compass before `rg`, not a replacement for `rg`.
 
 ## Protocol
 
@@ -133,7 +134,49 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
   ],
   "recommended_next_actions_v2": [
     { "command": "open", "args": ["spec/b.md"], "reason": "read the recommended node first" }
-  ]
+  ],
+  "actionable_digest": {
+    "intent": "root decision",
+    "relevant_docs": [
+      {
+        "id": "spec/b.md",
+        "title": "Spec B",
+        "type": "spec",
+        "status": "active",
+        "reason": "direct depends_on"
+      },
+      {
+        "id": "decision/a.md",
+        "title": "Decision A",
+        "type": "decision",
+        "status": "active",
+        "reason": "high lexical or graph score"
+      }
+    ],
+    "relevant_task_history": [],
+    "likely_code_entrypoints": [],
+    "known_guardrails": [
+      {
+        "id": "decision/a.md",
+        "title": "Decision A",
+        "type": "decision",
+        "status": "active",
+        "reason": "mentions constraint"
+      }
+    ],
+    "suggested_rg": [
+      {
+        "command": "rg",
+        "args": ["-n", "root|decision", "spec", "decision", "design"],
+        "pattern": "root|decision",
+        "paths": ["spec", "decision", "design"],
+        "reason": "expand from mdex entrypoint candidates into exact source matches"
+      }
+    ],
+    "context_gaps": [
+      "no indexed code entrypoint found; use suggested rg to bridge into source code"
+    ]
+  }
 }
 ```
 
@@ -176,8 +219,8 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | command | primary keys |
 |---|---|
 | `scan` | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
-| `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `confidence` |
-| `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `deferred_nodes`, `confidence` |
+| `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
+| `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
 | `doctor` | `status`, `summary`, `checks`, `recommended_next_actions` |
 | `impact` | `inputs`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
 | `finish` | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |

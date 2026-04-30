@@ -42,7 +42,7 @@ Expected shape:
 
 - `scan` reports node and edge counts.
 - `start` returns `recommended_read_order`.
-- `context --actionable` returns next actions such as `open ...` and `search_code ...`.
+- `context --actionable` returns next actions plus `actionable_digest`, including relevant docs, task history, likely code entrypoints, known guardrails, suggested `rg`, and context gaps.
 - `doctor` reports index hygiene issues or `status: "ok"`.
 
 ## 3. Try Your Repo
@@ -111,6 +111,7 @@ You do not need to annotate every file. Start with README, AGENT-style rules, ac
 ## 5. Interpret Results
 
 - If `start` returns the right entrypoint, continue with `context --actionable`.
+- If `actionable_digest.context_gaps` says no code entrypoint was indexed, run the suggested `rg` command instead of broadening the main index too early.
 - If results are noisy, run `doctor` and tighten `exclude_patterns`.
 - If results are sparse, add frontmatter and short summaries to the few documents that should guide first-pass judgment.
 - If you need task history, memory, eval cases, or raw logs, prefer a separate index or direct reads.

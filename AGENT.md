@@ -40,7 +40,7 @@
 | 索引の新しさが怪しい | 先に `mdex scan` | 読む順序の誤判定を減らす |
 | 索引に local / old / archive ノイズが混ざった疑い | `mdex doctor` | 清掃が必要な状態を先に見える化する |
 | 作業を始める | `mdex start "<task>"` | `recommended_read_order` と `recommended_next_actions` を得る |
-| `start` より広い入口が欲しい | `mdex context "<task>" --actionable` | 入口情報を直接深掘りする |
+| `start` より広い入口が欲しい | `mdex context "<task>" --actionable` | `actionable_digest` で docs / task history / code entrypoints / guardrails / suggested `rg` を分けて見る |
 | 特定文書から読む順を決めたい | `mdex first <node-id>` | node 起点の read order を得る |
 | 関連文書を掘りたい | `mdex related <node-id>` | 近接文脈を確認する |
 | changed files がある | `mdex impact <path...>` または `mdex impact --changed-files-from-git` | `read_first` / `related_tasks` / `decision_records` を得る |
@@ -57,9 +57,23 @@
 4. changed files があるなら `mdex impact`
 5. 終了前に `mdex finish --dry-run`
 
+## Review Gate
+
+実質的な mdex 変更を入れたら、完了前にサブエージェントレビューを呼ぶ。
+
+対象例:
+
+- CLI output contract / schema を変える
+- ranking / context / start / impact / finish の判断ロジックを変える
+- scan / SQLite / doctor / hygiene の挙動を変える
+- README / AGENT / design の運用ルールを変える
+
+レビュー依頼では bugs / contract regressions / CLI compatibility / Windows behavior / missing tests を確認させる。
+
 ## Prohibitions / Discouraged
 
 - `mdex` を全文検索やコード理解の完全代替として扱わない
+- `suggested_rg` が出ているときは、`command` + `args` を分けて扱い、mdex の候補を起点に `rg` で exact evidence を取りに行く
 - prose 出力を期待しない。JSON field を読む
 - `finish --summary-file` を summary なしで実行しない
 - 通常の反映で `enrich` を優先しない。まず `finish` を使う

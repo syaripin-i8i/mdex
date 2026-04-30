@@ -142,6 +142,89 @@ def test_select_context_actionable_includes_structured_actions(
     assert first["command"] == "open"
     assert isinstance(first["args"], list)
     assert isinstance(first["reason"], str)
+    digest = result["actionable_digest"]
+    assert digest["intent"] == "root decision"
+    assert digest["relevant_docs"]
+    assert digest["suggested_rg"]
+    assert any("code entrypoint" in gap for gap in digest["context_gaps"])
+
+
+def test_select_context_actionable_digest_surfaces_code_and_guardrails(tmp_path: Path) -> None:
+    repo = tmp_path / "entrypoint_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    (repo / "runtime").mkdir()
+    (repo / "tests").mkdir()
+
+    (repo / "docs" / "reply_guard.md").write_text(
+        """---
+type: design
+status: active
+tags:
+  - reply
+  - guardrail
+---
+# Reply Guard
+
+Reply guardrail must check runtime/elyth_runtime.py and tests/test_elyth_thread_reply_guard.py before changing notification behavior.
+""",
+        encoding="utf-8",
+    )
+    (repo / "runtime" / "elyth_runtime.py").write_text(
+        "def thread_reply_guard():\n    return 'reply guardrail runtime entrypoint'\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_elyth_thread_reply_guard.py").write_text(
+        "def test_thread_reply_guard():\n    assert True\n",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md", ".py"],
+        "exclude_patterns": [],
+        "node_type_map": {"design": ["docs"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "entrypoint.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("reply guardrail runtime", str(db_path), budget=4000, limit=6, actionable=True)
+    digest = result["actionable_digest"]
+
+    assert [item["id"] for item in digest["known_guardrails"]] == ["docs/reply_guard.md"]
+    code_ids = {item["id"] for item in digest["likely_code_entrypoints"]}
+    assert "runtime/elyth_runtime.py" in code_ids
+    assert "tests/test_elyth_thread_reply_guard.py" in code_ids
+    assert digest["suggested_rg"][0]["command"] == "rg"
+    assert digest["suggested_rg"][0]["args"][0] == "-n"
+    assert {"runtime", "tests"}.issubset(set(digest["suggested_rg"][0]["paths"]))
+
+
+def test_select_context_suggested_rg_uses_args_for_shell_sensitive_terms(tmp_path: Path) -> None:
+    repo = tmp_path / "entrypoint_repo"
+    code_dir = repo / "runtime space"
+    code_dir.mkdir(parents=True)
+    (code_dir / "price_reply.py").write_text(
+        "def price_reply():\n    return 'price $reply path with spaces'\n",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "entrypoint.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("price $reply", str(db_path), budget=4000, limit=3, actionable=True)
+    suggestion = result["actionable_digest"]["suggested_rg"][0]
+
+    assert suggestion["command"] == "rg"
+    assert suggestion["args"][0] == "-n"
+    assert suggestion["args"][1] == "price|\\$reply"
+    assert "runtime space" in suggestion["args"]
+    assert suggestion["paths"] == ["runtime space"]
 
 
 def test_resolve_context_scoring_prefers_runtime_config_over_scan_config() -> None:

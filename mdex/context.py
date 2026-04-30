@@ -11,6 +11,45 @@ from mdex.store import get_scan_root, list_edges_for_nodes, list_nodes, search_n
 KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"']+")
 MDEX_FIND_ACTION_RE = re.compile(r'^run mdex find "(?P<query>.*)"$')
 
+CODE_ENTRYPOINT_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".mjs",
+    ".php",
+    ".ps1",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".ts",
+    ".tsx",
+}
+TEST_PATH_MARKERS = {"/test/", "/tests/", "_test.", ".test.", ".spec.", "/spec/"}
+PATH_TOKEN_RE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]+")
+GUARDRAIL_TERMS = {
+    "boundary",
+    "caveat",
+    "constraint",
+    "contract",
+    "gotcha",
+    "guard",
+    "guardrail",
+    "hazard",
+    "invariant",
+    "must",
+    "pitfall",
+    "prohibit",
+    "rule",
+    "warning",
+}
+
 DEFAULT_KEYWORD_WEIGHTS = {
     # Title is strongest lexical signal because it usually expresses scope succinctly.
     "title": 3.0,
@@ -486,6 +525,281 @@ def _query_keywords(query: str) -> list[str]:
     return filtered
 
 
+def _node_type(node_map: dict[str, dict[str, Any]], node_id: str) -> str:
+    return str(node_map.get(node_id, {}).get("type", "")).strip().lower()
+
+
+def _node_status(node_map: dict[str, dict[str, Any]], node_id: str) -> str:
+    return str(node_map.get(node_id, {}).get("status", "")).strip().lower()
+
+
+def _node_title(node_map: dict[str, dict[str, Any]], node_id: str) -> str:
+    return str(node_map.get(node_id, {}).get("title", ""))
+
+
+def _node_summary(node_map: dict[str, dict[str, Any]], node_id: str) -> str:
+    return str(node_map.get(node_id, {}).get("summary", ""))
+
+
+def _node_tags(node_map: dict[str, dict[str, Any]], node_id: str) -> list[str]:
+    tags = node_map.get(node_id, {}).get("tags", [])
+    if not isinstance(tags, list):
+        return []
+    return [str(item).strip() for item in tags if str(item).strip()]
+
+
+def _is_code_entrypoint(node_id: str, node: dict[str, Any] | None = None) -> bool:
+    lowered = node_id.lower().replace("\\", "/")
+    if any(lowered.endswith(extension) for extension in CODE_ENTRYPOINT_EXTENSIONS):
+        return True
+    if lowered.endswith((".md", ".json", ".jsonl", ".txt", ".rst")):
+        return False
+    if node is None:
+        return False
+    node_type = str(node.get("type", "")).strip().lower()
+    return node_type in {"code", "source", "implementation", "test"}
+
+
+def _is_test_entrypoint(node_id: str) -> bool:
+    normalized = node_id.lower().replace("\\", "/")
+    lowered = f"/{normalized}"
+    return any(marker in lowered for marker in TEST_PATH_MARKERS)
+
+
+def _node_brief(
+    node_id: str,
+    node_map: dict[str, dict[str, Any]],
+    *,
+    reason: str,
+    priority: int | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": node_id,
+        "title": _node_title(node_map, node_id),
+        "type": _node_type(node_map, node_id),
+        "status": _node_status(node_map, node_id),
+        "reason": reason,
+    }
+    if priority is not None:
+        payload["priority"] = priority
+    return payload
+
+
+def _unique_node_briefs(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for item in items:
+        node_id = str(item.get("id", "")).strip()
+        if not node_id or node_id in seen:
+            continue
+        seen.add(node_id)
+        result.append(item)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _top_level_path(node_id: str) -> str:
+    normalized = node_id.replace("\\", "/").strip("/")
+    if not normalized:
+        return "."
+    return normalized.split("/", 1)[0]
+
+
+def _indexed_code_mentions(node_id: str, node_map: dict[str, dict[str, Any]]) -> list[str]:
+    source = " ".join([_node_title(node_map, node_id), _node_summary(node_map, node_id)])
+    mentioned: list[str] = []
+    seen: set[str] = set()
+    for match in PATH_TOKEN_RE.findall(source):
+        candidate = match.strip().strip(".,;:()[]{}<>\"'").replace("\\", "/")
+        if candidate in seen:
+            continue
+        node = node_map.get(candidate)
+        if not node:
+            continue
+        if not _is_code_entrypoint(candidate, node):
+            continue
+        seen.add(candidate)
+        mentioned.append(candidate)
+    return mentioned
+
+
+def _rg_paths(
+    recommended_read_order: list[dict[str, Any]],
+    likely_code_entrypoints: list[dict[str, Any]],
+) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+
+    for item in likely_code_entrypoints:
+        node_id = str(item.get("id", "")).strip()
+        if not node_id:
+            continue
+        path = _top_level_path(node_id)
+        if path and path not in seen:
+            seen.add(path)
+            paths.append(path)
+
+    for item in recommended_read_order:
+        node_id = str(item.get("id", "")).strip()
+        if not node_id:
+            continue
+        path = _top_level_path(node_id)
+        if path in {"tasks", "task"}:
+            continue
+        if path and path not in seen:
+            seen.add(path)
+            paths.append(path)
+        if len(paths) >= 4:
+            break
+
+    return paths[:4] or ["."]
+
+
+def _suggested_rg_commands(
+    query: str,
+    recommended_read_order: list[dict[str, Any]],
+    likely_code_entrypoints: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    terms = _query_keywords(query)
+    if not terms:
+        return []
+
+    pattern = "|".join(re.escape(term) for term in terms[:5])
+    paths = _rg_paths(recommended_read_order, likely_code_entrypoints)
+    args = ["-n", pattern, *paths]
+    return [
+        {
+            "command": "rg",
+            "args": args,
+            "pattern": pattern,
+            "paths": paths,
+            "reason": "expand from mdex entrypoint candidates into exact source matches",
+        }
+    ]
+
+
+def _guardrail_reason(node_id: str, node_map: dict[str, dict[str, Any]]) -> str:
+    haystack = " ".join(
+        [
+            _node_title(node_map, node_id),
+            _node_summary(node_map, node_id),
+            " ".join(_node_tags(node_map, node_id)),
+        ]
+    ).lower()
+    matches = [term for term in sorted(GUARDRAIL_TERMS) if term in haystack]
+    if matches:
+        return f"mentions {'/'.join(matches[:3])}"
+    return "design/spec/reference node may define constraints"
+
+
+def _build_actionable_digest(
+    query: str,
+    selected_nodes: list[dict[str, Any]],
+    recommended_read_order: list[dict[str, Any]],
+    deferred_nodes: list[dict[str, Any]],
+    confidence: float,
+    node_map: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    read_items: list[dict[str, Any]] = []
+    task_items: list[dict[str, Any]] = []
+    code_items: list[dict[str, Any]] = []
+    guardrail_items: list[dict[str, Any]] = []
+
+    ordered_candidates = list(recommended_read_order)
+    ordered_candidates.extend({"id": str(item.get("id", "")), "reason": "selected by context score"} for item in selected_nodes)
+    ordered_candidates.extend(deferred_nodes)
+
+    for index, item in enumerate(ordered_candidates, start=1):
+        node_id = str(item.get("id", "")).strip()
+        if not node_id:
+            continue
+        node = node_map.get(node_id, {})
+        node_type = _node_type(node_map, node_id)
+        reason = str(item.get("reason", "")).strip() or "selected by context score"
+
+        if _is_code_entrypoint(node_id, node):
+            code_reason = "likely test entrypoint" if _is_test_entrypoint(node_id) else "likely code entrypoint"
+            code_items.append(_node_brief(node_id, node_map, reason=code_reason, priority=index))
+            continue
+
+        if node_type == "task":
+            task_items.append(_node_brief(node_id, node_map, reason=reason, priority=index))
+            continue
+
+        read_items.append(_node_brief(node_id, node_map, reason=reason, priority=index))
+
+        if node_type in {"decision", "design", "reference", "spec"}:
+            haystack = " ".join(
+                [
+                    _node_title(node_map, node_id),
+                    _node_summary(node_map, node_id),
+                    " ".join(_node_tags(node_map, node_id)),
+                ]
+            ).lower()
+            if any(term in haystack for term in GUARDRAIL_TERMS):
+                guardrail_items.append(
+                    _node_brief(node_id, node_map, reason=_guardrail_reason(node_id, node_map), priority=index)
+                )
+
+        for mentioned_id in _indexed_code_mentions(node_id, node_map):
+            code_reason = "mentioned test entrypoint" if _is_test_entrypoint(mentioned_id) else "mentioned code entrypoint"
+            code_items.append(_node_brief(mentioned_id, node_map, reason=code_reason, priority=index))
+
+    relevant_docs = _unique_node_briefs(read_items, limit=6)
+    relevant_task_history = _unique_node_briefs(task_items, limit=5)
+    likely_code_entrypoints = _unique_node_briefs(code_items, limit=5)
+    known_guardrails = _unique_node_briefs(guardrail_items, limit=5)
+    suggested_rg = _suggested_rg_commands(query, recommended_read_order, likely_code_entrypoints)
+
+    context_gaps: list[str] = []
+    if confidence < 0.6:
+        context_gaps.append("low confidence: mdex found sparse direct matches")
+    if not relevant_docs:
+        context_gaps.append("no strong document entrypoint found")
+    if not likely_code_entrypoints:
+        context_gaps.append("no indexed code entrypoint found; use suggested rg to bridge into source code")
+    if not known_guardrails:
+        context_gaps.append("no explicit guardrail/trap node found for this query")
+
+    return {
+        "intent": query.strip(),
+        "relevant_docs": relevant_docs,
+        "relevant_task_history": relevant_task_history,
+        "likely_code_entrypoints": likely_code_entrypoints,
+        "known_guardrails": known_guardrails,
+        "suggested_rg": suggested_rg,
+        "context_gaps": context_gaps,
+    }
+
+
+def _empty_actionable_digest(query: str, reason: str) -> dict[str, Any]:
+    terms = _query_keywords(query)
+    suggested_rg: list[dict[str, Any]] = []
+    if terms:
+        pattern = "|".join(re.escape(term) for term in terms[:5])
+        args = ["-n", pattern, "."]
+        suggested_rg.append(
+            {
+                "command": "rg",
+                "args": args,
+                "pattern": pattern,
+                "paths": ["."],
+                "reason": "mdex has insufficient context; fall back to exact source search",
+            }
+        )
+    return {
+        "intent": query.strip(),
+        "relevant_docs": [],
+        "relevant_task_history": [],
+        "likely_code_entrypoints": [],
+        "known_guardrails": [],
+        "suggested_rg": suggested_rg,
+        "context_gaps": [reason],
+    }
+
+
+
 def _next_actions(
     query: str,
     recommended_read_order: list[dict[str, Any]],
@@ -583,6 +897,7 @@ def select_context(
             "deferred_nodes": [],
             "confidence": 0.0,
             "why_this_set": [],
+            "actionable_digest": _empty_actionable_digest(query, "blank query: provide a task description"),
         }
 
     safe_limit = _coerce_positive_int(limit, 10)
@@ -632,6 +947,10 @@ def select_context(
             "deferred_nodes": [],
             "confidence": 0.0,
             "why_this_set": [],
+            "actionable_digest": _empty_actionable_digest(
+                query,
+                "no mdex candidates found; use suggested rg or add frontmatter/tags to entry docs",
+            ),
         }
 
     seed_ids = sorted(candidate_map.keys())
@@ -738,6 +1057,14 @@ def select_context(
     why_this_set = _why_this_set(selected_nodes, confidence, node_map)
     next_actions = _next_actions(query, read_order, confidence, node_map)
     next_actions_v2 = _next_actions_v2(next_actions)
+    actionable_digest = _build_actionable_digest(
+        query,
+        selected_nodes,
+        read_order,
+        deferred,
+        confidence,
+        node_map,
+    )
 
     payload.update(
         {
@@ -747,6 +1074,7 @@ def select_context(
             "deferred_nodes": deferred,
             "confidence": confidence,
             "why_this_set": why_this_set,
+            "actionable_digest": actionable_digest,
         }
     )
     return payload

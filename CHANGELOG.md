@@ -21,6 +21,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `mdex doctor` command for index hygiene checks, including scan warnings, JSON/SQLite drift, orphan overrides, legacy artifacts, and `old/`/`archive/` review paths.
 - Context hygiene policy documenting that the main repo index is an entrypoint guide, not a fixture/eval/log warehouse.
 - Getting started, adoption guide, and before/after examples for first-time mdex evaluation.
+- `context --actionable` and `start` now include `actionable_digest` with relevant docs, task history, likely code entrypoints, known guardrails, suggested `rg`, and context gaps.
 
 ### Changed
 

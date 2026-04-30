@@ -74,7 +74,7 @@ mdex/
   indexer.py     JSON / SQLite 出力
   store.py       SQLite API
   resolver.py    first / related
-  context.py     context 選別（actionable 出力あり）
+  context.py     context 選別（actionable digest 出力あり）
   start.py       start JSON 生成
   gittools.py    git changed files 収集
   impact.py      changed file 起点の分類
@@ -112,7 +112,13 @@ mdex/
 ### start
 
 - 入力: `task`, `budget`, `limit`
-- 出力: `recommended_read_order`, `recommended_next_actions`, `confidence`
+- 出力: `recommended_read_order`, `recommended_next_actions`, `actionable_digest`, `confidence`
+
+### context --actionable
+
+- 入力: `query`, `budget`, `limit`
+- 出力: `recommended_read_order`, `recommended_next_actions`, `actionable_digest`, `confidence`
+- `actionable_digest` は `rg` の代替ではなく、`rg` の前に読む docs / task history / code entrypoints / guardrails / suggested rg を分けて返す
 
 ### impact
 
