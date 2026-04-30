@@ -71,6 +71,12 @@ def _emit_payload(payload: Any, *, stderr: bool = False, pretty: bool = False) -
         print(output)
 
 
+def _mark_stdout_payload(payload: Any) -> None:
+    global _LAST_EMITTED_PAYLOAD, _LAST_EMITTED_STREAM
+    _LAST_EMITTED_PAYLOAD = payload
+    _LAST_EMITTED_STREAM = "stdout"
+
+
 def _emit_error(error: str, **details: Any) -> None:
     payload: dict[str, Any] = {"error": error}
     payload.update(details)
@@ -116,6 +122,7 @@ def _count_edge_resolution(edges: list[dict[str, Any]]) -> tuple[int, int, int, 
 
 
 def _print_node_table(nodes: list[dict[str, Any]]) -> None:
+    _mark_stdout_payload(nodes)
     for node in sorted(nodes, key=lambda item: str(item.get("id", ""))):
         node_id = str(node.get("id", ""))
         title = str(node.get("title", ""))
@@ -340,6 +347,7 @@ def _cmd_open(args: argparse.Namespace) -> int:
         _emit_error("node file not found", node_id=node_id)
         return 2
 
+    _mark_stdout_payload([{}])
     if text.endswith("\n"):
         print(text, end="")
     else:
@@ -507,6 +515,7 @@ def _cmd_orphans(args: argparse.Namespace) -> int:
 
 
 def _print_stale_table(rows: list[dict[str, Any]]) -> None:
+    _mark_stdout_payload(rows)
     for row in rows:
         print(
             "\t".join(

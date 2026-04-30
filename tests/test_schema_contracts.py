@@ -17,6 +17,7 @@ def _run_cli(*args: str, cwd: Path, env: dict[str, str] | None = None) -> subpro
     merged_env = os.environ.copy()
     existing_pythonpath = merged_env.get("PYTHONPATH", "")
     merged_env["PYTHONPATH"] = str(PROJECT_ROOT) if not existing_pythonpath else f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}"
+    merged_env.pop("MDEX_TELEMETRY", None)
     if env:
         merged_env.update(env)
     return subprocess.run(
@@ -286,6 +287,39 @@ def test_opt_in_telemetry_jsonl_is_local_schema_shaped_and_redacted(quality_repo
     assert "--db" in event["args"]["flags"]
     assert task not in lines[0]
     assert str(db_path) not in lines[0]
+
+    listed = _run_cli(
+        "list",
+        "--db",
+        str(db_path),
+        "--format",
+        "table",
+        cwd=quality_repo,
+        env={"MDEX_TELEMETRY": "1"},
+    )
+    assert listed.returncode == 0
+    list_event = json.loads(telemetry_path.read_text(encoding="utf-8").splitlines()[-1])
+    validate(instance=list_event, schema=_load_schema("telemetry_event.schema.json"))
+    assert list_event["command"] == "list"
+    assert list_event["stream"] == "stdout"
+    assert list_event["result_size"] > 0
+    assert list_event["args"]["positional_count"] == 0
+    assert {"--db", "--format"}.issubset(set(list_event["args"]["flags"]))
+    assert str(db_path) not in json.dumps(list_event, ensure_ascii=False)
+
+    opened = _run_cli("open", "design/root.md", "--db", str(db_path), cwd=quality_repo, env={"MDEX_TELEMETRY": "1"})
+    assert opened.returncode == 0
+    open_event = json.loads(telemetry_path.read_text(encoding="utf-8").splitlines()[-1])
+    validate(instance=open_event, schema=_load_schema("telemetry_event.schema.json"))
+    assert open_event["command"] == "open"
+    assert open_event["stream"] == "stdout"
+    assert open_event["result_size"] == 1
+
+    (quality_repo / ".mdex" / "config.json").write_text('{"telemetry": "false"}\n', encoding="utf-8")
+    telemetry_path.unlink()
+    disabled = _run_cli("list", "--db", str(db_path), cwd=quality_repo)
+    assert disabled.returncode == 0
+    assert not telemetry_path.exists()
 
     missing_db_dir = tmp_path / "telemetry_missing_db"
     missing_db_dir.mkdir()

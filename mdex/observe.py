@@ -15,6 +15,26 @@ TELEMETRY_SCHEMA = "https://github.com/syaripin-i8i/mdex/schemas/telemetry_event
 
 TRUTHY = {"1", "true", "yes", "on"}
 FALSY = {"0", "false", "no", "off"}
+VALUE_FLAGS = {
+    "--budget",
+    "--config",
+    "--db",
+    "--days",
+    "--digest",
+    "--format",
+    "--json-index",
+    "--limit",
+    "--node",
+    "--output",
+    "--path",
+    "--project",
+    "--root",
+    "--status",
+    "--summary",
+    "--summary-file",
+    "--task",
+    "--type",
+}
 
 
 def _now_utc() -> str:
@@ -39,7 +59,7 @@ def telemetry_enabled(cwd: Path | None = None) -> bool:
         return True
     if raw in FALSY:
         return False
-    return bool(_read_runtime_config(root).get("telemetry", False))
+    return _read_runtime_config(root).get("telemetry") is True
 
 
 def telemetry_log_path(cwd: Path | None = None) -> Path:
@@ -161,12 +181,19 @@ def summarize_payload(command: str, payload: Any) -> dict[str, Any]:
 def _argv_shape(argv: list[str]) -> dict[str, Any]:
     flags: list[str] = []
     positional_count = 0
+    skip_next = False
     for item in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
         text = str(item).strip()
         if not text:
             continue
         if text.startswith("-"):
-            flags.append(text.split("=", 1)[0])
+            flag = text.split("=", 1)[0]
+            flags.append(flag)
+            if "=" not in text and flag in VALUE_FLAGS:
+                skip_next = True
         else:
             positional_count += 1
     return {
