@@ -15,7 +15,7 @@
 - `start` と `context --actionable` の詳細な分岐は `AGENT.md` を正本とする
 - agents should prefer `recommended_next_actions_v2`; `recommended_next_actions` is deprecated but kept for 0.2.x compatibility
 - use `--digest minimal` on `start` / `context --actionable` to reduce context use when the full `actionable_digest` is not needed
-- JSON payloads include `contract_schema` / `contract_version`; integration details are in `docs/agent_integration.md`
+- JSON payloads require `contract_schema` / `contract_version`; error payloads also include machine-readable `code`
 
 ## For New Adopters
 
@@ -227,7 +227,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | `doctor` | `status`, `summary`, `checks`, `recommended_next_actions` |
 | `impact` | `inputs`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
 | `finish` | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
-| db resolution error | `error`, `resolution_attempts` |
+| db resolution error | `code`, `error`, `resolution_attempts` |
 
 `finish --dry-run` の成功判定:
 
@@ -237,7 +237,13 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 - `requires_manual_targeting: true` のときは `mdex enrich <node-id> --summary-file <path>` を明示ターゲットで実行
 
 ```json
-{ "error": "db not found", "resolution_attempts": [] }
+{
+  "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/error.schema.json",
+  "contract_version": "0.3.0",
+  "code": "db_not_found",
+  "error": "db not found",
+  "resolution_attempts": []
+}
 ```
 
 人間向け整形が必要な場合だけ `--format table` を使用してください。

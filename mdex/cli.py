@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mdex.builder import build_index
-from mdex.contract import with_contract_metadata
+from mdex.contract import with_contract_metadata, with_error_contract
 from mdex.context import resolve_context_scoring_config, select_context
 from mdex.dbresolve import (
     DbResolutionError,
@@ -65,11 +65,11 @@ def _emit_payload(payload: Any, *, stderr: bool = False, pretty: bool = False) -
 def _emit_error(error: str, **details: Any) -> None:
     payload: dict[str, Any] = {"error": error}
     payload.update(details)
-    _emit_payload(with_contract_metadata(payload, "error"), stderr=True)
+    _emit_payload(with_error_contract(payload), stderr=True)
 
 
 def _emit_error_payload(payload: dict[str, Any]) -> None:
-    _emit_payload(with_contract_metadata(payload, "error"), stderr=True)
+    _emit_payload(with_error_contract(payload), stderr=True)
 
 
 class JsonArgumentParser(argparse.ArgumentParser):

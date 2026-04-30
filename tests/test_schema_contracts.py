@@ -44,7 +44,7 @@ def _validate_payload(payload: dict[str, object], schema_filename: str) -> None:
 
 def _assert_contract(payload: dict[str, object], command: str) -> None:
     assert payload["contract_schema"] == f"https://github.com/syaripin-i8i/mdex/schemas/{command}.schema.json"
-    assert payload["contract_version"] == "0.2.0"
+    assert payload["contract_version"] == "0.3.0"
 
 
 def test_schema_files_are_valid_draft_2020_12() -> None:
@@ -198,24 +198,28 @@ def test_cli_error_outputs_match_error_schema(quality_repo: Path, tmp_path: Path
     assert missing_db.returncode == 2
     missing_db_payload = json.loads(missing_db.stderr)
     _assert_contract(missing_db_payload, "error")
+    assert missing_db_payload["code"] == "db_not_found"
     _validate_payload(missing_db_payload, "error.schema.json")
 
     open_absolute = _run_cli("open", str((quality_repo / "design" / "root.md").resolve()), "--db", str(db_path), cwd=quality_repo)
     assert open_absolute.returncode == 2
     open_absolute_payload = json.loads(open_absolute.stderr)
     _assert_contract(open_absolute_payload, "error")
+    assert open_absolute_payload["code"] == "invalid_node_id"
     _validate_payload(open_absolute_payload, "error.schema.json")
 
     open_parent = _run_cli("open", "../outside.md", "--db", str(db_path), cwd=quality_repo)
     assert open_parent.returncode == 2
     open_parent_payload = json.loads(open_parent.stderr)
     _assert_contract(open_parent_payload, "error")
+    assert open_parent_payload["code"] == "invalid_node_id"
     _validate_payload(open_parent_payload, "error.schema.json")
 
     stamp_not_indexed = _run_cli("stamp", "design/not_indexed.md", "--db", str(db_path), cwd=quality_repo)
     assert stamp_not_indexed.returncode == 2
     stamp_not_indexed_payload = json.loads(stamp_not_indexed.stderr)
     _assert_contract(stamp_not_indexed_payload, "error")
+    assert stamp_not_indexed_payload["code"] == "node_not_indexed"
     _validate_payload(stamp_not_indexed_payload, "error.schema.json")
 
     invalid_digest = _run_cli("context", "root decision", "--digest", "nope", cwd=quality_repo)
@@ -223,4 +227,13 @@ def test_cli_error_outputs_match_error_schema(quality_repo: Path, tmp_path: Path
     invalid_digest_payload = json.loads(invalid_digest.stderr)
     _assert_contract(invalid_digest_payload, "error")
     assert invalid_digest_payload["error"] == "invalid arguments"
+    assert invalid_digest_payload["code"] == "invalid_arguments"
     _validate_payload(invalid_digest_payload, "error.schema.json")
+
+    empty_title = _run_cli("new", "task", "", cwd=quality_repo)
+    assert empty_title.returncode == 2
+    empty_title_payload = json.loads(empty_title.stderr)
+    _assert_contract(empty_title_payload, "error")
+    assert empty_title_payload["error"] == "title is required"
+    assert empty_title_payload["code"] == "invalid_arguments"
+    _validate_payload(empty_title_payload, "error.schema.json")

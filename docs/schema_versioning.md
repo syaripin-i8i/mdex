@@ -28,6 +28,8 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
   - description clarifications
   - schema metadata/documentation-only changes
 
+Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor release when the change is explicit in `CHANGELOG.md` and the package is still in public-preview mode. After `1.0.0`, the `MAJOR` rules above apply strictly.
+
 ## Compatibility Guarantees
 
 - Existing required fields keep name and type within the same MAJOR line.
@@ -58,5 +60,10 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 ## Recent Minor Additions
 
 - `scan.schema.json` adds optional `warnings` for per-file parse failures in non-strict scan mode.
-- Success and error schemas allow optional `contract_schema` and `contract_version`; new CLI payloads include them.
 - `start` and `context --actionable` support `--digest minimal|full`. Minimal digest may omit full-only `actionable_digest` members.
+
+## 0.3.0 Contract Tightening
+
+- Success and error schemas require `contract_schema` and `contract_version`.
+- Error schemas require machine-readable `code` alongside human-readable `error`.
+- `recommended_next_actions` remains present but deprecated; agents should prefer `recommended_next_actions_v2`.

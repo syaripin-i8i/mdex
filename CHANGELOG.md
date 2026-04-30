@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-01
+
+### Added
+
+- `start` and `context --actionable` support `--digest minimal|full`; `full` preserves the previous digest shape and `minimal` reduces context usage.
+- Success JSON payloads for `scan`, `start`, `context`, `doctor`, `impact`, and `finish` include required `contract_schema` and `contract_version`.
+- Error JSON payloads include required `contract_schema`, `contract_version`, and machine-readable `code`.
+- Agent integration guidance in `docs/agent_integration.md`, including safe argv execution for structured actions and `suggested_rg.args`.
+- `AGENT.md` now documents shortest safe paths and an entrypoint flowchart for low round-trip agent use.
+
+### Changed
+
+- `recommended_next_actions` v1 is now documented and schema-annotated as deprecated; agents should prefer `recommended_next_actions_v2`.
+- `recommended_next_actions_v2` now uses executable argv-style commands such as `mdex open ...` and `rg -n ...`.
+- Parser-level argument failures now emit JSON error payloads instead of argparse prose.
+
 ## [0.2.0] - 2026-05-01
 
 First public-preview GitHub/source milestone. PyPI publication can use this version once publishing is enabled.
@@ -26,9 +42,6 @@ First public-preview GitHub/source milestone. PyPI publication can use this vers
 - Context hygiene policy documenting that the main repo index is an entrypoint guide, not a fixture/eval/log warehouse.
 - Getting started, adoption guide, and before/after examples for first-time mdex evaluation.
 - `context --actionable` and `start` now include `actionable_digest` with relevant docs, task history, likely code entrypoints, known guardrails, suggested `rg`, and context gaps.
-- `start` and `context --actionable` support `--digest minimal|full`; `full` preserves the 0.2.x digest shape and `minimal` reduces context usage.
-- Success JSON payloads for `scan`, `start`, `context`, `doctor`, `impact`, and `finish` include `contract_schema` and `contract_version`; error JSON payloads include the same metadata for `error.schema.json`.
-- Agent integration guidance in `docs/agent_integration.md`, including safe argv execution for structured actions and `suggested_rg.args`.
 - Japanese guardrail terms and a detailed `suggested_rg` example for the `actionable_digest` workflow.
 - Python 3.13 and 3.14 support in the CI/support matrix.
 
@@ -46,7 +59,6 @@ First public-preview GitHub/source milestone. PyPI publication can use this vers
 - SQLite metadata now records scan warnings so `mdex doctor` can surface them after the scan run.
 - Public scan config now excludes archive, fixture, eval, log, dump, and raw-log paths from the main repo index.
 - Package metadata now bounds supported Python installs to `>=3.10,<3.15`.
-- `recommended_next_actions` v1 is now documented and schema-annotated as deprecated; agents should prefer `recommended_next_actions_v2`.
 
 ### Removed
 

@@ -5,6 +5,8 @@
   "description": "Contract for mdex context JSON output",
   "type": "object",
   "required": [
+    "contract_schema",
+    "contract_version",
     "query",
     "nodes",
     "total_tokens",
@@ -13,11 +15,11 @@
   "properties": {
     "contract_schema": {
       "type": "string",
-      "description": "Schema URL identifying this output contract. Optional in 0.2.x; expected on new CLI success payloads."
+      "description": "Schema URL identifying this output contract."
     },
     "contract_version": {
       "type": "string",
-      "description": "mdex contract version for this payload. Optional in 0.2.x; expected on new CLI success payloads."
+      "description": "mdex contract version for this payload."
     },
     "query": {
       "type": "string"

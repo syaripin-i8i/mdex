@@ -32,7 +32,7 @@ Parse stdout or stderr as JSON before making decisions. New success and error pa
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/start.schema.json",
-  "contract_version": "0.2.0"
+  "contract_version": "0.3.0"
 }
 ```
 
@@ -40,7 +40,20 @@ Consumers should ignore unknown fields for forward compatibility.
 
 ## Schema Validation
 
-Schemas live in `schemas/`. Use `contract_schema` to select the expected schema when available. In 0.2.x these metadata fields are optional in schemas for compatibility with older consumers, but new CLI payloads include them.
+Schemas live in `schemas/`. Use `contract_schema` to select the expected schema. In 0.3.x, `contract_schema` and `contract_version` are required in success and error schemas.
+
+Error payloads include a machine-readable `code` field. Switch on `code`; display `error` / `detail` to humans.
+
+Common codes:
+
+| code | recovery |
+|---|---|
+| `db_not_found` | run `mdex scan` or pass `--db` |
+| `invalid_arguments` | fix argv construction before retrying |
+| `context_selection_failed` | retry with a narrower query or refresh the DB |
+| `not_a_git_repository` | omit `--changed-files-from-git` or run inside a git repo |
+| `summary_file_not_found` | create/pass the intended summary file |
+| `node_not_indexed` | run `mdex scan` or use an indexed node id |
 
 ## Structured Actions
 

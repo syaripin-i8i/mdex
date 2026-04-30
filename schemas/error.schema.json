@@ -5,16 +5,52 @@
   "description": "Contract for stderr JSON emitted by mdex commands on failure",
   "type": "object",
   "required": [
+    "contract_schema",
+    "contract_version",
+    "code",
     "error"
   ],
   "properties": {
     "contract_schema": {
       "type": "string",
-      "description": "Schema URL identifying this error contract. Optional in 0.2.x; expected on new CLI error payloads."
+      "description": "Schema URL identifying this error contract."
     },
     "contract_version": {
       "type": "string",
-      "description": "mdex contract version for this error payload. Optional in 0.2.x; expected on new CLI error payloads."
+      "description": "mdex contract version for this error payload."
+    },
+    "code": {
+      "type": "string",
+      "description": "Machine-readable error code for agent switch handling.",
+      "enum": [
+        "collect_git_changed_files_failed",
+        "command_failed",
+        "context_selection_failed",
+        "db_not_found",
+        "db_resolution_failed",
+        "doctor_failed",
+        "enrich_failed",
+        "finish_failed",
+        "impact_failed",
+        "invalid_arguments",
+        "invalid_node_id",
+        "load_graph_failed",
+        "load_nodes_failed",
+        "load_runtime_config_failed",
+        "load_stale_nodes_failed",
+        "new_failed",
+        "node_file_not_found",
+        "node_not_found",
+        "node_not_indexed",
+        "not_a_git_repository",
+        "path_must_be_absolute",
+        "read_summary_file_failed",
+        "scan_failed",
+        "stamp_failed",
+        "start_failed",
+        "summary_file_not_found",
+        "summary_required"
+      ]
     },
     "error": {
       "type": "string",

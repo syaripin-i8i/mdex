@@ -45,6 +45,19 @@ Agents do not need to run `context` after `start` when `start` already returns e
 
 Run `scan` first when `index_status.fresh == false`, when DB resolution fails, or when the repo/index state is uncertain.
 
+```mermaid
+flowchart TD
+  A["Need an entrypoint?"] --> B["Run mdex start <task>"]
+  B --> C{"index_status.fresh?"}
+  C -- "false" --> D["Run mdex scan, then mdex start again"]
+  C -- "true" --> E{"confidence >= 0.6 and read_order/actions are enough?"}
+  E -- "yes" --> F["Proceed without mdex context"]
+  E -- "no" --> G["Run mdex context <task> --actionable"]
+  H["Likely area already known?"] --> G
+  I["Changed files exist?"] --> J["Run mdex impact --changed-files-from-git"]
+  K["Closing work?"] --> L["Run mdex finish --task <task> --dry-run"]
+```
+
 ## If-Then Rules
 
 | if | then | why |

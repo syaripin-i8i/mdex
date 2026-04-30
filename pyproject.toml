@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdex-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "Markdown/JSON indexer and lightweight graph-based explorer"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -37,6 +37,17 @@ mdex = "mdex.cli:main"
 
 [tool.setuptools]
 packages = ["mdex"]
+
+[tool.setuptools.data-files]
+schemas = [
+  "schemas/context.schema.json",
+  "schemas/doctor.schema.json",
+  "schemas/error.schema.json",
+  "schemas/finish.schema.json",
+  "schemas/impact.schema.json",
+  "schemas/scan.schema.json",
+  "schemas/start.schema.json",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
