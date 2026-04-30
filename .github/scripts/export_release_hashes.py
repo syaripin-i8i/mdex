@@ -25,12 +25,18 @@ TARGET_MATRIX = (
     ("3.10", "linux", "Linux", "posix"),
     ("3.11", "linux", "Linux", "posix"),
     ("3.12", "linux", "Linux", "posix"),
+    ("3.13", "linux", "Linux", "posix"),
+    ("3.14", "linux", "Linux", "posix"),
     ("3.10", "darwin", "Darwin", "posix"),
     ("3.11", "darwin", "Darwin", "posix"),
     ("3.12", "darwin", "Darwin", "posix"),
+    ("3.13", "darwin", "Darwin", "posix"),
+    ("3.14", "darwin", "Darwin", "posix"),
     ("3.10", "win32", "Windows", "nt"),
     ("3.11", "win32", "Windows", "nt"),
     ("3.12", "win32", "Windows", "nt"),
+    ("3.13", "win32", "Windows", "nt"),
+    ("3.14", "win32", "Windows", "nt"),
 )
 
 

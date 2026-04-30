@@ -13,13 +13,19 @@ This guide is the shortest path to seeing whether `mdex` helps your repo.
 
 ## 1. Install
 
-This page documents the current repository state. Some commands, including `mdex doctor`, are not in the 0.1.0 package yet. For the exact flow below, install from this checkout:
+For the current GitHub source version:
+
+```bash
+python -m pip install git+https://github.com/syaripin-i8i/mdex.git
+```
+
+For local development from this checkout:
 
 ```bash
 python -m pip install -e .
 ```
 
-After the next release, the package install path is:
+After public PyPI publication:
 
 ```bash
 python -m pip install mdex-cli

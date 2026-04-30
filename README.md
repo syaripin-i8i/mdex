@@ -309,14 +309,20 @@ read order と source of truth は同義ではありません。
 
 ## Setup
 
-The current repository docs describe unreleased commands such as `mdex doctor`. Until the next package release, use editable install from this checkout for the documented verification flow:
+Current GitHub source install:
+
+```bash
+python -m pip install git+https://github.com/syaripin-i8i/mdex.git
+```
+
+Local checkout install:
 
 ```bash
 python -m pip install -e .
 python -m pip install -e ".[dev]"
 ```
 
-For the latest released package only:
+After public PyPI publication:
 
 ```bash
 python -m pip install mdex-cli
@@ -336,10 +342,10 @@ python -m pip lock -e ".[dev]" -o pylock.toml
 python .github/scripts/export_release_hashes.py --lock pylock.toml --output .github/locks/pypi_release_hashes.json
 ```
 
-matrix (`ubuntu/macos/windows x 3.10/3.11/3.12`) で hash install を維持するため、`pylock.toml` 更新時は  
+matrix (`ubuntu/macos/windows x 3.10/3.11/3.12/3.13/3.14`) で hash install を維持するため、`pylock.toml` 更新時は  
 `.github/locks/pypi_release_hashes.json` も同時更新してください。
 
-Python 3.13 は support matrix で「未サポート / 未検証」として扱います。詳細は `docs/support_matrix.md` を参照してください。
+Python support policy is documented in `docs/support_matrix.md`.
 
 ## Privacy Note
 

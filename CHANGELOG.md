@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-01
+
+First public-preview GitHub/source milestone. PyPI publication can use this version once publishing is enabled.
+
 ### Added
 
 - `scan` supports `scan_roots` (array) with backward-compatible `scan_root` alias handling.
@@ -23,6 +27,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Getting started, adoption guide, and before/after examples for first-time mdex evaluation.
 - `context --actionable` and `start` now include `actionable_digest` with relevant docs, task history, likely code entrypoints, known guardrails, suggested `rg`, and context gaps.
 - Japanese guardrail terms and a detailed `suggested_rg` example for the `actionable_digest` workflow.
+- Python 3.13 and 3.14 support in the CI/support matrix.
 
 ### Changed
 
@@ -37,6 +42,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - SQLite regeneration now prunes `node_overrides` for nodes no longer present in the freshly built index.
 - SQLite metadata now records scan warnings so `mdex doctor` can surface them after the scan run.
 - Public scan config now excludes archive, fixture, eval, log, dump, and raw-log paths from the main repo index.
+- Package metadata now bounds supported Python installs to `>=3.10,<3.15`.
 
 ### Removed
 

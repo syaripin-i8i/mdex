@@ -13,7 +13,7 @@ except ModuleNotFoundError:
 
 
 # Pytest loads conftest before importing test modules, so expose a consistent
-# tomllib module name across Python 3.10-3.12.
+# tomllib module name across supported Python versions.
 sys.modules.setdefault("tomllib", tomllib)
 
 

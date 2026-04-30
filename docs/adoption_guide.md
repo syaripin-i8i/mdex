@@ -19,7 +19,7 @@ It should not contain every file that might someday be useful.
 
 ## Recommended Rollout
 
-This guide describes the current repository state. Until the next package release, `mdex doctor` requires installing from this checkout with `python -m pip install -e .`.
+This guide describes the current GitHub source state. Install with `python -m pip install git+https://github.com/syaripin-i8i/mdex.git` or from a local checkout with `python -m pip install -e .`.
 
 1. Create a narrow scan config.
 2. Index only source-authority documents first.

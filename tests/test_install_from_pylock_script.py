@@ -8,11 +8,11 @@ import textwrap
 from pathlib import Path
 from types import ModuleType
 
-from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.version import Version
 import pytest
 import tomllib
+import yaml
 
 
 def _load_script_module() -> ModuleType:
@@ -20,6 +20,16 @@ def _load_script_module() -> ModuleType:
     spec = importlib.util.spec_from_file_location("install_from_pylock_script", script_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("failed to load install_from_pylock.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_export_script_module() -> ModuleType:
+    script_path = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "export_release_hashes.py"
+    spec = importlib.util.spec_from_file_location("export_release_hashes_script", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("failed to load export_release_hashes.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -372,8 +382,29 @@ def test_real_pylock_is_covered_by_supplemental_release_hash_catalog() -> None:
     assert not missing, f"supplemental release hash catalog missing coverage: {missing}"
 
 
+def test_ci_python_matrix_matches_release_hash_targets() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    export_module = _load_export_script_module()
+    ci = yaml.safe_load((repo_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    matrix = ci["jobs"]["test"]["strategy"]["matrix"]
+
+    os_to_target = {
+        "ubuntu-latest": ("linux", "Linux", "posix"),
+        "macos-latest": ("darwin", "Darwin", "posix"),
+        "windows-latest": ("win32", "Windows", "nt"),
+    }
+    expected = sorted(
+        (pyver, *os_to_target[os_name])
+        for os_name in matrix["os"]
+        for pyver in matrix["python-version"]
+    )
+
+    assert sorted(export_module.TARGET_MATRIX) == expected
+
+
 def test_supplemental_catalog_closes_transitives_for_ci_matrix() -> None:
     module = _load_script_module()
+    export_module = _load_export_script_module()
     repo_root = Path(__file__).resolve().parents[1]
     lock_data = tomllib.loads((repo_root / "pylock.toml").read_text(encoding="utf-8"))
     packages = lock_data.get("packages", [])
@@ -397,27 +428,7 @@ def test_supplemental_catalog_closes_transitives_for_ci_matrix() -> None:
             continue
         roots[name] = version
 
-    base_env = default_environment()
-    target_envs: list[dict[str, str]] = []
-    for pyver, sys_platform, platform_system, os_name in (
-        ("3.10", "linux", "Linux", "posix"),
-        ("3.11", "linux", "Linux", "posix"),
-        ("3.12", "linux", "Linux", "posix"),
-        ("3.10", "darwin", "Darwin", "posix"),
-        ("3.11", "darwin", "Darwin", "posix"),
-        ("3.12", "darwin", "Darwin", "posix"),
-        ("3.10", "win32", "Windows", "nt"),
-        ("3.11", "win32", "Windows", "nt"),
-        ("3.12", "win32", "Windows", "nt"),
-    ):
-        env = dict(base_env)
-        env["python_version"] = pyver
-        env["python_full_version"] = f"{pyver}.0"
-        env["sys_platform"] = sys_platform
-        env["platform_system"] = platform_system
-        env["os_name"] = os_name
-        env["extra"] = ""
-        target_envs.append(env)
+    target_envs = export_module._build_target_envs()
 
     missing: list[str] = []
     for env in target_envs:
