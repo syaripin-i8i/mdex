@@ -26,6 +26,9 @@ First public-preview GitHub/source milestone. PyPI publication can use this vers
 - Context hygiene policy documenting that the main repo index is an entrypoint guide, not a fixture/eval/log warehouse.
 - Getting started, adoption guide, and before/after examples for first-time mdex evaluation.
 - `context --actionable` and `start` now include `actionable_digest` with relevant docs, task history, likely code entrypoints, known guardrails, suggested `rg`, and context gaps.
+- `start` and `context --actionable` support `--digest minimal|full`; `full` preserves the 0.2.x digest shape and `minimal` reduces context usage.
+- Success JSON payloads for `scan`, `start`, `context`, `doctor`, `impact`, and `finish` include `contract_schema` and `contract_version`; error JSON payloads include the same metadata for `error.schema.json`.
+- Agent integration guidance in `docs/agent_integration.md`, including safe argv execution for structured actions and `suggested_rg.args`.
 - Japanese guardrail terms and a detailed `suggested_rg` example for the `actionable_digest` workflow.
 - Python 3.13 and 3.14 support in the CI/support matrix.
 
@@ -43,6 +46,7 @@ First public-preview GitHub/source milestone. PyPI publication can use this vers
 - SQLite metadata now records scan warnings so `mdex doctor` can surface them after the scan run.
 - Public scan config now excludes archive, fixture, eval, log, dump, and raw-log paths from the main repo index.
 - Package metadata now bounds supported Python installs to `>=3.10,<3.15`.
+- `recommended_next_actions` v1 is now documented and schema-annotated as deprecated; agents should prefer `recommended_next_actions_v2`.
 
 ### Removed
 

@@ -45,8 +45,8 @@ def test_readme_quality_repo_expected_outputs_are_in_sync() -> None:
     assert '"id": "design/root.md"' in start_block
     assert '"recommended_next_actions": [' in start_block
     assert '"recommended_next_actions_v2": [' in start_block
-    assert '"command": "open"' in start_block
-    assert '"args": ["spec/b.md"]' in start_block
+    assert '"command": "mdex"' in start_block
+    assert '"args": ["open", "spec/b.md"]' in start_block
 
     impact_start = section.index('"inputs": ["design/root.md"]')
     impact_end = section.index("```", impact_start)

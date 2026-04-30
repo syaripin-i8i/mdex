@@ -32,6 +32,19 @@
 標準は `start -> context --actionable`。  
 ただし入口が明確な場合は `context --actionable` から始めてよい。
 
+## Shortest Safe Paths
+
+| situation | shortest safe command | when it is enough |
+|---|---|---|
+| fresh DB and unknown entrypoint | `mdex start "<task>"` | use when `index_status.fresh == true` and `confidence >= 0.6` |
+| known entrypoint / need actions | `mdex context "<task>" --actionable` | use when a likely area is already known |
+| changed files exist | `mdex impact --changed-files-from-git` | use after edits to classify impacted docs |
+| close task without applying summary | `mdex finish --task "<task>" --dry-run` | use to confirm no-op or update candidates |
+
+Agents do not need to run `context` after `start` when `start` already returns enough `recommended_read_order`, `recommended_next_actions_v2`, and `actionable_digest`.
+
+Run `scan` first when `index_status.fresh == false`, when DB resolution fails, or when the repo/index state is uncertain.
+
 ## If-Then Rules
 
 | if | then | why |

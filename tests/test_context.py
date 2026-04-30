@@ -139,14 +139,31 @@ def test_select_context_actionable_includes_structured_actions(
     assert result["recommended_next_actions"]
     assert result["recommended_next_actions_v2"]
     first = result["recommended_next_actions_v2"][0]
-    assert first["command"] == "open"
-    assert isinstance(first["args"], list)
+    assert first["command"] == "mdex"
+    assert first["args"][:1] == ["open"]
     assert isinstance(first["reason"], str)
     digest = result["actionable_digest"]
     assert digest["intent"] == "root decision"
     assert digest["relevant_docs"]
     assert digest["suggested_rg"]
     assert any("code entrypoint" in gap for gap in digest["context_gaps"])
+
+
+def test_select_context_actionable_digest_minimal_omits_full_only_keys(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_context_digest_minimal.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    result = select_context("root decision", str(db_path), budget=4000, limit=5, actionable=True, digest="minimal")
+    digest = result["actionable_digest"]
+
+    assert set(digest) == {"intent", "relevant_docs", "suggested_rg", "context_gaps"}
+    assert digest["intent"] == "root decision"
+    assert digest["suggested_rg"][0]["command"] == "rg"
+    assert set(result["recommended_next_actions_v2"][0]) >= {"command", "args", "reason"}
 
 
 def test_select_context_actionable_digest_surfaces_code_and_guardrails(tmp_path: Path) -> None:
@@ -232,6 +249,44 @@ tags:
 
     assert [item["id"] for item in guardrails] == ["docs/reply_policy.md"]
     assert "制約" in guardrails[0]["reason"]
+
+
+def test_select_context_detects_japanese_guardrails_in_title_summary_and_tags(tmp_path: Path) -> None:
+    repo = tmp_path / "japanese_guardrail_fields_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    for filename, title, tags, summary in (
+        ("title.md", "注意事項", ["reply"], "title carries the guardrail term"),
+        ("summary.md", "Reply Summary", ["reply"], "認可の前提を確認する"),
+        ("tags.md", "Reply Tags", ["ロールバック"], "tag carries the guardrail term"),
+    ):
+        (repo / "docs" / filename).write_text(
+            f"""---
+type: design
+status: active
+tags:
+  - {tags[0]}
+---
+# {title}
+
+返信 policy {summary}
+""",
+            encoding="utf-8",
+        )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"design": ["docs"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "japanese_guardrail_fields.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("返信 policy", str(db_path), budget=4000, limit=3, actionable=True)
+    guardrail_ids = {item["id"] for item in result["actionable_digest"]["known_guardrails"]}
+
+    assert guardrail_ids == {"docs/title.md", "docs/summary.md", "docs/tags.md"}
 
 
 def test_select_context_suggested_rg_uses_args_for_shell_sensitive_terms(tmp_path: Path) -> None:

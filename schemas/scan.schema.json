@@ -10,6 +10,14 @@
     "output"
   ],
   "properties": {
+    "contract_schema": {
+      "type": "string",
+      "description": "Schema URL identifying this output contract. Optional in 0.2.x; expected on new CLI success payloads."
+    },
+    "contract_version": {
+      "type": "string",
+      "description": "mdex contract version for this payload. Optional in 0.2.x; expected on new CLI success payloads."
+    },
     "nodes": {
       "type": "integer",
       "minimum": 0

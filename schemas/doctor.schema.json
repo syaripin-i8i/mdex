@@ -11,6 +11,14 @@
     "recommended_next_actions"
   ],
   "properties": {
+    "contract_schema": {
+      "type": "string",
+      "description": "Schema URL identifying this output contract. Optional in 0.2.x; expected on new CLI success payloads."
+    },
+    "contract_version": {
+      "type": "string",
+      "description": "mdex contract version for this payload. Optional in 0.2.x; expected on new CLI success payloads."
+    },
     "status": {
       "type": "string",
       "enum": ["ok", "warning", "error"]

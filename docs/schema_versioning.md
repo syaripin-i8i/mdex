@@ -40,6 +40,7 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - A field scheduled for removal is first marked deprecated in docs and release notes.
 - Minimum deprecation window: one MINOR release cycle before MAJOR removal.
 - During deprecation, field behavior and type stay stable.
+- `recommended_next_actions` is deprecated in `start` and actionable `context` payloads. Agents should prefer structured `recommended_next_actions_v2`; v1 remains present in 0.2.x for compatibility.
 
 ## Change Process
 
@@ -57,3 +58,5 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 ## Recent Minor Additions
 
 - `scan.schema.json` adds optional `warnings` for per-file parse failures in non-strict scan mode.
+- Success and error schemas allow optional `contract_schema` and `contract_version`; new CLI payloads include them.
+- `start` and `context --actionable` support `--digest minimal|full`. Minimal digest may omit full-only `actionable_digest` members.

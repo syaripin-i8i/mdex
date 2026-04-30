@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from mdex.context import select_context
+from mdex.context import project_actionable_digest, select_context
 from mdex.store import get_index_metadata
 
 
@@ -15,6 +15,7 @@ def build_start_payload(
     budget: int,
     limit: int,
     include_content: bool,
+    digest: str = "full",
     scoring_config: dict[str, Any] | None = None,
     scoring_config_source: str = "defaults",
     stale_after_hours: int = 24,
@@ -29,6 +30,7 @@ def build_start_payload(
         limit=limit,
         include_content=include_content,
         actionable=True,
+        digest=digest,
         scoring_config=scoring_config,
         scoring_config_source=scoring_config_source,
     )
@@ -61,7 +63,7 @@ def build_start_payload(
         "confidence": confidence,
         "why_this_set": context_payload.get("why_this_set", []),
         "actionable_digest": context_payload.get("actionable_digest")
-        or _fallback_actionable_digest(task),
+        or project_actionable_digest(_fallback_actionable_digest(task), digest),
         "total_tokens": int(context_payload.get("total_tokens", 0) or 0),
         "budget": int(context_payload.get("budget", budget) or budget),
         "nodes": context_payload.get("nodes", []),

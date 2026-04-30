@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from mdex.builder import build_index
+from mdex.contract import with_contract_metadata
 from mdex.context import resolve_context_scoring_config, select_context
 from mdex.dbresolve import (
     DbResolutionError,
@@ -64,7 +65,17 @@ def _emit_payload(payload: Any, *, stderr: bool = False, pretty: bool = False) -
 def _emit_error(error: str, **details: Any) -> None:
     payload: dict[str, Any] = {"error": error}
     payload.update(details)
-    _emit_payload(payload, stderr=True)
+    _emit_payload(with_contract_metadata(payload, "error"), stderr=True)
+
+
+def _emit_error_payload(payload: dict[str, Any]) -> None:
+    _emit_payload(with_contract_metadata(payload, "error"), stderr=True)
+
+
+class JsonArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        _emit_error("invalid arguments", detail=message)
+        raise SystemExit(2)
 
 
 def _load_json(path: str, *, optional: bool = False) -> dict[str, Any]:
@@ -146,7 +157,7 @@ def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any]
     try:
         resolved = resolve_db_path(explicit, cwd=Path.cwd(), must_exist=must_exist)
     except DbResolutionError as exc:
-        _emit_payload(exc.payload, stderr=True)
+        _emit_error_payload(exc.payload)
         return None
     except Exception as exc:
         _emit_error("db resolution failed", detail=str(exc))
@@ -246,7 +257,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         },
         "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
     }
-    _emit_payload(payload, pretty=True)
+    _emit_payload(with_contract_metadata(payload, "scan"), pretty=True)
     return 0
 
 
@@ -269,7 +280,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         _emit_error("doctor failed", detail=str(exc))
         return 2
 
-    _emit_payload(payload, pretty=True)
+    _emit_payload(with_contract_metadata(payload, "doctor"), pretty=True)
     return 0
 
 
@@ -536,6 +547,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
             limit=int(args.limit),
             include_content=bool(args.include_content),
             actionable=bool(args.actionable),
+            digest=str(args.digest),
             scoring_config=scoring_config,
             scoring_config_source=scoring_source,
         )
@@ -543,7 +555,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
         _emit_error("context selection failed", detail=str(exc))
         return 2
 
-    _emit_payload(result, pretty=True)
+    _emit_payload(with_contract_metadata(result, "context"), pretty=True)
     return 0
 
 
@@ -562,6 +574,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
             budget=int(args.budget),
             limit=int(args.limit),
             include_content=bool(args.include_content),
+            digest=str(args.digest),
             scoring_config=scoring_config,
             scoring_config_source=scoring_source,
         )
@@ -569,7 +582,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
         _emit_error("start failed", detail=str(exc))
         return 2
 
-    _emit_payload(payload, pretty=True)
+    _emit_payload(with_contract_metadata(payload, "start"), pretty=True)
     return 0
 
 
@@ -656,7 +669,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
         _emit_error("impact failed", detail=str(exc))
         return 2
 
-    _emit_payload(payload, pretty=True)
+    _emit_payload(with_contract_metadata(payload, "impact"), pretty=True)
     return 0
 
 
@@ -680,13 +693,13 @@ def _cmd_finish(args: argparse.Namespace) -> int:
             limit=int(args.limit),
         )
     except FinishError as exc:
-        _emit_payload(exc.payload, stderr=True)
+        _emit_error_payload(exc.payload)
         return 2
     except Exception as exc:
         _emit_error("finish failed", detail=str(exc))
         return 2
 
-    _emit_payload(payload, pretty=True)
+    _emit_payload(with_contract_metadata(payload, "finish"), pretty=True)
     return 0
 
 
@@ -731,8 +744,8 @@ def _cmd_stamp(args: argparse.Namespace) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="mdex CLI")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = JsonArgumentParser(description="mdex CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=JsonArgumentParser)
 
     scan_parser = subparsers.add_parser("scan", help="Scan indexable files and build an index")
     scan_parser.add_argument("--root", help="Directory to scan")
@@ -803,6 +816,12 @@ def _build_parser() -> argparse.ArgumentParser:
     context_parser.add_argument("--limit", type=int, default=10, help="Maximum nodes to return")
     context_parser.add_argument("--actionable", action="store_true", help="Return action-oriented output")
     context_parser.add_argument(
+        "--digest",
+        choices=["minimal", "full"],
+        default="full",
+        help="Actionable digest verbosity",
+    )
+    context_parser.add_argument(
         "--include-content",
         action="store_true",
         help="Include full node content in output",
@@ -814,6 +833,12 @@ def _build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     start_parser.add_argument("--budget", type=int, default=4000, help="Token budget (soft)")
     start_parser.add_argument("--limit", type=int, default=10, help="Maximum nodes to consider")
+    start_parser.add_argument(
+        "--digest",
+        choices=["minimal", "full"],
+        default="full",
+        help="Actionable digest verbosity",
+    )
     start_parser.add_argument(
         "--include-content",
         action="store_true",
@@ -856,7 +881,7 @@ def _build_parser() -> argparse.ArgumentParser:
     enrich_parser.set_defaults(func=_cmd_enrich)
 
     new_parser = subparsers.add_parser("new", help="Create a task/decision document scaffold")
-    new_subparsers = new_parser.add_subparsers(dest="kind", required=True)
+    new_subparsers = new_parser.add_subparsers(dest="kind", required=True, parser_class=JsonArgumentParser)
     new_task = new_subparsers.add_parser("task", help="Create task scaffold")
     new_task.add_argument("title", help="Task title")
     new_task.set_defaults(func=_cmd_new, kind="task")

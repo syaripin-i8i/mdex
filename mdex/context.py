@@ -34,20 +34,32 @@ CODE_ENTRYPOINT_EXTENSIONS = {
 TEST_PATH_MARKERS = {"/test/", "/tests/", "_test.", ".test.", ".spec.", "/spec/"}
 PATH_TOKEN_RE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]+")
 GUARDRAIL_TERMS = {
+    "SLA",
+    "SLO",
     "boundary",
     "caveat",
+    "compatibility",
     "constraint",
     "contract",
+    "credential",
+    "credentials",
     "gotcha",
     "guard",
     "guardrail",
     "hazard",
     "invariant",
+    "migration",
     "must",
     "pitfall",
     "prohibit",
     "rule",
+    "rollback",
+    "secret",
+    "secrets",
+    "token",
     "warning",
+    "breaking",
+    "breaking change",
     "ロールバック",
     "互換性",
     "例外",
@@ -58,7 +70,21 @@ GUARDRAIL_TERMS = {
     "破壊的変更",
     "禁止",
     "落とし穴",
+    "認可",
+    "認証",
 }
+
+_GUARDRAIL_MATCH_TERMS = tuple(sorted((term.lower() for term in GUARDRAIL_TERMS), key=lambda item: (len(item), item)))
+_GUARDRAIL_REASON_TERMS = tuple(sorted(GUARDRAIL_TERMS, key=lambda item: (len(item), item)))
+
+DIGEST_MODES = {"minimal", "full"}
+
+MINIMAL_DIGEST_KEYS = (
+    "intent",
+    "relevant_docs",
+    "suggested_rg",
+    "context_gaps",
+)
 
 DEFAULT_KEYWORD_WEIGHTS = {
     # Title is strongest lexical signal because it usually expresses scope succinctly.
@@ -697,7 +723,7 @@ def _guardrail_reason(node_id: str, node_map: dict[str, dict[str, Any]]) -> str:
             " ".join(_node_tags(node_map, node_id)),
         ]
     ).lower()
-    matches = [term for term in sorted(GUARDRAIL_TERMS) if term in haystack]
+    matches = [term for term in _GUARDRAIL_REASON_TERMS if term.lower() in haystack]
     if matches:
         return f"mentions {'/'.join(matches[:3])}"
     return "design/spec/reference node may define constraints"
@@ -747,7 +773,7 @@ def _build_actionable_digest(
                     " ".join(_node_tags(node_map, node_id)),
                 ]
             ).lower()
-            if any(term in haystack for term in GUARDRAIL_TERMS):
+            if any(term in haystack for term in _GUARDRAIL_MATCH_TERMS):
                 guardrail_items.append(
                     _node_brief(node_id, node_map, reason=_guardrail_reason(node_id, node_map), priority=index)
                 )
@@ -809,6 +835,19 @@ def _empty_actionable_digest(query: str, reason: str) -> dict[str, Any]:
     }
 
 
+def project_actionable_digest(payload: dict[str, Any], digest: str) -> dict[str, Any]:
+    if str(digest or "full").strip().lower() != "minimal":
+        return payload
+    return {key: payload.get(key, [] if key != "intent" else "") for key in MINIMAL_DIGEST_KEYS}
+
+
+def _normalize_digest_mode(digest: str) -> str:
+    clean_digest = str(digest or "full").strip().lower()
+    if clean_digest in DIGEST_MODES:
+        return clean_digest
+    return "full"
+
+
 
 def _next_actions(
     query: str,
@@ -855,11 +894,11 @@ def _action_v2_from_legacy(action: str) -> dict[str, Any]:
     text = action.strip()
     if text.startswith("open "):
         node_id = text[5:].strip()
-        return _structured_action("open", [node_id], "read the recommended node first")
+        return _structured_action("mdex", ["open", node_id], "read the recommended node first")
 
     if text.startswith("search code for "):
         query = text[len("search code for ") :].strip()
-        return _structured_action("search_code", [query], "expand evidence from source code")
+        return _structured_action("rg", ["-n", query, "."], "expand evidence from source code")
 
     find_match = MDEX_FIND_ACTION_RE.match(text)
     if find_match:
@@ -872,7 +911,7 @@ def _action_v2_from_legacy(action: str) -> dict[str, Any]:
     if text == "run mdex scan":
         return _structured_action("mdex", ["scan"], "refresh index metadata before selecting an entrypoint")
 
-    return _structured_action("note", [text], "manual follow-up action")
+    return _structured_action("mdex", ["context", text], "retry with the manual follow-up text")
 
 
 def _next_actions_v2(actions: list[str]) -> list[dict[str, Any]]:
@@ -887,9 +926,11 @@ def select_context(
     *,
     include_content: bool = False,
     actionable: bool = False,
+    digest: str = "full",
     scoring_config: dict[str, Any] | None = None,
     scoring_config_source: str = "defaults",
 ) -> dict[str, Any]:
+    digest_mode = _normalize_digest_mode(digest)
     active_scoring = _copy_default_scoring_config()
     if isinstance(scoring_config, dict):
         _apply_scoring_overrides(active_scoring, scoring_config)
@@ -907,7 +948,10 @@ def select_context(
             "deferred_nodes": [],
             "confidence": 0.0,
             "why_this_set": [],
-            "actionable_digest": _empty_actionable_digest(query, "blank query: provide a task description"),
+            "actionable_digest": project_actionable_digest(
+                _empty_actionable_digest(query, "blank query: provide a task description"),
+                digest_mode,
+            ),
         }
 
     safe_limit = _coerce_positive_int(limit, 10)
@@ -957,9 +1001,12 @@ def select_context(
             "deferred_nodes": [],
             "confidence": 0.0,
             "why_this_set": [],
-            "actionable_digest": _empty_actionable_digest(
-                query,
-                "no mdex candidates found; use suggested rg or add frontmatter/tags to entry docs",
+            "actionable_digest": project_actionable_digest(
+                _empty_actionable_digest(
+                    query,
+                    "no mdex candidates found; use suggested rg or add frontmatter/tags to entry docs",
+                ),
+                digest_mode,
             ),
         }
 
@@ -1075,6 +1122,7 @@ def select_context(
         confidence,
         node_map,
     )
+    actionable_digest = project_actionable_digest(actionable_digest, digest_mode)
 
     payload.update(
         {

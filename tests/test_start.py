@@ -82,14 +82,12 @@ def test_build_start_payload_fallback_digest_is_schema_shaped(monkeypatch: pytes
         budget=500,
         limit=7,
         include_content=False,
+        digest="minimal",
     )
 
     assert payload["actionable_digest"] == {
         "intent": "root decision",
         "relevant_docs": [],
-        "relevant_task_history": [],
-        "likely_code_entrypoints": [],
-        "known_guardrails": [],
         "suggested_rg": [],
         "context_gaps": ["select_context did not return actionable_digest"],
     }

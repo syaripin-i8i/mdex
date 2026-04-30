@@ -8,6 +8,14 @@
     "error"
   ],
   "properties": {
+    "contract_schema": {
+      "type": "string",
+      "description": "Schema URL identifying this error contract. Optional in 0.2.x; expected on new CLI error payloads."
+    },
+    "contract_version": {
+      "type": "string",
+      "description": "mdex contract version for this error payload. Optional in 0.2.x; expected on new CLI error payloads."
+    },
     "error": {
       "type": "string",
       "minLength": 1

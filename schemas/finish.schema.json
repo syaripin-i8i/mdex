@@ -20,6 +20,14 @@
     "requires_manual_targeting"
   ],
   "properties": {
+    "contract_schema": {
+      "type": "string",
+      "description": "Schema URL identifying this output contract. Optional in 0.2.x; expected on new CLI success payloads."
+    },
+    "contract_version": {
+      "type": "string",
+      "description": "mdex contract version for this payload. Optional in 0.2.x; expected on new CLI success payloads."
+    },
     "status": {
       "type": "string",
       "description": "Execution status for the finish command. success indicates JSON payload contract completed."

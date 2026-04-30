@@ -21,6 +21,14 @@
     "nodes"
   ],
   "properties": {
+    "contract_schema": {
+      "type": "string",
+      "description": "Schema URL identifying this output contract. Optional in 0.2.x; expected on new CLI success payloads."
+    },
+    "contract_version": {
+      "type": "string",
+      "description": "mdex contract version for this payload. Optional in 0.2.x; expected on new CLI success payloads."
+    },
     "task": {
       "type": "string"
     },
@@ -69,12 +77,15 @@
     },
     "recommended_next_actions": {
       "type": "array",
+      "deprecated": true,
+      "description": "Deprecated v1 string actions kept for 0.2.x compatibility. Agents should prefer recommended_next_actions_v2 to avoid parsing command strings.",
       "items": {
         "type": "string"
       }
     },
     "recommended_next_actions_v2": {
       "type": "array",
+      "description": "Preferred structured actions for agents. Execute command and args as argv, not as a shell string.",
       "items": {
         "$ref": "#/$defs/actionV2Item"
       }
@@ -118,9 +129,6 @@
       "required": [
         "intent",
         "relevant_docs",
-        "relevant_task_history",
-        "likely_code_entrypoints",
-        "known_guardrails",
         "suggested_rg",
         "context_gaps"
       ],

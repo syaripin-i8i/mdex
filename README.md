@@ -13,6 +13,9 @@
 - first read order: `README.md -> AGENT.md -> docs/design.md -> docs/convention.md`
 - read order と source of truth は同義ではない（正本は本 README の Source of Truth 表）
 - `start` と `context --actionable` の詳細な分岐は `AGENT.md` を正本とする
+- agents should prefer `recommended_next_actions_v2`; `recommended_next_actions` is deprecated but kept for 0.2.x compatibility
+- use `--digest minimal` on `start` / `context --actionable` to reduce context use when the full `actionable_digest` is not needed
+- JSON payloads include `contract_schema` / `contract_version`; integration details are in `docs/agent_integration.md`
 
 ## For New Adopters
 
@@ -133,7 +136,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
     "search code for root decision"
   ],
   "recommended_next_actions_v2": [
-    { "command": "open", "args": ["spec/b.md"], "reason": "read the recommended node first" }
+    { "command": "mdex", "args": ["open", "spec/b.md"], "reason": "read the recommended node first" }
   ],
   "actionable_digest": {
     "intent": "root decision",
@@ -252,6 +255,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 - `schemas/error.schema.json`
 
 schema 版運用は `docs/schema_versioning.md` を参照してください。
+Agent integration guidance, including safe argv execution for structured actions and `suggested_rg.args`, is in `docs/agent_integration.md`.
 
 ## DB Resolution
 
@@ -293,6 +297,7 @@ read order と source of truth は同義ではありません。
 | architecture / persistence / schema | `docs/design.md` |
 | input note contract | `docs/convention.md` |
 | context hygiene policy | `docs/context_hygiene.md` |
+| agent integration | `docs/agent_integration.md` |
 | update / versioning policy | `docs/update_policy.md` |
 | schema versioning policy | `docs/schema_versioning.md` |
 
