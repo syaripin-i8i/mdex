@@ -23,6 +23,8 @@ updated: 2026-04-24
 - `keyword.title`: クエリ語が title に含まれる寄与
 - `keyword.summary`: クエリ語が summary に含まれる寄与
 - `keyword.tags`: クエリ語が tags に一致する寄与
+- `keyword.search_terms`: scan が抽出した alias / symbol / seed terms への寄与
+- `keyword.learning_note`: `### Learning Note` の symptom / next_time_query_seed への寄与
 - `type_status.type_bonus`: 種別ボーナス（design/decision を優先）
 - `type_status.status_bonus`: 状態ボーナス（active/draft を優先、archived を減点）
 - `recency`: 更新日時の新しさによる寄与（`recency_weight` で重み付け）
@@ -36,6 +38,17 @@ updated: 2026-04-24
 
 `token_cost` は順位スコアには直接加算しません。最終選抜は score 順 + budget 条件です。
 
+`status: done` は通常減点されますが、Learning Note は再発防止の価値が高いため、
+query が symptom / next_time_query_seed / 抽出 alias に当たった場合は
+`keyword.learning_note` と `keyword.search_terms` で明示的に加点します。
+
+## Code Entrypoint Summary
+
+`include_extensions` に `.py` を入れると、scan は Python ファイルを全文要約ではなく
+軽量 symbol summary として index します。top-level class/function/import を summary、
+tags、search_terms に入れるため、`context --actionable` の
+`likely_code_entrypoints` に runtime module や test file が出やすくなります。
+
 ## config 例
 
 ```json
@@ -44,7 +57,9 @@ updated: 2026-04-24
     "keyword": {
       "title": 3.0,
       "summary": 1.5,
-      "tags": 2.2
+      "tags": 2.2,
+      "search_terms": 2.4,
+      "learning_note": 3.0
     },
     "type_bonus": {
       "design": 1.2,

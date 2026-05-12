@@ -9,28 +9,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-NODE_SELECT_COLUMNS = (
-    "id, title, type, project, status, summary, summary_source, summary_updated, "
-    "estimated_tokens, tags_json, updated, links_to_json, depends_on_json, relates_to_json"
-)
-
-LEGACY_NODE_SELECT_COLUMNS = (
-    "id, title, type, project, status, summary, summary_source, summary_updated, "
-    "0 AS estimated_tokens, tags_json, updated, links_to_json, depends_on_json, relates_to_json"
-)
-
 OVERRIDE_SELECT_SQL = (
     "SELECT id, summary, summary_source, summary_updated "
     "FROM node_overrides"
 )
 
-SEARCH_TOKEN_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"'\-]+")
+SEARCH_TOKEN_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"'\-、。．，！？：；・「」『』（）［］｛｝＜＞]+")
 WORD_TOKEN_RE = re.compile(r"[a-z0-9_]+")
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]")
+SCRIPT_SEGMENT_RE = re.compile(r"[a-z0-9_][a-z0-9_.-]{2,}|[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]{2,}")
 SEARCH_TITLE_WEIGHT = 3.0
 SEARCH_SUMMARY_WEIGHT = 2.0
 SEARCH_TAG_WEIGHT = 2.5
 SEARCH_ID_WEIGHT = 1.0
+SEARCH_TERM_WEIGHT = 2.4
+SEARCH_LEARNING_NOTE_WEIGHT = 3.0
 
 
 def _as_json_list(value: Any) -> list[str]:
@@ -50,6 +43,23 @@ def _as_json_list(value: Any) -> list[str]:
     if isinstance(loaded, list):
         return [str(item) for item in loaded]
     return []
+
+
+def _as_json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    text = value.strip()
+    if not text:
+        return {}
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(loaded, dict):
+        return loaded
+    return {}
 
 
 @contextmanager
@@ -76,8 +86,25 @@ def _column_exists(conn: sqlite3.Connection, table_name: str, column_name: str) 
 
 
 def _node_select_sql(conn: sqlite3.Connection) -> str:
-    columns = NODE_SELECT_COLUMNS if _column_exists(conn, "nodes", "estimated_tokens") else LEGACY_NODE_SELECT_COLUMNS
-    return f"SELECT {columns} FROM nodes"
+    columns = [
+        "id",
+        "title",
+        "type",
+        "project",
+        "status",
+        "summary",
+        "summary_source",
+        "summary_updated",
+        "estimated_tokens" if _column_exists(conn, "nodes", "estimated_tokens") else "0 AS estimated_tokens",
+        "tags_json",
+        "search_terms_json" if _column_exists(conn, "nodes", "search_terms_json") else "'[]' AS search_terms_json",
+        "learning_note_json" if _column_exists(conn, "nodes", "learning_note_json") else "'{}' AS learning_note_json",
+        "updated",
+        "links_to_json",
+        "depends_on_json",
+        "relates_to_json",
+    ]
+    return f"SELECT {', '.join(columns)} FROM nodes"
 
 
 def _ensure_node_overrides_table(conn: sqlite3.Connection) -> None:
@@ -165,6 +192,24 @@ def _contains_cjk(text: str) -> bool:
     return bool(CJK_RE.search(text))
 
 
+def _cjk_ngrams(text: str) -> list[str]:
+    compact = "".join(CJK_RE.findall(text))
+    if len(compact) < 4:
+        return []
+    grams: list[str] = []
+    for size in (2, 3, 4):
+        if len(compact) < size:
+            continue
+        grams.extend(compact[index : index + size] for index in range(0, len(compact) - size + 1))
+    return grams
+
+
+def _script_segments(text: str) -> list[str]:
+    if not _contains_cjk(text) or not re.search(r"[a-z0-9_]", text):
+        return []
+    return [match.group(0) for match in SCRIPT_SEGMENT_RE.finditer(text)]
+
+
 def _parse_timestamp(value: str) -> datetime | None:
     raw = (value or "").strip()
     if not raw:
@@ -186,6 +231,16 @@ def _search_terms(query: str) -> list[str]:
         return []
     terms: list[str] = [lowered]
     seen = {lowered}
+    for segment in _script_segments(lowered):
+        if segment in seen:
+            continue
+        seen.add(segment)
+        terms.append(segment)
+    for gram in _cjk_ngrams(lowered):
+        if gram in seen:
+            continue
+        seen.add(gram)
+        terms.append(gram)
     for token in SEARCH_TOKEN_SPLIT_RE.split(lowered):
         clean = token.strip()
         if not clean or clean in seen:
@@ -197,6 +252,11 @@ def _search_terms(query: str) -> list[str]:
             continue
         seen.add(clean)
         terms.append(clean)
+        for gram in _cjk_ngrams(clean):
+            if gram in seen:
+                continue
+            seen.add(gram)
+            terms.append(gram)
     return terms
 
 
@@ -205,6 +265,12 @@ def _search_score(node: dict[str, Any], terms: list[str]) -> float:
     summary = str(node.get("summary", "")).lower()
     node_id = str(node.get("id", "")).lower()
     tags = {str(item).strip().lower() for item in node.get("tags", []) if str(item).strip()}
+    search_terms = [str(item).strip().lower() for item in node.get("search_terms", []) if str(item).strip()]
+    search_text = " ".join(search_terms)
+    learning_note = node.get("learning_note", {})
+    learning_text = ""
+    if isinstance(learning_note, dict):
+        learning_text = json.dumps(learning_note, ensure_ascii=False).lower()
     title_words = set(WORD_TOKEN_RE.findall(title))
     summary_words = set(WORD_TOKEN_RE.findall(summary))
     id_words = set(WORD_TOKEN_RE.findall(node_id))
@@ -223,6 +289,10 @@ def _search_score(node: dict[str, Any], terms: list[str]) -> float:
                 score += SEARCH_TAG_WEIGHT
             if term in node_id:
                 score += SEARCH_ID_WEIGHT
+            if term in search_text:
+                score += SEARCH_TERM_WEIGHT
+            if term in learning_text:
+                score += SEARCH_LEARNING_NOTE_WEIGHT
             continue
 
         is_phrase = bool(re.search(r"[\s\-_/]", term))
@@ -235,6 +305,10 @@ def _search_score(node: dict[str, Any], terms: list[str]) -> float:
                 score += SEARCH_TAG_WEIGHT
             if term in node_id:
                 score += SEARCH_ID_WEIGHT
+            if term in search_text:
+                score += SEARCH_TERM_WEIGHT
+            if term in learning_text:
+                score += SEARCH_LEARNING_NOTE_WEIGHT
             continue
 
         if term in title_words:
@@ -245,6 +319,10 @@ def _search_score(node: dict[str, Any], terms: list[str]) -> float:
             score += SEARCH_TAG_WEIGHT
         if term in id_words:
             score += SEARCH_ID_WEIGHT
+        if term in search_terms:
+            score += SEARCH_TERM_WEIGHT
+        if term in learning_text:
+            score += SEARCH_LEARNING_NOTE_WEIGHT
     return score
 
 
@@ -260,6 +338,8 @@ def _row_to_node(row: sqlite3.Row) -> dict[str, Any]:
         "summary_updated": str(row["summary_updated"] or ""),
         "estimated_tokens": int(row["estimated_tokens"] or 0),
         "tags": _as_json_list(row["tags_json"]),
+        "search_terms": _as_json_list(row["search_terms_json"]),
+        "learning_note": _as_json_dict(row["learning_note_json"]),
         "updated": str(row["updated"] or ""),
         "links_to": _as_json_list(row["links_to_json"]),
         "depends_on": _as_json_list(row["depends_on_json"]),

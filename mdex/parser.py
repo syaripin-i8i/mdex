@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import ast
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,10 @@ FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 METADATA_LINE_RE = re.compile(r"^\*\*([^*]+)\*\*:\s*(.+?)\s*$")
 TASK_ID_RE = re.compile(r"\bT\d{14}\b")
+LEARNING_NOTE_HEADING_RE = re.compile(r"^(#{2,6})\s+Learning Note\s*$", re.IGNORECASE)
+LEARNING_NOTE_ITEM_RE = re.compile(r"^\s*[-*]\s*([^:：]+)[:：]\s*(.*?)\s*$")
+CJK_TOKEN_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]{2,}")
+ASCII_TERM_RE = re.compile(r"[a-zA-Z0-9_][a-zA-Z0-9_.-]{2,}")
 
 DEFAULT_LINKABLE_EXTENSIONS = (".md", ".json", ".jsonl")
 DEFAULT_MARKDOWN_EXTENSION = ".md"
@@ -104,6 +109,37 @@ JSON_SKIP_SUMMARY_KEYS = {
 }
 
 JSON_CONTAINER_KEYS = ("metadata", "mdex", "document")
+PYTHON_TEST_PATH_MARKERS = ("/test/", "/tests/", "_test.", ".test.", ".spec.", "/spec/")
+GENERIC_CODE_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".mjs",
+    ".php",
+    ".ps1",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".ts",
+    ".tsx",
+}
+GENERIC_SYMBOL_PATTERNS = (
+    re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"^\s*(?:export\s+)?(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"^\s*(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"^\s*func(?:\s+\([^)]*\))?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\("),
+    re.compile(
+        r"^\s*(?:(?:public|private|protected|static|async|final|virtual|override|inline|extern|constexpr)\s+)*"
+        r"[A-Za-z_][A-Za-z0-9_:<>\*&\[\],\s]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*(?:\{|$)"
+    ),
+)
+GENERIC_CONTROL_NAMES = {"if", "for", "while", "switch", "catch", "return", "sizeof"}
 
 
 def _normalize_updated(value: Any) -> str:
@@ -215,6 +251,27 @@ def _normalize_str_list(value: Any) -> list[str]:
     return []
 
 
+def _term_candidates(text: str) -> list[str]:
+    terms: list[str] = []
+    lower_text = text.lower()
+    terms.extend(match.group(0) for match in ASCII_TERM_RE.finditer(lower_text))
+    terms.extend(match.group(0) for match in CJK_TOKEN_RE.finditer(text))
+    return _dedupe_keep_order([term.strip() for term in terms if term.strip()])
+
+
+def _symbol_alias_terms(symbols: list[str]) -> list[str]:
+    terms: list[str] = []
+    for symbol in symbols:
+        spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", symbol)
+        spaced = spaced.replace("_", " ").replace("-", " ")
+        parts = [part.lower() for part in re.split(r"\s+", spaced) if len(part) >= 2]
+        terms.extend(parts)
+        if len(parts) > 1:
+            terms.append("_".join(parts))
+            terms.append("".join(parts))
+    return _dedupe_keep_order(terms)
+
+
 def _extract_inline_metadata(body: str) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     for line in body.splitlines():
@@ -288,6 +345,80 @@ def _extract_headings(lines: list[str]) -> list[str]:
         if match:
             headings.append(match.group(2).strip())
     return headings
+
+
+def _extract_heading_section(body: str, heading_re: re.Pattern[str]) -> str:
+    lines = body.splitlines()
+    collected: list[str] = []
+    in_section = False
+    source_level = 0
+
+    for line in lines:
+        heading_match = H2_PLUS_RE.match(line)
+        if not in_section:
+            target_match = heading_re.match(line)
+            if not target_match:
+                continue
+            in_section = True
+            source_level = len(target_match.group(1))
+            continue
+
+        if heading_match and len(heading_match.group(1)) <= source_level:
+            break
+        collected.append(line)
+
+    return "\n".join(collected).strip()
+
+
+def _remove_heading_section(body: str, heading_re: re.Pattern[str]) -> str:
+    lines = body.splitlines()
+    kept: list[str] = []
+    in_section = False
+    source_level = 0
+
+    for line in lines:
+        heading_match = H2_PLUS_RE.match(line)
+        if not in_section:
+            target_match = heading_re.match(line)
+            if target_match:
+                in_section = True
+                source_level = len(target_match.group(1))
+                continue
+            kept.append(line)
+            continue
+
+        if heading_match and len(heading_match.group(1)) <= source_level:
+            in_section = False
+            kept.append(line)
+
+    return "\n".join(kept).strip()
+
+
+def _extract_learning_note(body: str) -> dict[str, Any]:
+    section = _extract_heading_section(body, LEARNING_NOTE_HEADING_RE)
+    if not section:
+        return {"captured": False, "fields": {}, "terms": []}
+
+    fields: dict[str, str] = {}
+    for line in section.splitlines():
+        match = LEARNING_NOTE_ITEM_RE.match(line)
+        if not match:
+            continue
+        key = _normalize_metadata_key(match.group(1))
+        value = match.group(2).strip()
+        if key and value:
+            fields[key] = value
+
+    term_source_parts = [section]
+    for key in ("symptom", "next_time_query_seed", "alias", "aliases", "symptom_terms"):
+        if fields.get(key):
+            term_source_parts.append(fields[key])
+
+    return {
+        "captured": True,
+        "fields": fields,
+        "terms": _term_candidates("\n".join(term_source_parts)),
+    }
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -587,10 +718,12 @@ def _parse_markdown_file(source_path: Path, raw_text: str, options: dict[str, An
     md_links = _extract_file_links(link_source, allowed_extensions)
     summary_max_sentences = _get_int_option(options, "summary_max_sentences", 3)
     summary_max_chars = _get_int_option(options, "summary_max_chars", 200)
-    summary = _extract_summary(body, max_sentences=summary_max_sentences, max_chars=summary_max_chars)
+    body_for_summary = _remove_heading_section(body, LEARNING_NOTE_HEADING_RE)
+    summary = _extract_summary(body_for_summary, max_sentences=summary_max_sentences, max_chars=summary_max_chars)
     tags = _normalize_tags(merged_frontmatter.get("tags"))
     task_refs = _extract_task_refs(raw_text)
     path_refs = _extract_path_refs(body, allowed_extensions)
+    learning_note = _extract_learning_note(body)
 
     updated = _normalize_updated(merged_frontmatter.get("updated"))
     if not updated:
@@ -608,6 +741,8 @@ def _parse_markdown_file(source_path: Path, raw_text: str, options: dict[str, An
         "updated": updated,
         "task_refs": task_refs,
         "path_refs": path_refs,
+        "learning_note": learning_note,
+        "search_terms": learning_note.get("terms", []),
     }
 
 
@@ -643,6 +778,8 @@ def _parse_json_file(source_path: Path, raw_text: str, options: dict[str, Any]) 
         "updated": updated,
         "task_refs": _extract_task_refs(raw_text),
         "path_refs": _extract_json_path_refs(payload, allowed_extensions),
+        "learning_note": {"captured": False, "fields": {}, "terms": []},
+        "search_terms": [],
     }
 
 
@@ -669,6 +806,201 @@ def _parse_text_file(source_path: Path, raw_text: str, options: dict[str, Any]) 
         "updated": updated,
         "task_refs": _extract_task_refs(raw_text),
         "path_refs": _extract_text_file_refs(raw_text, allowed_extensions),
+        "learning_note": {"captured": False, "fields": {}, "terms": []},
+        "search_terms": [],
+    }
+
+
+def _is_python_test_path(source_path: Path, node_id: str = "") -> bool:
+    normalized = (node_id or _path_tail(source_path)).replace("\\", "/").lower()
+    return any(marker in f"/{normalized}" for marker in PYTHON_TEST_PATH_MARKERS) or normalized.rsplit("/", 1)[-1].startswith("test_")
+
+
+def _path_tail(source_path: Path, *, max_parts: int = 4) -> str:
+    return "/".join(source_path.parts[-max_parts:])
+
+
+def _python_import_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Import):
+        names = [alias.name for alias in node.names if alias.name]
+        return ", ".join(names[:3])
+    if isinstance(node, ast.ImportFrom):
+        module = node.module or ""
+        if node.level:
+            module = "." * node.level + module
+        names = [alias.name for alias in node.names if alias.name]
+        return f"{module}: {', '.join(names[:3])}".strip(": ")
+    return ""
+
+
+def _parse_python_file(source_path: Path, raw_text: str, options: dict[str, Any]) -> dict[str, Any]:
+    summary_max_chars = _get_int_option(options, "summary_max_chars", 200)
+    option_node_id = str(options.get("node_id", "") or "").strip().replace("\\", "/")
+    is_test = _is_python_test_path(source_path, option_node_id)
+    module_name = source_path.with_suffix("").name
+
+    classes: list[str] = []
+    functions: list[str] = []
+    imports: list[str] = []
+    try:
+        tree = ast.parse(raw_text)
+    except SyntaxError:
+        summary = f"Python {'test' if is_test else 'module'} {module_name}. Syntax error prevented symbol extraction."
+        return {
+            "title": f"Python {'test' if is_test else 'module'} {module_name}",
+            "frontmatter": {"type": "test" if is_test else "code"},
+            "wikilinks": [],
+            "md_links": [],
+            "summary": summary,
+            "headings": [],
+            "tags": ["python", "test" if is_test else "code"],
+            "updated": datetime.fromtimestamp(source_path.stat().st_mtime, tz=timezone.utc).isoformat(),
+            "task_refs": [],
+            "path_refs": [],
+            "learning_note": {"captured": False, "fields": {}, "terms": []},
+            "search_terms": [module_name, source_path.stem, option_node_id or _path_tail(source_path), "python"],
+            "estimated_tokens": estimate_tokens(summary),
+        }
+
+    seen_classes: set[str] = set()
+    seen_functions: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            if node.name not in seen_classes:
+                seen_classes.add(node.name)
+                classes.append(node.name)
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name not in seen_functions:
+                seen_functions.add(node.name)
+                functions.append(node.name)
+            continue
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            import_name = _python_import_name(node)
+            if import_name:
+                imports.append(import_name)
+
+    parts = [f"Python {'test' if is_test else 'module'} {module_name}."]
+    if classes:
+        parts.append("Classes: " + ", ".join(classes[:8]) + ".")
+    if functions:
+        parts.append("Functions: " + ", ".join(functions[:12]) + ".")
+    if imports:
+        parts.append("Imports: " + ", ".join(imports[:8]) + ".")
+    summary = " ".join(parts)
+    if len(summary) > summary_max_chars:
+        summary = summary[:summary_max_chars].rstrip()
+
+    mtime = source_path.stat().st_mtime
+    updated = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    symbols = [*classes, *functions]
+    path_hint = option_node_id or _path_tail(source_path)
+    code_terms = _term_candidates(
+        " ".join([path_hint, *symbols, *imports]).replace("_", " ")
+    )
+    symbol_aliases = _symbol_alias_terms(symbols)
+    search_terms = _dedupe_keep_order(
+        [
+            module_name,
+            source_path.stem,
+            path_hint,
+            *symbols,
+            *symbol_aliases,
+            *imports,
+            *code_terms[:60],
+            "python",
+            "test" if is_test else "code",
+        ]
+    )
+
+    return {
+        "title": f"Python {'test' if is_test else 'module'} {module_name}",
+        "frontmatter": {"type": "test" if is_test else "code"},
+        "wikilinks": [],
+        "md_links": [],
+        "summary": summary,
+        "headings": [],
+        "tags": ["python", "test" if is_test else "code", *symbols[:8]],
+        "updated": updated,
+        "task_refs": _extract_task_refs(raw_text),
+        "path_refs": _extract_text_file_refs(raw_text, _normalize_extensions(options.get("linkable_extensions"))),
+        "learning_note": {"captured": False, "fields": {}, "terms": []},
+        "search_terms": search_terms,
+        "estimated_tokens": estimate_tokens(summary),
+    }
+
+
+def _parse_code_file(source_path: Path, raw_text: str, options: dict[str, Any]) -> dict[str, Any]:
+    summary_max_chars = _get_int_option(options, "summary_max_chars", 200)
+    option_node_id = str(options.get("node_id", "") or "").strip().replace("\\", "/")
+    path_hint = option_node_id or _path_tail(source_path)
+    is_test = _is_python_test_path(source_path, option_node_id)
+    stem = source_path.stem
+    symbols: list[str] = []
+    in_block_comment = False
+    in_template_literal = False
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if in_block_comment:
+            if "*/" in stripped:
+                in_block_comment = False
+            continue
+        if in_template_literal:
+            if stripped.count("`") % 2 == 1:
+                in_template_literal = False
+            continue
+        if not stripped or stripped.startswith(("//", "#", "*")):
+            continue
+        if stripped.startswith("/*"):
+            if "*/" not in stripped:
+                in_block_comment = True
+            continue
+        if stripped.count("`") % 2 == 1:
+            in_template_literal = True
+            continue
+        for pattern in GENERIC_SYMBOL_PATTERNS:
+            match = pattern.match(line)
+            if not match:
+                continue
+            symbol = match.group(1)
+            if symbol not in GENERIC_CONTROL_NAMES:
+                symbols.append(symbol)
+            break
+    symbols = _dedupe_keep_order(symbols)[:16]
+
+    parts = [f"Code {'test' if is_test else 'file'} {stem}."]
+    if symbols:
+        parts.append("Symbols: " + ", ".join(symbols[:12]) + ".")
+    summary = " ".join(parts)
+    if len(summary) > summary_max_chars:
+        summary = summary[:summary_max_chars].rstrip()
+
+    symbol_aliases = _symbol_alias_terms(symbols)
+    terms = _dedupe_keep_order(
+        [
+            stem,
+            path_hint,
+            *symbols,
+            *symbol_aliases,
+            *_term_candidates(" ".join([path_hint, *symbols, *symbol_aliases]).replace("_", " ")),
+            "test" if is_test else "code",
+        ]
+    )
+    return {
+        "title": f"Code {'test' if is_test else 'file'} {stem}",
+        "frontmatter": {"type": "test" if is_test else "code"},
+        "wikilinks": [],
+        "md_links": [],
+        "summary": summary,
+        "headings": [],
+        "tags": ["test" if is_test else "code", *symbols[:8]],
+        "updated": datetime.fromtimestamp(source_path.stat().st_mtime, tz=timezone.utc).isoformat(),
+        "task_refs": [],
+        "path_refs": [],
+        "learning_note": {"captured": False, "fields": {}, "terms": []},
+        "search_terms": terms,
+        "estimated_tokens": estimate_tokens(summary),
     }
 
 
@@ -682,8 +1014,13 @@ def parse_file(path: str, options: dict[str, Any] | None = None) -> dict[str, An
         parsed = _parse_markdown_file(source_path, raw_text, options)
     elif suffix in {".json", ".jsonl"}:
         parsed = _parse_json_file(source_path, raw_text, options)
+    elif suffix == ".py":
+        parsed = _parse_python_file(source_path, raw_text, options)
+    elif suffix in GENERIC_CODE_EXTENSIONS:
+        parsed = _parse_code_file(source_path, raw_text, options)
     else:
         parsed = _parse_text_file(source_path, raw_text, options)
 
-    parsed["estimated_tokens"] = estimate_tokens(raw_text)
+    if int(parsed.get("estimated_tokens", 0) or 0) <= 0:
+        parsed["estimated_tokens"] = estimate_tokens(raw_text)
     return parsed

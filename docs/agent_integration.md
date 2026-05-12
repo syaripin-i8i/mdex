@@ -115,6 +115,17 @@ When changed files exist after edits, run `mdex impact --changed-files-from-git`
 
 Before closing work, run `mdex finish --task "<task>" --dry-run`. Apply summaries only when an intentional summary file exists.
 
+## Refresh After Edits
+
+Use `tools/context_refresh.py` when changed files may affect one or more context indexes:
+
+```bash
+python tools/context_refresh.py --dry-run
+python tools/context_refresh.py docs/design.md tasks/T20260101010101.md
+```
+
+The script classifies changed files into repo/task/memory refresh targets and runs the repo `mdex scan` unless `--dry-run` is set. Task-history and memory indexes are reported as required refreshes with notes because their commands are repo-wrapper specific.
+
 ## Local Telemetry
 
 Telemetry is opt-in and local only. Enable it with either:

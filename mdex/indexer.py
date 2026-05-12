@@ -11,7 +11,22 @@ from typing import Any
 def write_json(index: dict[str, Any], output_path: str) -> None:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json.dumps(_json_public_index(index), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _json_public_index(index: dict[str, Any]) -> dict[str, Any]:
+    public_index = dict(index)
+    public_nodes: list[dict[str, Any]] = []
+    for node in _normalize_nodes(index):
+        public_nodes.append(
+            {
+                key: value
+                for key, value in node.items()
+                if key not in {"search_terms", "learning_note"}
+            }
+        )
+    public_index["nodes"] = public_nodes
+    return public_index
 
 
 def _normalize_nodes(index: dict[str, Any]) -> list[dict[str, Any]]:
@@ -68,6 +83,8 @@ def _create_schema(cur: sqlite3.Cursor) -> None:
             summary_updated TEXT,
             estimated_tokens INTEGER NOT NULL DEFAULT 0,
             tags_json TEXT,
+            search_terms_json TEXT,
+            learning_note_json TEXT,
             updated TEXT,
             links_to_json TEXT,
             depends_on_json TEXT,
@@ -130,8 +147,9 @@ def _insert_nodes(cur: sqlite3.Cursor, nodes: list[dict[str, Any]]) -> None:
             """
             INSERT OR REPLACE INTO nodes (
                 id, title, type, project, status, summary, summary_source, summary_updated,
-                estimated_tokens, tags_json, updated, links_to_json, depends_on_json, relates_to_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                estimated_tokens, tags_json, search_terms_json, learning_note_json,
+                updated, links_to_json, depends_on_json, relates_to_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(node.get("id", "")),
@@ -144,6 +162,8 @@ def _insert_nodes(cur: sqlite3.Cursor, nodes: list[dict[str, Any]]) -> None:
                 str(node.get("updated", "")),
                 int(node.get("estimated_tokens", 0) or 0),
                 json.dumps(node.get("tags", []), ensure_ascii=False),
+                json.dumps(node.get("search_terms", []), ensure_ascii=False),
+                json.dumps(node.get("learning_note", {}), ensure_ascii=False),
                 str(node.get("updated", "")),
                 json.dumps(node.get("links_to", []), ensure_ascii=False),
                 json.dumps(node.get("depends_on", []), ensure_ascii=False),

@@ -106,6 +106,220 @@ shared ranking term for context selection
     assert "done_doc.md" in ids
 
 
+def test_learning_note_boost_offsets_done_status_for_failure_terms(tmp_path: Path) -> None:
+    repo = tmp_path / "learning_note_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010101.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: reply tone fix
+
+Past completed implementation.
+
+### Learning Note
+- symptom: 返信が刺しすぎで重すぎる。ずぶり感が強く、穏やかさと儀式感の調整が必要。
+- next_time_query_seed: reply tone too sharp, heavy ritual wording, gentle self post
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "learning_note.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("刺しすぎ 穏やか", str(db_path), budget=4000, limit=3)
+
+    assert result["nodes"][0]["id"] == "tasks/T20260101010101.md"
+    breakdown = result["nodes"][0]["score_breakdown"]
+    assert breakdown["keyword"]["learning_note"] > 0
+    assert breakdown["type_status"]["status_bonus"] < 0
+
+
+def test_learning_note_boost_handles_japanese_punctuation(tmp_path: Path) -> None:
+    repo = tmp_path / "learning_note_punctuation_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010103.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: reply tone fix
+
+### Learning Note
+- symptom: 返信が刺しすぎで重すぎる。穏やかさの調整が必要。
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "learning_note_punctuation.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("刺しすぎ、穏やか", str(db_path), budget=4000, limit=3)
+
+    assert result["nodes"][0]["id"] == "tasks/T20260101010103.md"
+
+    compact_result = select_context("刺しすぎ穏やか", str(db_path), budget=4000, limit=3)
+    assert compact_result["nodes"][0]["id"] == "tasks/T20260101010103.md"
+
+
+def test_learning_note_boost_handles_full_width_colon_short_cjk_terms(tmp_path: Path) -> None:
+    repo = tmp_path / "learning_note_colon_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010104.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: reply constraint
+
+### Learning Note
+- symptom: 返信 制約 gate missed
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "learning_note_colon.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("返信：制約", str(db_path), budget=4000, limit=3)
+
+    assert result["nodes"][0]["id"] == "tasks/T20260101010104.md"
+
+    compact_result = select_context("返信制約", str(db_path), budget=4000, limit=3)
+    assert compact_result["nodes"][0]["id"] == "tasks/T20260101010104.md"
+
+
+def test_learning_note_boost_handles_mixed_latin_cjk_compact_query(tmp_path: Path) -> None:
+    repo = tmp_path / "learning_note_mixed_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010105.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: pylock constraint
+
+### Learning Note
+- symptom: pylock 制約 handling failed
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "learning_note_mixed.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("pylock制約", str(db_path), budget=4000, limit=3)
+
+    assert result["nodes"][0]["id"] == "tasks/T20260101010105.md"
+
+
+def test_learning_note_seed_terms_are_searchable(tmp_path: Path) -> None:
+    from mdex.store import search_nodes
+
+    repo = tmp_path / "learning_note_seed_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010102.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: install hardening
+
+Implementation notes.
+
+### Learning Note
+- symptom: lock install hash verification was missing
+- next_time_query_seed: pylock require-hashes, pip install hash pinning, tomllib lock parser
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "learning_note_seed.db"
+    _build_db(repo, config, db_path)
+
+    rows = search_nodes(str(db_path), "require-hashes", limit=5)
+
+    assert [row["id"] for row in rows] == ["tasks/T20260101010102.md"]
+    assert rows[0]["learning_note"]["captured"] is True
+
+
+def test_learning_note_section_does_not_become_public_summary(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "learning_note_summary_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010106.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: note only
+
+### Learning Note
+
+- symptom: SECRET_LEARNING_NOTE_TEXT should not become summary
+- next_time_query_seed: private query seed
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"task": ["tasks"]},
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "learning_note_summary.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["tasks/T20260101010106.md"]
+
+    assert "SECRET_LEARNING_NOTE_TEXT" not in node["summary"]
+
+
 def test_select_context_skips_file_read_when_content_not_requested(
     quality_repo: Path,
     quality_config: dict[str, object],
@@ -215,6 +429,364 @@ Reply guardrail must check runtime/elyth_runtime.py and tests/test_elyth_thread_
     assert digest["suggested_rg"][0]["command"] == "rg"
     assert digest["suggested_rg"][0]["args"][0] == "-n"
     assert {"runtime", "tests"}.issubset(set(digest["suggested_rg"][0]["paths"]))
+
+
+def test_python_symbol_summary_surfaces_code_entrypoint(tmp_path: Path) -> None:
+    repo = tmp_path / "python_symbol_repo"
+    repo.mkdir()
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "reason_code.py").write_text(
+        """import json
+
+
+class ReasonCode:
+    pass
+
+
+def classify_reason_code(value: str) -> str:
+    return json.dumps({"reason_code": value})
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "python_symbol.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("classify_reason_code", str(db_path), budget=4000, limit=3, actionable=True)
+
+    assert result["nodes"][0]["id"] == "runtime/reason_code.py"
+    assert result["nodes"][0]["score_breakdown"]["keyword"]["search_terms"] > 0
+    digest_ids = [item["id"] for item in result["actionable_digest"]["likely_code_entrypoints"]]
+    assert digest_ids == ["runtime/reason_code.py"]
+
+
+def test_python_symbol_summary_avoids_source_literals_and_raw_token_budget(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "python_privacy_repo"
+    repo.mkdir()
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "big_module.py").write_text(
+        "\n".join(
+            [
+                "import os",
+                "",
+                "def classify_reason_code(value: str) -> str:",
+                "    secret_literal = 'SECRET_TOKEN_SHOULD_NOT_INDEX'",
+                "    return value",
+                *["# filler comment SECRET_TOKEN_SHOULD_NOT_INDEX" for _ in range(500)],
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "python_privacy.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["runtime/big_module.py"]
+    search_text = " ".join(node["search_terms"])
+
+    assert "SECRET_TOKEN_SHOULD_NOT_INDEX" not in search_text
+    assert str(tmp_path).replace("\\", "/") not in search_text
+    assert int(node["estimated_tokens"]) < 200
+
+    result = select_context(
+        "classify_reason_code",
+        str(db_path),
+        budget=100,
+        limit=1,
+        include_content=True,
+    )
+    assert "SECRET_TOKEN_SHOULD_NOT_INDEX" not in result["nodes"][0]["content"]
+    assert int(result["total_tokens"]) < 100
+
+
+def test_python_syntax_error_uses_safe_summary(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "python_syntax_error_repo"
+    repo.mkdir()
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "broken.py").write_text(
+        "def broken(:\n    secret = 'SECRET_TOKEN_SHOULD_NOT_INDEX'\n",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "python_syntax_error.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["runtime/broken.py"]
+
+    assert "SECRET_TOKEN_SHOULD_NOT_INDEX" not in node["summary"]
+    assert "Syntax error prevented symbol extraction" in node["summary"]
+
+
+def test_python_test_detection_uses_node_id_not_absolute_parent_path(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "test_project_parent" / "repo"
+    repo.mkdir(parents=True)
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "worker.py").write_text("def run_worker():\n    return True\n", encoding="utf-8")
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "python_parent_path.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["runtime/worker.py"]
+
+    assert node["type"] == "code"
+    assert node["title"].startswith("Python module")
+
+
+def test_python_test_detection_does_not_match_contest_filename(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "contest_repo"
+    repo.mkdir()
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "contest_helper.py").write_text("def helper():\n    return True\n", encoding="utf-8")
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "contest.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["runtime/contest_helper.py"]
+
+    assert node["type"] == "code"
+    assert "test" not in node["tags"]
+
+
+def test_python_symbol_summary_includes_class_methods(tmp_path: Path) -> None:
+    repo = tmp_path / "python_method_repo"
+    repo.mkdir()
+    (repo / "runtime").mkdir()
+    (repo / "runtime" / "client.py").write_text(
+        """class ApiClient:
+    def send_message(self) -> None:
+        pass
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "python_method.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("send_message", str(db_path), budget=4000, limit=3)
+
+    assert result["nodes"][0]["id"] == "runtime/client.py"
+
+
+def test_non_python_code_budget_uses_emitted_summary_when_content_requested(tmp_path: Path) -> None:
+    repo = tmp_path / "js_budget_repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "huge.js").write_text(
+        "function classifyReasonCode() { return true; }\n" + "\n".join(["// filler" for _ in range(1000)]),
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".js"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 120,
+    }
+    db_path = tmp_path / "js_budget.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("classifyReasonCode", str(db_path), budget=100, limit=1, include_content=True)
+
+    assert result["nodes"][0]["id"] == "src/huge.js"
+    assert int(result["total_tokens"]) < 100
+    assert "// filler" not in result["nodes"][0]["content"]
+
+
+def test_generic_code_symbol_summary_ignores_comment_and_string_literals(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "generic_privacy_repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "privacy.js").write_text(
+        """// function SECRET_TOKEN_SHOULD_NOT_INDEX() {}
+const text = "function STRING_LITERAL_SHOULD_NOT_INDEX() {}";
+export function publishMessage() {
+  return true;
+}
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".js"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 120,
+    }
+    db_path = tmp_path / "generic_privacy.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["src/privacy.js"]
+    public_text = " ".join([node["summary"], " ".join(node["tags"])])
+
+    assert "publishMessage" in public_text
+    assert "SECRET_TOKEN_SHOULD_NOT_INDEX" not in public_text
+    assert "STRING_LITERAL_SHOULD_NOT_INDEX" not in public_text
+
+
+def test_generic_code_symbol_summary_ignores_block_comments_and_template_literals(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "generic_multiline_privacy_repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "privacy.ts").write_text(
+        """/*
+function BLOCK_COMMENT_SHOULD_NOT_INDEX() {}
+*/
+const text = `
+function TEMPLATE_LITERAL_SHOULD_NOT_INDEX() {}
+`;
+export function publishMessage() {
+  return true;
+}
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".ts"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 120,
+    }
+    db_path = tmp_path / "generic_multiline_privacy.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["src/privacy.ts"]
+    public_text = " ".join([node["summary"], " ".join(node["tags"])])
+
+    assert "publishMessage" in public_text
+    assert "BLOCK_COMMENT_SHOULD_NOT_INDEX" not in public_text
+    assert "TEMPLATE_LITERAL_SHOULD_NOT_INDEX" not in public_text
+
+
+def test_generic_code_symbol_summary_handles_common_languages(tmp_path: Path) -> None:
+    repo = tmp_path / "generic_symbols_repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "lib.rs").write_text("pub fn transmit_packet() {}\n", encoding="utf-8")
+    (repo / "src" / "service.go").write_text("func SendWebhook() {}\n", encoding="utf-8")
+    (repo / "src" / "native.c").write_text("int open_native_channel(void) {\n  return 1;\n}\n", encoding="utf-8")
+    config = {
+        "include_extensions": [".rs", ".go", ".c"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 120,
+    }
+    db_path = tmp_path / "generic_symbols.db"
+    _build_db(repo, config, db_path)
+
+    rust = select_context("transmit_packet", str(db_path), budget=4000, limit=3)
+    go = select_context("send webhook", str(db_path), budget=4000, limit=3)
+    c = select_context("open_native_channel", str(db_path), budget=4000, limit=3)
+
+    assert rust["nodes"][0]["id"] == "src/lib.rs"
+    assert go["nodes"][0]["id"] == "src/service.go"
+    assert c["nodes"][0]["id"] == "src/native.c"
+
+
+def test_generic_test_file_is_typed_as_test(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "generic_test_repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "reply.spec.ts").write_text("function checksReply() {}\n", encoding="utf-8")
+    config = {
+        "include_extensions": [".ts"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 120,
+    }
+    db_path = tmp_path / "generic_test.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["src/reply.spec.ts"]
+
+    assert node["type"] == "test"
+    assert "test" in node["tags"]
+
+
+def test_generic_underscore_test_file_is_typed_as_test(tmp_path: Path) -> None:
+    from mdex.store import list_nodes
+
+    repo = tmp_path / "generic_go_test_repo"
+    repo.mkdir()
+    (repo / "src").mkdir()
+    (repo / "src" / "worker_test.go").write_text("func TestWorker() {}\n", encoding="utf-8")
+    config = {
+        "include_extensions": [".go"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 120,
+    }
+    db_path = tmp_path / "generic_go_test.db"
+    _build_db(repo, config, db_path)
+
+    node = {row["id"]: row for row in list_nodes(str(db_path))}["src/worker_test.go"]
+
+    assert node["type"] == "test"
+    assert "test" in node["tags"]
+
+
+def test_actionable_digest_labels_root_test_file_as_test_entrypoint(tmp_path: Path) -> None:
+    repo = tmp_path / "root_test_repo"
+    repo.mkdir()
+    (repo / "test_reason_code.py").write_text(
+        "def test_reason_code():\n    assert True\n",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".py"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 240,
+    }
+    db_path = tmp_path / "root_test.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("test_reason_code", str(db_path), budget=4000, limit=3, actionable=True)
+    entrypoint = result["actionable_digest"]["likely_code_entrypoints"][0]
+
+    assert entrypoint["id"] == "test_reason_code.py"
+    assert entrypoint["reason"] == "likely test entrypoint"
 
 
 def test_select_context_actionable_digest_detects_japanese_guardrails(tmp_path: Path) -> None:

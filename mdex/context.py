@@ -8,8 +8,9 @@ from mdex.reader import read_node_text
 from mdex.resolver import prerequisite_order, related_nodes
 from mdex.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
 
-KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"']+")
+KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"'、。．，！？：；・「」『』（）［］｛｝＜＞]+")
 MDEX_FIND_ACTION_RE = re.compile(r'^run mdex find "(?P<query>.*)"$')
+SCRIPT_SEGMENT_RE = re.compile(r"[a-z0-9_][a-z0-9_.-]{2,}|[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]{2,}")
 
 CODE_ENTRYPOINT_EXTENSIONS = {
     ".c",
@@ -93,6 +94,10 @@ DEFAULT_KEYWORD_WEIGHTS = {
     "summary": 1.5,
     # Tags are explicit intent markers; weight slightly above summary.
     "tags": 2.2,
+    # Search terms are scan-derived aliases/symbols that should bridge sparse wording.
+    "search_terms": 2.4,
+    # Learning notes capture past failure symptoms and should counteract done-task decay.
+    "learning_note": 3.0,
 }
 
 DEFAULT_TYPE_BONUS = {
@@ -196,7 +201,7 @@ def _apply_scoring_overrides(base: dict[str, Any], overrides: dict[str, Any]) ->
     keyword = overrides.get("keyword")
     if isinstance(keyword, dict):
         keyword_map = dict(base["keyword"])
-        for key in ("title", "summary", "tags"):
+        for key in ("title", "summary", "tags", "search_terms", "learning_note"):
             if key not in keyword:
                 continue
             next_value = _coerce_float(keyword.get(key), float(keyword_map[key]))
@@ -310,6 +315,16 @@ def _extract_keywords(query: str) -> list[str]:
     if lowered not in seen:
         seen.add(lowered)
         keywords.append(lowered)
+        for segment in _script_segments(lowered):
+            if segment in seen:
+                continue
+            seen.add(segment)
+            keywords.append(segment)
+        for gram in _cjk_ngrams(lowered):
+            if gram in seen:
+                continue
+            seen.add(gram)
+            keywords.append(gram)
 
     for part in parts:
         if len(part) <= 1:
@@ -318,7 +333,32 @@ def _extract_keywords(query: str) -> list[str]:
             continue
         seen.add(part)
         keywords.append(part)
+        for gram in _cjk_ngrams(part):
+            if gram in seen:
+                continue
+            seen.add(gram)
+            keywords.append(gram)
     return keywords
+
+
+def _script_segments(text: str) -> list[str]:
+    if not re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]", text):
+        return []
+    if not re.search(r"[a-z0-9_]", text):
+        return []
+    return [match.group(0) for match in SCRIPT_SEGMENT_RE.finditer(text)]
+
+
+def _cjk_ngrams(text: str) -> list[str]:
+    compact = "".join(re.findall(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]", text))
+    if len(compact) < 4:
+        return []
+    grams: list[str] = []
+    for size in (2, 3, 4):
+        if len(compact) < size:
+            continue
+        grams.extend(compact[index : index + size] for index in range(0, len(compact) - size + 1))
+    return grams
 
 
 def _parse_updated_timestamp(value: str) -> datetime | None:
@@ -359,15 +399,32 @@ def _keyword_match_breakdown(
     title = str(node.get("title", "")).lower()
     summary = str(node.get("summary", "")).lower()
     tags = {str(item).strip().lower() for item in node.get("tags", []) if str(item).strip()}
+    search_terms = [str(item).strip().lower() for item in node.get("search_terms", []) if str(item).strip()]
+    search_text = " ".join(search_terms)
+    learning_note = node.get("learning_note", {})
+    learning_text = ""
+    if isinstance(learning_note, dict):
+        for value in learning_note.values():
+            if isinstance(value, dict):
+                learning_text += " " + " ".join(str(item) for item in value.values())
+            elif isinstance(value, list):
+                learning_text += " " + " ".join(str(item) for item in value)
+            else:
+                learning_text += " " + str(value)
+    learning_text = learning_text.lower()
 
     keyword_weights = scoring.get("keyword", DEFAULT_KEYWORD_WEIGHTS)
     title_weight = float(keyword_weights.get("title", DEFAULT_KEYWORD_WEIGHTS["title"]))
     summary_weight = float(keyword_weights.get("summary", DEFAULT_KEYWORD_WEIGHTS["summary"]))
     tags_weight = float(keyword_weights.get("tags", DEFAULT_KEYWORD_WEIGHTS["tags"]))
+    search_terms_weight = float(keyword_weights.get("search_terms", DEFAULT_KEYWORD_WEIGHTS["search_terms"]))
+    learning_note_weight = float(keyword_weights.get("learning_note", DEFAULT_KEYWORD_WEIGHTS["learning_note"]))
 
     title_score = 0.0
     summary_score = 0.0
     tags_score = 0.0
+    search_terms_score = 0.0
+    learning_note_score = 0.0
     for keyword in keywords:
         if keyword in title:
             title_score += title_weight
@@ -375,12 +432,18 @@ def _keyword_match_breakdown(
             summary_score += summary_weight
         if keyword in tags:
             tags_score += tags_weight
+        if keyword in search_text or keyword in search_terms:
+            search_terms_score += search_terms_weight
+        if keyword in learning_text:
+            learning_note_score += learning_note_weight
 
-    total = title_score + summary_score + tags_score
+    total = title_score + summary_score + tags_score + search_terms_score + learning_note_score
     return {
         "title": round(title_score, 3),
         "summary": round(summary_score, 3),
         "tags": round(tags_score, 3),
+        "search_terms": round(search_terms_score, 3),
+        "learning_note": round(learning_note_score, 3),
         "total": round(total, 3),
     }
 
@@ -405,6 +468,10 @@ def _type_status_breakdown(
 
 
 def _estimated_tokens_for_node(node: dict[str, Any]) -> int:
+    node_id = str(node.get("id", "")).strip()
+    if _is_code_entrypoint(node_id, node):
+        fallback = str(node.get("summary", "")) or str(node.get("title", ""))
+        return max(1, len(fallback) // 4)
     value = int(node.get("estimated_tokens", 0) or 0)
     if value > 0:
         return value
@@ -417,6 +484,12 @@ def _load_node_content(node_id: str, scan_root: str, summary_fallback: str) -> s
         return read_node_text(scan_root, node_id)
     except FileNotFoundError:
         return summary_fallback
+
+
+def _content_for_output(node_id: str, node: dict[str, Any], scan_root: str, summary_fallback: str) -> str:
+    if _is_code_entrypoint(node_id, node):
+        return summary_fallback
+    return _load_node_content(node_id, scan_root, summary_fallback)
 
 
 def _node_meta_map(db_path: str) -> dict[str, dict[str, Any]]:
@@ -599,7 +672,7 @@ def _is_code_entrypoint(node_id: str, node: dict[str, Any] | None = None) -> boo
 def _is_test_entrypoint(node_id: str) -> bool:
     normalized = node_id.lower().replace("\\", "/")
     lowered = f"/{normalized}"
-    return any(marker in lowered for marker in TEST_PATH_MARKERS)
+    return any(marker in lowered for marker in TEST_PATH_MARKERS) or normalized.rsplit("/", 1)[-1].startswith("test_")
 
 
 def _node_brief(
@@ -1093,7 +1166,7 @@ def select_context(
         }
         if include_content:
             summary_fallback = str(node.get("summary", "")) or str(node.get("title", ""))
-            row["content"] = _load_node_content(node_id, scan_root, summary_fallback)
+            row["content"] = _content_for_output(node_id, node, scan_root, summary_fallback)
         selected_nodes.append(row)
         total_tokens = projected
 

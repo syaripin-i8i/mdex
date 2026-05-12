@@ -113,6 +113,14 @@ def _node_map_from_rows(nodes: list[dict[str, Any]]) -> dict[str, dict[str, Any]
     return node_map
 
 
+def _public_node(node: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in node.items()
+        if key not in {"search_terms", "learning_note"}
+    }
+
+
 def _count_edge_resolution(edges: list[dict[str, Any]]) -> tuple[int, int, int, float]:
     total = len(edges)
     resolved = sum(1 for edge in edges if bool(edge.get("resolved", False)))
@@ -132,7 +140,7 @@ def _print_node_table(nodes: list[dict[str, Any]]) -> None:
 
 
 def _print_nodes(nodes: list[dict[str, Any]], output_format: str) -> None:
-    sorted_nodes = sorted(nodes, key=lambda item: str(item.get("id", "")))
+    sorted_nodes = [_public_node(node) for node in sorted(nodes, key=lambda item: str(item.get("id", "")))]
     if output_format == "table":
         _print_node_table(sorted_nodes)
     else:
@@ -439,7 +447,7 @@ def _cmd_query(args: argparse.Namespace) -> int:
             )
 
     output = {
-        "node": node_map[start_id],
+        "node": _public_node(node_map[start_id]),
         "outgoing": outgoing,
         "incoming": incoming,
         "stats": stats,
@@ -463,7 +471,7 @@ def _cmd_related(args: argparse.Namespace) -> int:
 
     results = related_nodes(args.node, db_path, limit=int(args.limit))
     output = {
-        "node": node,
+        "node": _public_node(node),
         "related": results,
     }
     _emit_payload(output, pretty=True)
@@ -485,7 +493,7 @@ def _cmd_first(args: argparse.Namespace) -> int:
 
     prerequisites = prerequisite_order(args.node, db_path, limit=int(args.limit))
     output = {
-        "node": node,
+        "node": _public_node(node),
         "prerequisites": prerequisites,
     }
     _emit_payload(output, pretty=True)

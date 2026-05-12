@@ -649,6 +649,55 @@ root decision context
     assert payload["nodes"][0]["score_breakdown"]["config_source"] == "runtime_config"
 
 
+def test_find_cli_hides_internal_search_metadata(tmp_path: Path) -> None:
+    repo = tmp_path / "public_find_repo"
+    repo.mkdir()
+    (repo / "tasks").mkdir()
+    (repo / "tasks" / "T20260101010101.md").write_text(
+        """---
+type: task
+status: done
+updated: 2026-01-01
+---
+# Task: install hardening
+
+### Learning Note
+- symptom: lock install hash verification was missing
+- next_time_query_seed: pylock require-hashes
+""",
+        encoding="utf-8",
+    )
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["."],
+            "include_extensions": [".md"],
+            "exclude_patterns": ["control/**"],
+            "node_type_map": {"task": ["tasks"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    scan = _run_cli("scan", cwd=repo)
+    assert scan.returncode == 0
+    found = _run_cli("find", "require-hashes", "--format", "json", cwd=repo)
+    assert found.returncode == 0
+    payload = json.loads(found.stdout)
+
+    assert payload
+    assert "search_terms" not in payload[0]
+    assert "learning_note" not in payload[0]
+
+    scan_payload = json.loads(scan.stdout)
+    index_path = Path(scan_payload["output"]["json"])
+    index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    indexed_node = index_payload["nodes"][0]
+    assert "search_terms" not in indexed_node
+    assert "learning_note" not in indexed_node
+
+
 def test_finish_dry_run_uses_git_changed_files_without_writes(
     quality_repo: Path,
     quality_config: dict[str, object],

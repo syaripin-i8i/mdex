@@ -15,6 +15,22 @@ from mdex.scanner import DEFAULT_INDEX_EXTENSIONS, list_indexable_files
 
 URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://")
 DEFAULT_MARKDOWN_EXTENSION = ".md"
+CODE_FILE_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".rb",
+    ".php",
+    ".cs",
+    ".sh",
+    ".ps1",
+}
+TEST_PATH_MARKERS = {"/test/", "/tests/", "_test.", ".test.", ".spec.", "/spec/"}
 SUSPICIOUS_INDEXED_PATTERNS = (
     ".env*",
     "**/.env*",
@@ -176,6 +192,14 @@ def _resolve_type(
 
     if title.strip().lower().startswith("task:"):
         return "task"
+
+    normalized_id = file_id.lower().replace("\\", "/")
+    suffix = Path(file_id).suffix.lower()
+    if suffix in CODE_FILE_EXTENSIONS:
+        framed = f"/{normalized_id}"
+        if any(marker in framed for marker in TEST_PATH_MARKERS) or Path(file_id).name.lower().startswith("test_"):
+            return "test"
+        return "code"
 
     dir_parts = [part.lower() for part in Path(file_id).parts[:-1]]
     for node_type, aliases in node_type_map.items():
@@ -486,7 +510,7 @@ def build_index(
             warnings.append({"path": node_id, "error": suspicious_warning})
 
         try:
-            parsed = parse_file(str(file_path), options=parser_options)
+            parsed = parse_file(str(file_path), options={**parser_options, "node_id": node_id})
         except Exception as exc:
             if strict:
                 raise
@@ -588,6 +612,8 @@ def build_index(
             "tags": parsed.get("tags", []),
             "updated": parsed.get("updated", ""),
             "estimated_tokens": int(parsed.get("estimated_tokens", 0) or 0),
+            "search_terms": _normalize_str_list(parsed.get("search_terms")),
+            "learning_note": parsed.get("learning_note", {}),
             "links_to": links_to_resolved,
             "depends_on": depends_resolved,
             "relates_to": relates_resolved,

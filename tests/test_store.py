@@ -247,6 +247,62 @@ def test_list_nodes_includes_estimated_tokens(
     assert all(int(row["estimated_tokens"]) > 0 for row in rows)
 
 
+def test_list_nodes_reads_legacy_schema_without_search_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE nodes (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                type TEXT,
+                project TEXT,
+                status TEXT,
+                summary TEXT,
+                summary_source TEXT,
+                summary_updated TEXT,
+                estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                tags_json TEXT,
+                updated TEXT,
+                links_to_json TEXT,
+                depends_on_json TEXT,
+                relates_to_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO nodes (
+                id, title, type, project, status, summary, summary_source, summary_updated,
+                estimated_tokens, tags_json, updated, links_to_json, depends_on_json, relates_to_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy.md",
+                "Legacy",
+                "design",
+                "mdex",
+                "active",
+                "legacy summary",
+                "seed",
+                "2026-01-01",
+                12,
+                "[]",
+                "2026-01-01",
+                "[]",
+                "[]",
+                "[]",
+            ),
+        )
+        conn.commit()
+
+    rows = list_nodes(str(db_path))
+
+    assert rows[0]["id"] == "legacy.md"
+    assert rows[0]["search_terms"] == []
+    assert rows[0]["learning_note"] == {}
+
+
 def test_update_node_summary_uses_source_argument(
     quality_repo: Path,
     quality_config: dict[str, object],
