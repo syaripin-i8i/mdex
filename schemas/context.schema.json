@@ -65,6 +65,30 @@
         "$ref": "#/$defs/deferredItem"
       }
     },
+    "discovery_candidates": {
+      "type": "array",
+      "description": "Low-cost side-read candidates that are not part of the primary read order.",
+      "items": {
+        "$ref": "#/$defs/discoveryCandidate"
+      }
+    },
+    "budget_dropped_nodes": {
+      "type": "array",
+      "description": "High-scoring candidates omitted because the context soft budget would be exceeded.",
+      "items": {
+        "$ref": "#/$defs/budgetDroppedNode"
+      }
+    },
+    "multi_index": {
+      "type": "object",
+      "description": "Present when context was merged from multiple index databases.",
+      "additionalProperties": true
+    },
+    "per_index_context": {
+      "type": "object",
+      "description": "Per-index raw context payloads keyed by index alias.",
+      "additionalProperties": true
+    },
     "confidence": {
       "type": "number"
     },
@@ -76,9 +100,44 @@
     },
     "actionable_digest": {
       "$ref": "#/$defs/actionableDigest"
+    },
+    "agent_prompt_pack": {
+      "$ref": "#/$defs/agentPromptPack"
     }
   },
   "$defs": {
+    "agentPromptPack": {
+      "type": "object",
+      "required": ["role", "query", "instructions", "required_reads", "prompt"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["worker", "reviewer", "commander"]
+        },
+        "query": {
+          "type": "string"
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "required_reads": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "discovery_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
     "actionableDigest": {
       "type": "object",
       "required": [
@@ -113,6 +172,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/digestNode"
+          }
+        },
+        "discovery_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/discoveryCandidate"
           }
         },
         "suggested_rg": {
@@ -237,6 +302,87 @@
         },
         "reason": {
           "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "discoveryCandidate": {
+      "type": "object",
+      "required": [
+        "id",
+        "reason",
+        "reason_code",
+        "score",
+        "score_breakdown"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "shared_dependencies",
+            "shared_links",
+            "stale_but_related",
+            "orphan_nearby",
+            "recently_updated_neighbor",
+            "same_type_same_project"
+          ]
+        },
+        "score": {
+          "type": "number"
+        },
+        "score_breakdown": {
+          "type": "object",
+          "required": ["total"],
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "budgetDroppedNode": {
+      "type": "object",
+      "required": ["id", "score", "budget_drop_reason"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "estimated_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget_drop_reason": {
+          "type": "string"
+        },
+        "projected_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "soft_cap": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": true

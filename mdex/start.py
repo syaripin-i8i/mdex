@@ -60,12 +60,14 @@ def build_start_payload(
         "recommended_next_actions": recommended_next_actions,
         "recommended_next_actions_v2": recommended_next_actions_v2,
         "deferred_nodes": context_payload.get("deferred_nodes", []),
+        "discovery_candidates": context_payload.get("discovery_candidates", []),
         "confidence": confidence,
         "why_this_set": context_payload.get("why_this_set", []),
         "actionable_digest": context_payload.get("actionable_digest")
         or project_actionable_digest(_fallback_actionable_digest(task), digest),
         "total_tokens": int(context_payload.get("total_tokens", 0) or 0),
         "budget": int(context_payload.get("budget", budget) or budget),
+        "budget_dropped_nodes": context_payload.get("budget_dropped_nodes", []),
         "nodes": context_payload.get("nodes", []),
     }
     return payload

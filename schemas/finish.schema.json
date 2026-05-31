@@ -125,6 +125,37 @@
       },
       "additionalProperties": true
     },
+    "suspicion_signals": {
+      "type": "object",
+      "description": "Dry-run friendly closeout audit signals for stale docs, missing links, unreviewed neighbors, and decision gaps.",
+      "properties": {
+        "suspiciously_unupdated": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        },
+        "likely_missing_links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        },
+        "unreviewed_neighbors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        },
+        "decision_gap_candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/impactItem"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "enrich_candidates": {
       "type": "array",
       "description": "Ranked nodes considered for enrich. Empty array is valid and indicates no enrich target was found.",

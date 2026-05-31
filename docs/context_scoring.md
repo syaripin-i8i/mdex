@@ -25,6 +25,7 @@ updated: 2026-04-24
 - `keyword.tags`: クエリ語が tags に一致する寄与
 - `keyword.search_terms`: scan が抽出した alias / symbol / seed terms への寄与
 - `keyword.learning_note`: `### Learning Note` の symptom / next_time_query_seed への寄与
+- `path_symbol`: `runtime/foo.py` や `TurnService._run_turn_impl` のような path/symbol query への寄与
 - `type_status.type_bonus`: 種別ボーナス（design/decision を優先）
 - `type_status.status_bonus`: 状態ボーナス（active/draft を優先、archived を減点）
 - `recency`: 更新日時の新しさによる寄与（`recency_weight` で重み付け）
@@ -32,9 +33,14 @@ updated: 2026-04-24
 
 ## スコア集計と予算制御
 
-- `total = keyword.total + type_status.total + recency + graph_boost`
+- `total = keyword.total + path_symbol.total + type_status.total + recency + graph_boost`
 - `token_cost.estimated_tokens` は budget ゲートに使用
 - `token_cost.soft_cap = budget * soft_budget_multiplier`
+- budget で落ちた候補は `budget_dropped_nodes[].budget_drop_reason` に残ります。
+
+`keyword` は `matched_terms` と `matched_fields` を持つため、なぜ候補が上がったかを
+文字列 reason の解析なしに確認できます。Graph 由来の加点は `graph_reason` に edge
+evidence を残します。
 
 `token_cost` は順位スコアには直接加算しません。最終選抜は score 順 + budget 条件です。
 
@@ -76,11 +82,15 @@ tags、search_terms に入れるため、`context --actionable` の
     },
     "graph_default_boost": 0.15,
     "recency_weight": 1.0,
+    "path_symbol_weight": 3.5,
     "primary_keyword_search_multiplier": 5,
     "secondary_keyword_search_multiplier": 2,
     "primary_keyword_search_floor": 20,
     "secondary_keyword_search_floor": 10,
     "soft_budget_multiplier": 1.2
+  },
+  "synonyms": {
+    "自発投稿": ["self_post", "spontaneous post"]
   }
 }
 ```

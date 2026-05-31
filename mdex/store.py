@@ -571,6 +571,23 @@ def list_node_override_ids(db_path: str) -> list[str]:
     return [str(row["id"] or "") for row in rows if str(row["id"] or "").strip()]
 
 
+def list_node_overrides(db_path: str) -> list[dict[str, str]]:
+    with _connect(db_path) as conn:
+        if not _table_exists(conn, "node_overrides"):
+            return []
+        rows = conn.execute(f"{OVERRIDE_SELECT_SQL} ORDER BY id").fetchall()
+    return [
+        {
+            "id": str(row["id"] or ""),
+            "summary": str(row["summary"] or ""),
+            "summary_source": str(row["summary_source"] or ""),
+            "summary_updated": str(row["summary_updated"] or ""),
+        }
+        for row in rows
+        if str(row["id"] or "").strip()
+    ]
+
+
 def get_index_metadata(db_path: str, key: str, default: str | None = None) -> str | None:
     metadata = list_index_metadata(db_path)
     if key in metadata:

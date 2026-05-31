@@ -47,7 +47,7 @@ def _validate_payload(payload: dict[str, object], schema_filename: str) -> None:
 
 def _assert_contract(payload: dict[str, object], command: str) -> None:
     assert payload["contract_schema"] == f"https://github.com/syaripin-i8i/mdex/schemas/{command}.schema.json"
-    assert payload["contract_version"] == "0.3.0"
+    assert payload["contract_version"] == "0.4.0"
 
 
 def test_schema_files_are_valid_draft_2020_12() -> None:
@@ -56,6 +56,7 @@ def test_schema_files_are_valid_draft_2020_12() -> None:
         "start.schema.json",
         "context.schema.json",
         "doctor.schema.json",
+        "status.schema.json",
         "impact.schema.json",
         "finish.schema.json",
         "error.schema.json",
@@ -108,6 +109,12 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     doctor_payload = json.loads(doctor.stdout)
     _assert_contract(doctor_payload, "doctor")
     _validate_payload(doctor_payload, "doctor.schema.json")
+
+    status = _run_cli("status", "--db", str(db_path), "--json-index", str(scan_json), cwd=quality_repo)
+    assert status.returncode == 0
+    status_payload = json.loads(status.stdout)
+    _assert_contract(status_payload, "status")
+    _validate_payload(status_payload, "status.schema.json")
 
     impact = _run_cli("impact", "design/root.md", "--db", str(db_path), cwd=quality_repo)
     assert impact.returncode == 0
@@ -176,6 +183,21 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     assert {"relevant_task_history", "likely_code_entrypoints", "known_guardrails"}.issubset(
         full_context_payload["actionable_digest"]
     )
+
+    agent_context = _run_cli(
+        "context",
+        "root decision",
+        "--db",
+        str(db_path),
+        "--actionable",
+        "--for-agent",
+        "reviewer",
+        cwd=quality_repo,
+    )
+    assert agent_context.returncode == 0
+    agent_context_payload = json.loads(agent_context.stdout)
+    _validate_payload(agent_context_payload, "context.schema.json")
+    assert agent_context_payload["agent_prompt_pack"]["role"] == "reviewer"
 
 
 def test_cli_error_outputs_match_error_schema(quality_repo: Path, tmp_path: Path) -> None:
@@ -280,7 +302,7 @@ def test_opt_in_telemetry_jsonl_is_local_schema_shaped_and_redacted(quality_repo
     assert event["event"] == "command_completed"
     assert event["command"] == "start"
     assert event["exit_code"] == 0
-    assert event["contract_version"] == "0.3.0"
+    assert event["contract_version"] == "0.4.0"
     assert isinstance(event["duration_ms"], int)
     assert "confidence" in event
     assert event["suggested_rg_count"] >= 1

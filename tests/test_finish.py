@@ -165,6 +165,58 @@ def test_run_finish_dry_run_keeps_scan_not_ran(
     assert payload["scan"]["ran"] is False
     assert payload["requires_manual_targeting"] is False
     assert payload["changed_files"] == []
+    assert payload["suspicion_signals"] == {
+        "suspiciously_unupdated": [],
+        "likely_missing_links": [],
+        "unreviewed_neighbors": [],
+        "decision_gap_candidates": [],
+    }
+
+
+def test_run_finish_maps_impact_anomalies_to_suspicion_signals(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    anomaly = {
+        "id": "design/root.md",
+        "score": 1.0,
+        "reason": "isolated",
+        "reason_code": "isolated_changes",
+        "score_breakdown": {"total": 1.0},
+    }
+    monkeypatch.setattr(finish, "collect_changed_files", lambda *_args, **_kwargs: ["design/root.md"])
+    monkeypatch.setattr(
+        finish,
+        "build_impact_report",
+        lambda *_args, **_kwargs: {
+            "inputs": ["design/root.md"],
+            "read_first": [],
+            "related_tasks": [],
+            "decision_records": [],
+            "stale_watch": [anomaly],
+            "isolated_changes": [anomaly],
+            "unusual_neighbors": [anomaly],
+            "missing_decision_links": [anomaly],
+        },
+    )
+    monkeypatch.setattr(finish, "list_nodes", lambda *_args, **_kwargs: [])
+
+    payload = run_finish(
+        task="task",
+        db_path="tmp.db",
+        db_source="arg",
+        context=_context(tmp_path),
+        changed_files_from_git=False,
+        dry_run=True,
+        summary_file=None,
+        scan=False,
+    )
+
+    signals = payload["suspicion_signals"]
+    assert signals["suspiciously_unupdated"] == [anomaly]
+    assert signals["likely_missing_links"] == [anomaly]
+    assert signals["unreviewed_neighbors"] == [anomaly]
+    assert signals["decision_gap_candidates"] == [anomaly]
 
 
 def test_run_finish_sets_manual_targeting_for_multiple_primaries(

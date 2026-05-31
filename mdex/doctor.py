@@ -4,9 +4,10 @@ import fnmatch
 import json
 from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 from mdex.observe import telemetry_health_findings
-from mdex.store import list_index_metadata, list_node_override_ids, list_nodes
+from mdex.store import list_index_metadata, list_node_override_ids, list_node_overrides, list_nodes
 
 LOCAL_SECRET_PATTERNS = (
     ".env*",
@@ -146,6 +147,31 @@ def _indexed_path_findings(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "message": "fixture/eval/log/dump-style path is indexed; prefer a separate index or direct reads",
                 }
             )
+        elif Path(node_id).name == ".DS_Store":
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "message": ".DS_Store is indexed; add it to exclude_patterns",
+                }
+            )
+        elif node_id.lower().endswith((".json", ".jsonl")) and int(node.get("estimated_tokens", 0) or 0) > 20000:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "message": "large JSON/JSONL node is indexed; prefer excluding generated or raw data",
+                    "estimated_tokens": int(node.get("estimated_tokens", 0) or 0),
+                }
+            )
+        elif (node_id.startswith("tasks/archive/") or "/tasks/archive/" in node_id) and str(node.get("status", "")).strip().lower() not in {"done", "archived"}:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "message": "task archive path is indexed without done/archived status",
+                }
+            )
     return findings
 
 
@@ -160,6 +186,31 @@ def _override_findings(nodes: list[dict[str, Any]], override_ids: list[str]) -> 
         }
         for node_id in stale_ids
     ]
+
+
+def _override_freshness_findings(nodes: list[dict[str, Any]], overrides: list[dict[str, str]]) -> list[dict[str, Any]]:
+    node_map = {str(node.get("id", "")).strip(): node for node in nodes if str(node.get("id", "")).strip()}
+    findings: list[dict[str, Any]] = []
+    for override in overrides:
+        node_id = str(override.get("id", "")).strip()
+        node = node_map.get(node_id)
+        if not node:
+            continue
+        node_updated = _parse_utc_timestamp(str(node.get("updated", "")))
+        summary_updated = _parse_utc_timestamp(str(override.get("summary_updated", "")))
+        if node_updated is None or summary_updated is None:
+            continue
+        if node_updated > summary_updated:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "message": "agent summary override is older than the indexed source update",
+                    "node_updated": str(node.get("updated", "")),
+                    "summary_updated": str(override.get("summary_updated", "")),
+                }
+            )
+    return findings
 
 
 def _json_sync_findings(metadata: dict[str, str], json_index_path: Path | None) -> list[dict[str, Any]]:
@@ -254,30 +305,115 @@ def _recommended_next_actions(summary: dict[str, int]) -> list[str]:
     return actions
 
 
+def _parse_utc_timestamp(value: str) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def index_freshness_status(
+    db_path: str,
+    *,
+    alias: str = "repo",
+    source: str = "unknown",
+    config_path: str = "",
+    stale_after_hours: int = 24,
+) -> dict[str, Any]:
+    db_path_obj = Path(db_path)
+    if not db_path_obj.exists():
+        return {
+            "alias": alias,
+            "db": str(db_path_obj),
+            "source": source,
+            "config_path": config_path,
+            "ready": False,
+            "fresh": False,
+            "stale": True,
+            "reason": "index_db_missing",
+        }
+    metadata = list_index_metadata(str(db_path_obj))
+    generated = str(metadata.get("generated", "")).strip()
+    parsed = _parse_utc_timestamp(generated)
+    safe_stale_after_hours = max(1, int(stale_after_hours))
+    if parsed is None:
+        return {
+            "alias": alias,
+            "db": str(db_path_obj),
+            "source": source,
+            "config_path": config_path,
+            "ready": True,
+            "generated": generated,
+            "fresh": False,
+            "stale": True,
+            "age_hours": None,
+            "stale_after_hours": safe_stale_after_hours,
+            "reason": "missing_or_invalid_generated_timestamp",
+        }
+    age_hours = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0)
+    fresh = age_hours <= float(safe_stale_after_hours)
+    return {
+        "alias": alias,
+        "db": str(db_path_obj),
+        "source": source,
+        "config_path": config_path,
+        "ready": True,
+        "generated": generated,
+        "fresh": fresh,
+        "stale": not fresh,
+        "age_hours": round(age_hours, 2),
+        "stale_after_hours": safe_stale_after_hours,
+        "reason": "fresh_index" if fresh else "stale_index",
+    }
+
+
 def build_doctor_report(
     db_path: str,
     *,
     repo_root: Path | None = None,
     json_index_path: Path | None = None,
+    config_path: Path | None = None,
+    db_source: str = "unknown",
 ) -> dict[str, Any]:
     nodes = list_nodes(db_path)
     metadata = list_index_metadata(db_path)
     override_ids = list_node_override_ids(db_path)
+    overrides = list_node_overrides(db_path)
     db_path_obj = Path(db_path)
 
     checks = [
         _check_result("scan_warnings", _scan_warning_findings(metadata)),
         _check_result("indexed_path_hygiene", _indexed_path_findings(nodes)),
         _check_result("orphan_overrides", _override_findings(nodes, override_ids)),
+        _check_result("override_freshness", _override_freshness_findings(nodes, overrides)),
         _check_result("json_sqlite_sync", _json_sync_findings(metadata, json_index_path)),
         _check_result("legacy_artifacts", _legacy_artifact_findings(repo_root, db_path_obj)),
         _check_result("telemetry_health", telemetry_health_findings(repo_root)),
     ]
     summary = _summary(checks)
     status = _overall_status(checks)
+    freshness = index_freshness_status(
+        db_path,
+        source=db_source,
+        config_path=str(config_path) if config_path is not None else "",
+    )
     return {
         "status": status,
         "summary": summary,
+        "index_health": freshness,
+        "config": {
+            "repo_root": str(repo_root) if repo_root is not None else "",
+            "config_path": str(config_path) if config_path is not None else "",
+            "json_index_path": str(json_index_path) if json_index_path is not None else "",
+        },
         "checks": checks,
         "recommended_next_actions": _recommended_next_actions(summary),
     }

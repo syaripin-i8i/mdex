@@ -7,6 +7,7 @@ import pytest
 from mdex.builder import build_index
 from mdex.context import resolve_context_scoring_config, select_context
 from mdex.indexer import write_sqlite
+from mdex.multiindex import build_multi_context_payload
 
 
 def _build_db(root: Path, config: dict[str, object], db_path: Path) -> None:
@@ -949,6 +950,135 @@ def test_select_context_score_breakdown_records_config_source(
     )
     assert result["nodes"]
     assert result["nodes"][0]["score_breakdown"]["config_source"] == "runtime_config"
+
+
+def test_select_context_expands_repo_local_synonyms(tmp_path: Path) -> None:
+    repo = tmp_path / "synonym_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    (repo / "docs" / "self_post.md").write_text(
+        """---
+type: design
+status: active
+search_terms:
+  - self_post
+---
+# Self Post
+
+Spontaneous post pipeline notes.
+""",
+        encoding="utf-8",
+    )
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "node_type_map": {"design": ["docs"]},
+        "synonyms": {"自発投稿": ["self_post", "spontaneous post"]},
+    }
+    db_path = tmp_path / "synonym.db"
+    _build_db(repo, config, db_path)
+    scoring, source = resolve_context_scoring_config(scan_config=config)
+
+    result = select_context("自発投稿", str(db_path), budget=4000, limit=3, scoring_config=scoring, scoring_config_source=source)
+
+    assert result["nodes"][0]["id"] == "docs/self_post.md"
+    assert "spontaneous post" in result["nodes"][0]["score_breakdown"]["keyword"]["matched_terms"]
+
+
+def test_select_context_actionable_adds_discovery_lane_without_read_order_duplicates(tmp_path: Path) -> None:
+    repo = tmp_path / "discovery_repo"
+    repo.mkdir()
+    (repo / "docs").mkdir()
+    (repo / "docs" / "alpha.md").write_text(
+        """---
+type: design
+status: active
+depends_on:
+  - beta.md
+---
+# Alpha
+
+alpha launch policy
+""",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "beta.md").write_text(
+        """---
+type: design
+status: active
+---
+# Beta
+
+beta side policy
+""",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "gamma.md").write_text(
+        """---
+type: design
+status: active
+---
+# Gamma
+
+gamma adjacent policy
+""",
+        encoding="utf-8",
+    )
+    config = {"include_extensions": [".md"], "exclude_patterns": [], "node_type_map": {"design": ["docs"]}}
+    db_path = tmp_path / "discovery.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("alpha launch", str(db_path), budget=4000, limit=1, actionable=True)
+
+    read_ids = {item["id"] for item in result["recommended_read_order"]}
+    discovery = result["discovery_candidates"]
+    assert discovery
+    assert not (read_ids & {item["id"] for item in discovery})
+    assert discovery[0]["reason_code"] in {
+        "shared_dependencies",
+        "shared_links",
+        "stale_but_related",
+        "orphan_nearby",
+        "recently_updated_neighbor",
+        "same_type_same_project",
+    }
+    assert discovery[0]["score_breakdown"]["total"] == discovery[0]["score"]
+
+
+def test_multi_index_context_splits_budget_across_indexes(tmp_path: Path) -> None:
+    repo = tmp_path / "multi_repo"
+    repo.mkdir()
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir()
+    task_repo = tmp_path / "task_repo"
+    task_repo.mkdir()
+    large_body = "shared multi index term\n" + ("filler " * 1200)
+    (repo / "repo.md").write_text(f"# Repo\n\n{large_body}\n", encoding="utf-8")
+    (task_repo / "task.md").write_text(f"# Task\n\n{large_body}\n", encoding="utf-8")
+    config = {"include_extensions": [".md"], "exclude_patterns": []}
+    repo_db = mdex_dir / "mdex_index.db"
+    task_db = mdex_dir / "task_history.db"
+    _build_db(repo, config, repo_db)
+    _build_db(task_repo, config, task_db)
+
+    payload = build_multi_context_payload(
+        "shared multi index term",
+        {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}},
+        include="repo,task",
+        budget=100,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    assert payload["budget"] == 100
+    assert payload["total_tokens"] <= 100
+    assert payload["budget_dropped_nodes"]
+    assert set(payload["per_index_context"]) == {"repo", "task"}
+    assert all(item["budget"] <= 50 for item in payload["per_index_context"].values())
 
 
 def test_select_context_ranking_regression_on_quality_fixture(

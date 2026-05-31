@@ -226,6 +226,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
 | `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
 | `doctor` | `status`, `summary`, `checks`, `recommended_next_actions` |
+| `status` | `status`, `summary`, `indexes`, `recommended_next_actions` |
 | `impact` | `inputs`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
 | `finish` | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
 | db resolution error | `code`, `error`, `resolution_attempts` |
@@ -240,7 +241,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/error.schema.json",
-  "contract_version": "0.3.0",
+  "contract_version": "0.4.0",
   "code": "db_not_found",
   "error": "db not found",
   "resolution_attempts": []
@@ -257,6 +258,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 - `schemas/start.schema.json`
 - `schemas/context.schema.json`
 - `schemas/doctor.schema.json`
+- `schemas/status.schema.json`
 - `schemas/impact.schema.json`
 - `schemas/finish.schema.json`
 - `schemas/error.schema.json`

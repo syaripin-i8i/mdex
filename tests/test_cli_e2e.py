@@ -114,3 +114,41 @@ def test_enrich_non_ascii_output_with_cp1252_stdio_override(tmp_path: Path) -> N
     assert "UnicodeEncodeError" not in enrich.stderr
     payload = json.loads(enrich.stdout)
     assert payload["status"] == "enriched"
+
+
+def test_scan_incremental_reports_removed_by_node_id_set(tmp_path: Path) -> None:
+    repo = tmp_path / "incremental_repo"
+    repo.mkdir()
+    (repo / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    (repo / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
+    db_path = tmp_path / "incremental.db"
+    output_json = tmp_path / "incremental.json"
+
+    first = _run_cli(
+        "scan",
+        "--root",
+        str(repo),
+        "--db",
+        str(db_path),
+        "--output",
+        str(output_json),
+        "--incremental",
+    )
+    assert first.returncode == 0
+
+    (repo / "a.md").unlink()
+    (repo / "c.md").write_text("# C\n\ngamma\n", encoding="utf-8")
+    second = _run_cli(
+        "scan",
+        "--root",
+        str(repo),
+        "--db",
+        str(db_path),
+        "--output",
+        str(output_json),
+        "--incremental",
+    )
+    assert second.returncode == 0
+    payload = json.loads(second.stdout)
+    assert payload["incremental"]["removed"] == 1
+    assert payload["incremental"]["changed_or_new"] == 1

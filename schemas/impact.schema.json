@@ -51,6 +51,30 @@
       "items": {
         "$ref": "#/$defs/impactItem"
       }
+    },
+    "unusual_neighbors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "isolated_changes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "missing_decision_links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
+    },
+    "unreflected_specs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impactItem"
+      }
     }
   },
   "$defs": {
@@ -70,6 +94,14 @@
         },
         "score": {
           "type": "number"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "score_breakdown": {
+          "type": "object",
+          "required": ["total"],
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

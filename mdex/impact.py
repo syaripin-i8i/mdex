@@ -58,6 +58,24 @@ def _reason_text(reasons: list[str]) -> str:
     return "; ".join(reasons[:3])
 
 
+def _entry(row: _ScoredNode, *, extra_score: float = 0.0, reason_code: str | None = None) -> dict[str, Any]:
+    reasons = _dedupe_reasons(row.reasons)
+    score = round(row.score + extra_score, 3)
+    payload: dict[str, Any] = {
+        "id": row.node_id,
+        "reason": _reason_text(reasons),
+        "score": score,
+        "score_breakdown": {
+            "path_proximity": round(row.score, 3),
+            "extra": round(extra_score, 3),
+            "total": score,
+        },
+    }
+    if reason_code:
+        payload["reason_code"] = reason_code
+    return payload
+
+
 def _score_node_against_changed(node: dict[str, Any], changed_paths: list[str]) -> _ScoredNode | None:
     node_id = str(node.get("id", "")).strip()
     if not node_id:
@@ -171,14 +189,14 @@ def build_impact_report(db_path: str, changed_paths: list[str], *, limit: int = 
     related_tasks: list[dict[str, Any]] = []
     decision_records: list[dict[str, Any]] = []
     stale_watch: list[dict[str, Any]] = []
+    unusual_neighbors: list[dict[str, Any]] = []
+    isolated_changes: list[dict[str, Any]] = []
+    missing_decision_links: list[dict[str, Any]] = []
+    unreflected_specs: list[dict[str, Any]] = []
 
     for row in ranked:
         node = node_map.get(row.node_id, {})
-        entry = {
-            "id": row.node_id,
-            "reason": _reason_text(_dedupe_reasons(row.reasons)),
-            "score": round(row.score, 3),
-        }
+        entry = _entry(row)
         if _is_task_node(node, row.node_id):
             related_tasks.append(entry)
         elif _is_decision_node(node, row.node_id):
@@ -188,13 +206,21 @@ def build_impact_report(db_path: str, changed_paths: list[str], *, limit: int = 
 
         if _is_stale(row.node_id, stale_ids):
             stale_reason = _dedupe_reasons(row.reasons + ["stale summary"])
-            stale_watch.append(
-                {
-                    "id": row.node_id,
-                    "reason": _reason_text(stale_reason),
-                    "score": round(row.score + 0.8, 3),
-                }
-            )
+            stale_watch.append(_entry(_ScoredNode(row.node_id, row.score, stale_reason), extra_score=0.8, reason_code="stale_but_related"))
+
+        refs = [
+            str(item).strip()
+            for key in ("links_to", "depends_on", "relates_to")
+            for item in node.get(key, [])
+            if str(item).strip()
+        ]
+        if row.score > 0 and not refs:
+            unusual_neighbors.append(_entry(_ScoredNode(row.node_id, row.score, row.reasons + ["isolated impacted node"]), extra_score=0.4, reason_code="isolated_changes"))
+            isolated_changes.append(_entry(_ScoredNode(row.node_id, row.score, row.reasons + ["no resolved graph links"]), reason_code="isolated_changes"))
+        if row.score >= 2.0 and not any(_is_decision_node(node_map.get(ref, {}), ref) for ref in refs):
+            missing_decision_links.append(_entry(_ScoredNode(row.node_id, row.score, row.reasons + ["no decision link found"]), reason_code="missing_decision_links"))
+        if str(node.get("type", "")).strip().lower() in {"spec", "reference"} and row.node_id not in stale_ids:
+            unreflected_specs.append(_entry(_ScoredNode(row.node_id, row.score, row.reasons + ["spec/reference changed or adjacent"]), reason_code="unreflected_specs"))
 
     safe_limit = max(1, int(limit))
     return {
@@ -203,4 +229,8 @@ def build_impact_report(db_path: str, changed_paths: list[str], *, limit: int = 
         "related_tasks": related_tasks[:safe_limit],
         "decision_records": decision_records[:safe_limit],
         "stale_watch": stale_watch[:safe_limit],
+        "unusual_neighbors": unusual_neighbors[:safe_limit],
+        "isolated_changes": isolated_changes[:safe_limit],
+        "missing_decision_links": missing_decision_links[:safe_limit],
+        "unreflected_specs": unreflected_specs[:safe_limit],
     }

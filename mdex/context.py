@@ -6,7 +6,7 @@ from typing import Any
 
 from mdex.reader import read_node_text
 from mdex.resolver import prerequisite_order, related_nodes
-from mdex.store import get_scan_root, list_edges_for_nodes, list_nodes, search_nodes
+from mdex.store import get_scan_root, list_edges_for_nodes, list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes
 
 KEYWORD_SPLIT_RE = re.compile(r"[\s,.;:!?/\\(){}\[\]<>\"'、。．，！？：；・「」『』（）［］｛｝＜＞]+")
 MDEX_FIND_ACTION_RE = re.compile(r'^run mdex find "(?P<query>.*)"$')
@@ -79,6 +79,7 @@ _GUARDRAIL_MATCH_TERMS = tuple(sorted((term.lower() for term in GUARDRAIL_TERMS)
 _GUARDRAIL_REASON_TERMS = tuple(sorted(GUARDRAIL_TERMS, key=lambda item: (len(item), item)))
 
 DIGEST_MODES = {"minimal", "full"}
+AGENT_PACK_ROLES = {"worker", "reviewer", "commander"}
 
 MINIMAL_DIGEST_KEYS = (
     "intent",
@@ -141,6 +142,7 @@ DEFAULT_SECONDARY_KEYWORD_SEARCH_FLOOR = 10
 
 DEFAULT_SOFT_BUDGET_MULTIPLIER = 1.2
 DEFAULT_RECENCY_WEIGHT = 1.0
+DEFAULT_PATH_SYMBOL_WEIGHT = 3.5
 
 
 def _copy_default_scoring_config() -> dict[str, Any]:
@@ -156,6 +158,8 @@ def _copy_default_scoring_config() -> dict[str, Any]:
         "primary_keyword_search_floor": int(DEFAULT_PRIMARY_KEYWORD_SEARCH_FLOOR),
         "secondary_keyword_search_floor": int(DEFAULT_SECONDARY_KEYWORD_SEARCH_FLOOR),
         "soft_budget_multiplier": float(DEFAULT_SOFT_BUDGET_MULTIPLIER),
+        "path_symbol_weight": float(DEFAULT_PATH_SYMBOL_WEIGHT),
+        "synonyms": {},
     }
 
 
@@ -256,6 +260,7 @@ def _apply_scoring_overrides(base: dict[str, Any], overrides: dict[str, Any]) ->
         "graph_default_boost",
         "recency_weight",
         "soft_budget_multiplier",
+        "path_symbol_weight",
     )
     for key in scalar_float_keys:
         if key not in overrides:
@@ -284,6 +289,38 @@ def _apply_scoring_overrides(base: dict[str, Any], overrides: dict[str, Any]) ->
     return changed
 
 
+def _merge_synonyms(base: dict[str, Any], config: dict[str, Any] | None) -> bool:
+    if not isinstance(config, dict):
+        return False
+    raw = config.get("synonyms")
+    if raw is None:
+        raw = config.get("search_synonyms")
+    if not isinstance(raw, dict):
+        return False
+
+    synonyms = dict(base.get("synonyms", {}))
+    changed = False
+    for raw_key, raw_values in raw.items():
+        key = str(raw_key).strip().lower()
+        if not key:
+            continue
+        values: list[str] = []
+        if isinstance(raw_values, str):
+            values = [raw_values]
+        elif isinstance(raw_values, list):
+            values = [str(item) for item in raw_values]
+        clean_values = [item.strip().lower() for item in values if str(item).strip()]
+        if not clean_values:
+            continue
+        previous = set(str(item).strip().lower() for item in synonyms.get(key, []) if str(item).strip())
+        next_values = sorted(previous | set(clean_values))
+        if next_values != sorted(previous):
+            synonyms[key] = next_values
+            changed = True
+    base["synonyms"] = synonyms
+    return changed
+
+
 def resolve_context_scoring_config(
     *,
     runtime_config: dict[str, Any] | None = None,
@@ -293,14 +330,46 @@ def resolve_context_scoring_config(
     source = "defaults"
 
     scan_section = _extract_scoring_section(scan_config)
-    if _apply_scoring_overrides(resolved, scan_section):
+    if _apply_scoring_overrides(resolved, scan_section) or _merge_synonyms(resolved, scan_config) or _merge_synonyms(resolved, scan_section):
         source = "scan_config"
 
     runtime_section = _extract_scoring_section(runtime_config)
-    if _apply_scoring_overrides(resolved, runtime_section):
+    if _apply_scoring_overrides(resolved, runtime_section) or _merge_synonyms(resolved, runtime_config) or _merge_synonyms(resolved, runtime_section):
         source = "runtime_config"
 
     return resolved, source
+
+
+def _expand_keywords_with_synonyms(keywords: list[str], synonyms: dict[str, Any]) -> list[str]:
+    if not synonyms:
+        return keywords
+    expanded: list[str] = []
+    seen: set[str] = set()
+
+    def append(term: str) -> None:
+        clean = term.strip().lower()
+        if not clean or clean in seen:
+            return
+        seen.add(clean)
+        expanded.append(clean)
+
+    synonym_map: dict[str, set[str]] = {}
+    for raw_key, raw_values in synonyms.items():
+        key = str(raw_key).strip().lower()
+        if not key:
+            continue
+        values = [str(item).strip().lower() for item in raw_values if str(item).strip()] if isinstance(raw_values, list) else []
+        family = {key, *values}
+        for item in family:
+            synonym_map.setdefault(item, set()).update(family - {item})
+
+    for keyword in keywords:
+        append(keyword)
+        for synonym in sorted(synonym_map.get(keyword, set())):
+            append(synonym)
+            for piece in _extract_keywords(synonym):
+                append(piece)
+    return expanded
 
 
 def _extract_keywords(query: str) -> list[str]:
@@ -425,17 +494,29 @@ def _keyword_match_breakdown(
     tags_score = 0.0
     search_terms_score = 0.0
     learning_note_score = 0.0
+    matched_terms: list[str] = []
+    matched_fields: set[str] = set()
     for keyword in keywords:
         if keyword in title:
             title_score += title_weight
+            matched_terms.append(keyword)
+            matched_fields.add("title")
         if keyword in summary:
             summary_score += summary_weight
+            matched_terms.append(keyword)
+            matched_fields.add("summary")
         if keyword in tags:
             tags_score += tags_weight
+            matched_terms.append(keyword)
+            matched_fields.add("tags")
         if keyword in search_text or keyword in search_terms:
             search_terms_score += search_terms_weight
+            matched_terms.append(keyword)
+            matched_fields.add("search_terms")
         if keyword in learning_text:
             learning_note_score += learning_note_weight
+            matched_terms.append(keyword)
+            matched_fields.add("learning_note")
 
     total = title_score + summary_score + tags_score + search_terms_score + learning_note_score
     return {
@@ -444,8 +525,75 @@ def _keyword_match_breakdown(
         "tags": round(tags_score, 3),
         "search_terms": round(search_terms_score, 3),
         "learning_note": round(learning_note_score, 3),
+        "matched_terms": sorted(set(matched_terms)),
+        "matched_fields": sorted(matched_fields),
         "total": round(total, 3),
     }
+
+
+def _query_path_symbol_terms(query: str) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for token in re.findall(r"[A-Za-z0-9_./\\-]+", query):
+        clean = token.strip().strip(".,;:()[]{}<>\"'").replace("\\", "/")
+        if len(clean) < 3 or clean in seen:
+            continue
+        if "/" not in clean and "." not in clean and "_" not in clean:
+            continue
+        seen.add(clean)
+        terms.append(clean)
+    return terms
+
+
+def _path_symbol_breakdown(node_id: str, node: dict[str, Any], query: str, *, scoring: dict[str, Any]) -> dict[str, Any]:
+    weight = float(scoring.get("path_symbol_weight", DEFAULT_PATH_SYMBOL_WEIGHT))
+    terms = _query_path_symbol_terms(query)
+    if not terms:
+        return {"matched_terms": [], "matched_fields": [], "total": 0.0}
+
+    node_id_l = node_id.lower().replace("\\", "/")
+    title = str(node.get("title", "")).lower()
+    summary = str(node.get("summary", "")).lower()
+    search_terms = [str(item).strip().lower() for item in node.get("search_terms", []) if str(item).strip()]
+    search_text = " ".join(search_terms)
+
+    total = 0.0
+    matched_terms: list[str] = []
+    matched_fields: set[str] = set()
+    for term in terms:
+        lowered = term.lower()
+        if lowered in node_id_l or node_id_l.endswith(lowered):
+            total += weight
+            matched_terms.append(term)
+            matched_fields.add("id")
+        basename = node_id_l.rsplit("/", 1)[-1]
+        if lowered == basename or lowered == _basename_stem(basename):
+            total += weight * 0.6
+            matched_terms.append(term)
+            matched_fields.add("id")
+        if lowered in title:
+            total += weight * 0.5
+            matched_terms.append(term)
+            matched_fields.add("title")
+        if lowered in summary:
+            total += weight * 0.4
+            matched_terms.append(term)
+            matched_fields.add("summary")
+        if lowered in search_text or lowered in search_terms:
+            total += weight
+            matched_terms.append(term)
+            matched_fields.add("search_terms")
+    return {
+        "matched_terms": sorted(set(matched_terms)),
+        "matched_fields": sorted(matched_fields),
+        "total": round(total, 3),
+    }
+
+
+def _basename_stem(name: str) -> str:
+    if "." not in name:
+        return name
+    return name.rsplit(".", 1)[0]
 
 
 def _type_status_breakdown(
@@ -571,6 +719,172 @@ def _deferred_nodes(
             if len(deferred) >= 8:
                 return deferred
     return deferred
+
+
+DISCOVERY_REASON_CODES = {
+    "shared_dependencies",
+    "shared_links",
+    "stale_but_related",
+    "orphan_nearby",
+    "recently_updated_neighbor",
+    "same_type_same_project",
+}
+
+
+def _discovery_candidate(
+    node_id: str,
+    node_map: dict[str, dict[str, Any]],
+    *,
+    reason_code: str,
+    score_parts: dict[str, float],
+    evidence: list[str] | None = None,
+) -> dict[str, Any]:
+    score = round(sum(float(value) for value in score_parts.values()), 3)
+    reasons = {
+        "shared_dependencies": "shares dependency or prerequisite edges with the main context",
+        "shared_links": "near the main context through resolved links",
+        "stale_but_related": "related context is stale enough to review before closing assumptions",
+        "orphan_nearby": "orphaned node appears lexically near this task",
+        "recently_updated_neighbor": "recently updated neighbor may contain fresh context",
+        "same_type_same_project": "same type/project as a selected node but outside the main read path",
+    }
+    return {
+        "id": node_id,
+        "title": _node_title(node_map, node_id),
+        "type": _node_type(node_map, node_id),
+        "status": _node_status(node_map, node_id),
+        "reason": reasons.get(reason_code, reason_code),
+        "reason_code": reason_code,
+        "score": score,
+        "score_breakdown": {**{key: round(value, 3) for key, value in score_parts.items()}, "total": score},
+        "evidence": evidence or [],
+    }
+
+
+def _discovery_candidates(
+    query: str,
+    selected_nodes: list[dict[str, Any]],
+    deferred_nodes: list[dict[str, Any]],
+    db_path: str,
+    node_map: dict[str, dict[str, Any]],
+    *,
+    excluded_ids: set[str] | None = None,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    selected_ids = {str(item.get("id", "")).strip() for item in selected_nodes if str(item.get("id", "")).strip()}
+    blocked_ids = set(selected_ids)
+    if excluded_ids:
+        blocked_ids.update(node_id for node_id in excluded_ids if node_id)
+    if not selected_ids:
+        return []
+
+    candidates: dict[str, dict[str, Any]] = {}
+
+    def add(item: dict[str, Any]) -> None:
+        node_id = str(item.get("id", "")).strip()
+        if not node_id or node_id in blocked_ids:
+            return
+        if node_id not in node_map:
+            return
+        existing = candidates.get(node_id)
+        if existing is None or float(item.get("score", 0.0) or 0.0) > float(existing.get("score", 0.0) or 0.0):
+            candidates[node_id] = item
+
+    for index, item in enumerate(deferred_nodes[:8], start=1):
+        node_id = str(item.get("id", "")).strip()
+        if not node_id:
+            continue
+        add(
+            _discovery_candidate(
+                node_id,
+                node_map,
+                reason_code="shared_links",
+                score_parts={"graph_proximity": max(0.2, 1.2 - index * 0.1)},
+                evidence=[str(item.get("reason", "")).strip()],
+            )
+        )
+
+    selected_nodes_meta = [node_map.get(node_id, {}) for node_id in selected_ids]
+    selected_type_project = {
+        (
+            str(node.get("type", "")).strip().lower(),
+            str(node.get("project", "")).strip().lower(),
+        )
+        for node in selected_nodes_meta
+    }
+    for node_id, node in node_map.items():
+        if node_id in blocked_ids:
+            continue
+        pair = (
+            str(node.get("type", "")).strip().lower(),
+            str(node.get("project", "")).strip().lower(),
+        )
+        if pair not in selected_type_project or not pair[0]:
+            continue
+        recency = _recency_score(str(node.get("updated", "")))
+        if recency > 0:
+            add(
+                _discovery_candidate(
+                    node_id,
+                    node_map,
+                    reason_code="recently_updated_neighbor",
+                    score_parts={"same_type_project": 0.6, "recency": recency},
+                    evidence=[f"type={pair[0]}", f"project={pair[1] or 'unknown'}"],
+                )
+            )
+        else:
+            add(
+                _discovery_candidate(
+                    node_id,
+                    node_map,
+                    reason_code="same_type_same_project",
+                    score_parts={"same_type_project": 0.5},
+                    evidence=[f"type={pair[0]}", f"project={pair[1] or 'unknown'}"],
+                )
+            )
+
+    stale_ids = {str(item.get("id", "")).strip() for item in list_stale_nodes(db_path, days=30)}
+    for edge in list_edges_for_nodes(db_path, selected_ids, resolved_only=True):
+        src = str(edge.get("from", "")).strip()
+        dst = str(edge.get("to", "")).strip()
+        other = dst if src in selected_ids else src
+        if not other or other in blocked_ids or other not in node_map:
+            continue
+        reason_code = "stale_but_related" if other in stale_ids else "shared_dependencies"
+        edge_type = str(edge.get("type", "")).strip() or "links_to"
+        edge_score = 0.9 if edge_type == "depends_on" else 0.7
+        stale_score = 0.5 if other in stale_ids else 0.0
+        add(
+            _discovery_candidate(
+                other,
+                node_map,
+                reason_code=reason_code,
+                score_parts={"edge": edge_score, "stale": stale_score},
+                evidence=[f"{edge_type}:{src}->{dst}"],
+            )
+        )
+
+    query_terms = set(_query_keywords(query))
+    for orphan in list_orphan_nodes(db_path):
+        node_id = str(orphan.get("id", "")).strip()
+        if not node_id or node_id in blocked_ids or node_id not in node_map:
+            continue
+        haystack = " ".join([_node_title(node_map, node_id), _node_summary(node_map, node_id), " ".join(_node_tags(node_map, node_id))]).lower()
+        matched = sorted(term for term in query_terms if term and term in haystack)
+        if not matched:
+            continue
+        add(
+            _discovery_candidate(
+                node_id,
+                node_map,
+                reason_code="orphan_nearby",
+                score_parts={"orphan": 0.7, "lexical": min(1.0, len(matched) * 0.25)},
+                evidence=matched[:4],
+            )
+        )
+
+    ranked = sorted(candidates.values(), key=lambda item: (-float(item.get("score", 0.0) or 0.0), str(item.get("id", ""))))
+    return ranked[: max(0, int(limit))]
 
 
 def _confidence(selected_nodes: list[dict[str, Any]]) -> float:
@@ -807,6 +1121,7 @@ def _build_actionable_digest(
     selected_nodes: list[dict[str, Any]],
     recommended_read_order: list[dict[str, Any]],
     deferred_nodes: list[dict[str, Any]],
+    discovery_candidates: list[dict[str, Any]],
     confidence: float,
     node_map: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
@@ -877,6 +1192,7 @@ def _build_actionable_digest(
         "relevant_task_history": relevant_task_history,
         "likely_code_entrypoints": likely_code_entrypoints,
         "known_guardrails": known_guardrails,
+        "discovery_candidates": discovery_candidates,
         "suggested_rg": suggested_rg,
         "context_gaps": context_gaps,
     }
@@ -903,6 +1219,7 @@ def _empty_actionable_digest(query: str, reason: str) -> dict[str, Any]:
         "relevant_task_history": [],
         "likely_code_entrypoints": [],
         "known_guardrails": [],
+        "discovery_candidates": [],
         "suggested_rg": suggested_rg,
         "context_gaps": [reason],
     }
@@ -912,6 +1229,56 @@ def project_actionable_digest(payload: dict[str, Any], digest: str) -> dict[str,
     if str(digest or "full").strip().lower() != "minimal":
         return payload
     return {key: payload.get(key, [] if key != "intent" else "") for key in MINIMAL_DIGEST_KEYS}
+
+
+def build_agent_prompt_pack(query: str, payload: dict[str, Any], role: str) -> dict[str, Any]:
+    clean_role = str(role or "").strip().lower()
+    if clean_role not in AGENT_PACK_ROLES:
+        clean_role = "worker"
+
+    read_order = [item for item in list(payload.get("recommended_read_order", []) or []) if isinstance(item, dict)]
+    discovery = [item for item in list(payload.get("discovery_candidates", []) or []) if isinstance(item, dict)]
+    digest = payload.get("actionable_digest") if isinstance(payload.get("actionable_digest"), dict) else {}
+    role_instructions = {
+        "worker": "Implement only the assigned slice, preserve existing contracts, and report changed files plus verification.",
+        "reviewer": "Review for correctness, regressions, contract compatibility, missing tests, and risky omissions.",
+        "commander": "Coordinate scope, decide read order, and split follow-up work into bounded tasks.",
+    }
+    required_reads = [
+        {
+            "id": str(item.get("id", "")),
+            "reason": str(item.get("reason", "")),
+            "source": str(item.get("source", "")),
+            "index": str(item.get("index", "")),
+        }
+        for item in read_order[:6]
+    ]
+    side_reads = [
+        {
+            "id": str(item.get("id", "")),
+            "reason_code": str(item.get("reason_code", "")),
+            "reason": str(item.get("reason", "")),
+            "index": str(item.get("index", "")),
+        }
+        for item in discovery[:3]
+    ]
+    suggested_rg = [item for item in list(digest.get("suggested_rg", []) or []) if isinstance(item, dict)]
+    prompt_lines = [
+        f"Role: {clean_role}",
+        f"Task/query: {query.strip()}",
+        role_instructions[clean_role],
+        "Read the required_reads first, then inspect discovery_candidates only if they can change the decision.",
+    ]
+    return {
+        "role": clean_role,
+        "query": query.strip(),
+        "instructions": role_instructions[clean_role],
+        "required_reads": required_reads,
+        "discovery_candidates": side_reads,
+        "actionable_digest": digest,
+        "suggested_rg": suggested_rg[:3],
+        "prompt": "\n".join(prompt_lines),
+    }
 
 
 def _normalize_digest_mode(digest: str) -> str:
@@ -1007,8 +1374,12 @@ def select_context(
     active_scoring = _copy_default_scoring_config()
     if isinstance(scoring_config, dict):
         _apply_scoring_overrides(active_scoring, scoring_config)
+        _merge_synonyms(active_scoring, scoring_config)
 
-    keywords = _extract_keywords(query)
+    keywords = _expand_keywords_with_synonyms(
+        _extract_keywords(query),
+        active_scoring.get("synonyms", {}) if isinstance(active_scoring.get("synonyms"), dict) else {},
+    )
     if not keywords:
         return {
             "query": query,
@@ -1016,11 +1387,13 @@ def select_context(
             "total_tokens": 0,
             "budget": int(budget),
             "recommended_read_order": [],
-            "recommended_next_actions": [],
-            "recommended_next_actions_v2": [],
-            "deferred_nodes": [],
-            "confidence": 0.0,
-            "why_this_set": [],
+        "recommended_next_actions": [],
+        "recommended_next_actions_v2": [],
+        "deferred_nodes": [],
+        "discovery_candidates": [],
+        "confidence": 0.0,
+        "why_this_set": [],
+        "budget_dropped_nodes": [],
             "actionable_digest": project_actionable_digest(
                 _empty_actionable_digest(query, "blank query: provide a task description"),
                 digest_mode,
@@ -1069,11 +1442,13 @@ def select_context(
             "total_tokens": 0,
             "budget": safe_budget,
             "recommended_read_order": [],
-            "recommended_next_actions": [],
-            "recommended_next_actions_v2": [],
-            "deferred_nodes": [],
-            "confidence": 0.0,
-            "why_this_set": [],
+                "recommended_next_actions": [],
+                "recommended_next_actions_v2": [],
+                "deferred_nodes": [],
+                "discovery_candidates": [],
+                "confidence": 0.0,
+                "why_this_set": [],
+                "budget_dropped_nodes": [],
             "actionable_digest": project_actionable_digest(
                 _empty_actionable_digest(
                     query,
@@ -1085,6 +1460,7 @@ def select_context(
 
     seed_ids = sorted(candidate_map.keys())
     graph_boost: dict[str, float] = {}
+    graph_reason: dict[str, list[str]] = {}
     linked_ids: set[str] = set(seed_ids)
     for edge in list_edges_for_nodes(db_path, seed_ids, resolved_only=True):
         src = str(edge.get("from", "")).strip()
@@ -1097,9 +1473,11 @@ def select_context(
             continue
         if src in seed_ids and dst not in seed_ids:
             graph_boost[dst] = graph_boost.get(dst, 0.0) + boost
+            graph_reason.setdefault(dst, []).append(f"{edge_type}:{src}->{dst}")
             linked_ids.add(dst)
         if dst in seed_ids and src not in seed_ids:
             graph_boost[src] = graph_boost.get(src, 0.0) + boost
+            graph_reason.setdefault(src, []).append(f"{edge_type}:{src}->{dst}")
             linked_ids.add(src)
 
     for linked_id in linked_ids:
@@ -1110,23 +1488,27 @@ def select_context(
     recency_weight = float(active_scoring.get("recency_weight", DEFAULT_RECENCY_WEIGHT))
     for node_id, node in candidate_map.items():
         keyword_breakdown = _keyword_match_breakdown(node, keywords, scoring=active_scoring)
+        path_symbol_breakdown = _path_symbol_breakdown(node_id, node, query, scoring=active_scoring)
         type_status_breakdown = _type_status_breakdown(node, scoring=active_scoring)
         recency_raw = _recency_score(str(node.get("updated", "")))
         recency = recency_raw * recency_weight
         graph = graph_boost.get(node_id, 0.0)
         total_score = (
             float(keyword_breakdown["total"])
+            + float(path_symbol_breakdown["total"])
             + float(type_status_breakdown["total"])
             + recency
             + graph
         )
         score_breakdown = {
             "keyword": keyword_breakdown,
+            "path_symbol": path_symbol_breakdown,
             "type_status": type_status_breakdown,
             "recency": round(recency, 3),
             "recency_raw": round(recency_raw, 3),
             "recency_weight": round(recency_weight, 3),
             "graph_boost": round(graph, 3),
+            "graph_reason": graph_reason.get(node_id, []),
             "config_source": scoring_config_source,
             "total": round(total_score, 3),
         }
@@ -1136,6 +1518,7 @@ def select_context(
 
     scan_root = get_scan_root(db_path, default=".")
     selected_nodes: list[dict[str, Any]] = []
+    budget_dropped_nodes: list[dict[str, Any]] = []
     total_tokens = 0
     soft_budget_multiplier = float(active_scoring.get("soft_budget_multiplier", DEFAULT_SOFT_BUDGET_MULTIPLIER))
     soft_cap = int(safe_budget * soft_budget_multiplier)
@@ -1148,6 +1531,16 @@ def select_context(
         projected = total_tokens + estimated_tokens
 
         if selected_nodes and projected > soft_cap:
+            budget_dropped_nodes.append(
+                {
+                    "id": node_id,
+                    "score": round(score, 3),
+                    "estimated_tokens": estimated_tokens,
+                    "budget_drop_reason": "soft_budget_exceeded",
+                    "projected_tokens": projected,
+                    "soft_cap": soft_cap,
+                }
+            )
             continue
 
         row: dict[str, Any] = {
@@ -1160,6 +1553,7 @@ def select_context(
                     "estimated_tokens": estimated_tokens,
                     "soft_cap": soft_cap,
                     "soft_budget_multiplier": round(soft_budget_multiplier, 3),
+                    "budget_drop_reason": None,
                 },
             },
             "estimated_tokens": estimated_tokens,
@@ -1175,6 +1569,7 @@ def select_context(
         "nodes": selected_nodes,
         "total_tokens": total_tokens,
         "budget": safe_budget,
+        "budget_dropped_nodes": budget_dropped_nodes[:10],
     }
     if not actionable:
         return payload
@@ -1183,6 +1578,7 @@ def select_context(
     read_order = _read_order(selected_nodes, db_path, node_map)
     read_order_ids = {str(item.get("id", "")).strip() for item in read_order}
     deferred = _deferred_nodes(selected_nodes, db_path, read_order_ids)
+    discovery = _discovery_candidates(query, selected_nodes, deferred, db_path, node_map, excluded_ids=read_order_ids)
     confidence = _confidence(selected_nodes)
     why_this_set = _why_this_set(selected_nodes, confidence, node_map)
     next_actions = _next_actions(query, read_order, confidence, node_map)
@@ -1192,6 +1588,7 @@ def select_context(
         selected_nodes,
         read_order,
         deferred,
+        discovery,
         confidence,
         node_map,
     )
@@ -1203,6 +1600,7 @@ def select_context(
             "recommended_next_actions": next_actions,
             "recommended_next_actions_v2": next_actions_v2,
             "deferred_nodes": deferred,
+            "discovery_candidates": discovery,
             "confidence": confidence,
             "why_this_set": why_this_set,
             "actionable_digest": actionable_digest,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -214,6 +215,16 @@ def _resolve_type(
 
 def _to_iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _fingerprint(file_path: Path) -> dict[str, Any]:
+    stat = file_path.stat()
+    digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    return {
+        "mtime_ns": int(stat.st_mtime_ns),
+        "size": int(stat.st_size),
+        "sha256": digest,
+    }
 
 
 def _is_noise_target(value: str) -> bool:
@@ -502,9 +513,11 @@ def build_index(
     edges: list[dict[str, Any]] = []
     edge_keys = set()
     warnings: list[dict[str, str]] = []
+    fingerprints: dict[str, dict[str, Any]] = {}
 
     for file_path in indexed_files:
         node_id = path_to_id[file_path]
+        fingerprints[node_id] = _fingerprint(file_path)
         suspicious_warning = _suspicious_index_warning(node_id)
         if suspicious_warning:
             warnings.append({"path": node_id, "error": suspicious_warning})
@@ -643,6 +656,7 @@ def build_index(
         "nodes": nodes,
         "edges": edges,
         "warnings": warnings,
+        "fingerprints": fingerprints,
     }
 
 

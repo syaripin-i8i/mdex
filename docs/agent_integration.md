@@ -32,7 +32,7 @@ Parse stdout or stderr as JSON before making decisions. New success and error pa
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/start.schema.json",
-  "contract_version": "0.3.0"
+  "contract_version": "0.4.0"
 }
 ```
 
@@ -40,7 +40,7 @@ Consumers should ignore unknown fields for forward compatibility.
 
 ## Schema Validation
 
-Schemas live in `schemas/`. Use `contract_schema` to select the expected schema. In 0.3.x, `contract_schema` and `contract_version` are required in success and error schemas.
+Schemas live in `schemas/`. Use `contract_schema` to select the expected schema. Since 0.3.x, `contract_schema` and `contract_version` are required in success and error schemas.
 
 Error payloads include a machine-readable `code` field. Switch on `code`; display `error` / `detail` to humans.
 

@@ -179,6 +179,21 @@ def _next_actions(
     return actions[:5]
 
 
+def _finish_suspicion_signals(impact_payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    def rows(key: str) -> list[dict[str, Any]]:
+        value = impact_payload.get(key, [])
+        if not isinstance(value, list):
+            return []
+        return [dict(item) for item in value if isinstance(item, dict)]
+
+    return {
+        "suspiciously_unupdated": rows("stale_watch"),
+        "likely_missing_links": rows("isolated_changes"),
+        "unreviewed_neighbors": rows("unusual_neighbors"),
+        "decision_gap_candidates": rows("missing_decision_links"),
+    }
+
+
 def _noop_state(
     *,
     dry_run: bool,
@@ -294,6 +309,7 @@ def run_finish(
         },
         "changed_files": changed_rows,
         "impact": impact_payload,
+        "suspicion_signals": _finish_suspicion_signals(impact_payload),
         "enrich_candidates": enrich_candidates,
         "applied_enrichments": applied_enrichments,
         "scan": scan_payload,

@@ -7,6 +7,23 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-01
+
+### Added
+
+- `context` and `start` support `--include repo,task,memory` for additive multi-index payloads.
+- `context` and `start` emit `discovery_candidates`, stable match explanations, path/symbol scoring, and budget-drop audit rows.
+- `context --for-agent` and `start --for-agent` emit compact prompt packs for `worker`, `reviewer`, and `commander` subagents.
+- Scan configs may define repo-local `synonyms` / `search_synonyms` for mixed CJK/English query expansion.
+- `mdex status` summarizes freshness/doctor health across selected indexes; `doctor` now reports index freshness, config paths, stale overrides, `.DS_Store`, large JSON, and archive-task hygiene.
+- `impact` emits anomaly lanes, and `finish --dry-run` exposes `suspicion_signals` for closeout review.
+- `scan --incremental` records mtime/size/SHA-256 fingerprints and reports changed/unchanged index rows.
+- Actionable digest full mode includes `discovery_candidates`; minimal mode remains compact.
+
+### Changed
+
+- Contract version bumped to `0.4.0` for backward-compatible schema additions.
+
 ## [0.3.0] - 2026-05-01
 
 ### Added

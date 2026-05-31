@@ -9,7 +9,7 @@ from typing import Any
 
 from mdex.builder import build_index
 from mdex.contract import with_contract_metadata, with_error_contract
-from mdex.context import resolve_context_scoring_config, select_context
+from mdex.context import build_agent_prompt_pack, resolve_context_scoring_config, select_context
 from mdex.dbresolve import (
     DbResolutionError,
     RuntimeContext,
@@ -24,6 +24,7 @@ from mdex.finish import FinishError, run_finish
 from mdex.gittools import GitError, collect_changed_files
 from mdex.impact import build_impact_report
 from mdex.indexer import write_json, write_sqlite
+from mdex.multiindex import build_multi_context_payload, build_multi_start_payload, resolve_index_specs
 from mdex.observe import record_command_event
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
@@ -252,7 +253,22 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             else:
                 output_path = (context.repo_root / ".mdex" / "mdex_index.json").resolve()
 
+        previous_fingerprints: dict[str, Any] = {}
+        if bool(getattr(args, "incremental", False)) and Path(db_path).exists():
+            try:
+                from mdex.store import list_index_metadata
+
+                previous_raw = list_index_metadata(db_path).get("fingerprints", "{}")
+                loaded = json.loads(previous_raw)
+                if isinstance(loaded, dict):
+                    previous_fingerprints = loaded
+            except Exception:
+                previous_fingerprints = {}
+
         index = build_index(scan_roots, config, strict=bool(args.strict))
+        fingerprints = index.get("fingerprints", {}) if isinstance(index.get("fingerprints"), dict) else {}
+        unchanged = sum(1 for node_id, value in fingerprints.items() if previous_fingerprints.get(node_id) == value)
+        changed_or_new = max(0, len(fingerprints) - unchanged)
         index_warnings = [item for item in index.get("warnings", []) if isinstance(item, dict)]
         for warning in scan_root_warnings:
             index_warnings.append({"path": "scan_config", "error": warning})
@@ -280,6 +296,13 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             "db": db_path,
         },
         "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
+        "incremental": {
+            "requested": bool(getattr(args, "incremental", False)),
+            "strategy": "mtime_size_sha256_manifest",
+            "unchanged": unchanged if bool(getattr(args, "incremental", False)) else 0,
+            "changed_or_new": changed_or_new if bool(getattr(args, "incremental", False)) else node_count,
+            "removed": len(set(previous_fingerprints) - set(fingerprints)) if bool(getattr(args, "incremental", False)) else 0,
+        },
     }
     _emit_payload(with_contract_metadata(payload, "scan"), pretty=True)
     return 0
@@ -292,6 +315,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     db_path = str(Path(str(db_info["path"])))
     repo_root_raw = str(db_info.get("repo_root", "") or "").strip()
     repo_root = Path(repo_root_raw) if repo_root_raw else None
+    config_path_raw = str(db_info.get("config_path", "") or "").strip()
+    config_path = Path(config_path_raw) if config_path_raw else None
     json_index_path = _resolve_scan_json_path(db_info, getattr(args, "json_index", None))
 
     try:
@@ -299,6 +324,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             db_path,
             repo_root=repo_root,
             json_index_path=json_index_path,
+            config_path=config_path,
+            db_source=str(db_info.get("source", "unknown")),
         )
     except Exception as exc:
         _emit_error("doctor failed", detail=str(exc))
@@ -306,6 +333,80 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
     _emit_payload(with_contract_metadata(payload, "doctor"), pretty=True)
     return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    db_info = _resolve_db(args, must_exist=True)
+    if db_info is None:
+        return 2
+    repo_root_raw = str(db_info.get("repo_root", "") or "").strip()
+    repo_root = Path(repo_root_raw) if repo_root_raw else None
+    config_path_raw = str(db_info.get("config_path", "") or "").strip()
+    config_path = Path(config_path_raw) if config_path_raw else None
+    json_index_path = _resolve_scan_json_path(db_info, getattr(args, "json_index", None))
+
+    reports: dict[str, Any] = {}
+    for spec in resolve_index_specs(db_info, getattr(args, "include", "repo")):
+        alias = str(spec["alias"])
+        if not bool(spec.get("exists", False)):
+            reports[alias] = {
+                "status": "warning",
+                "index_health": {
+                    "alias": alias,
+                    "db": str(spec.get("path", "")),
+                    "source": str(spec.get("source", "")),
+                    "config_path": str(config_path) if config_path is not None else "",
+                    "ready": False,
+                    "fresh": False,
+                    "stale": True,
+                    "reason": "index_db_missing",
+                },
+                "checks": [],
+                "summary": {"error": 0, "warning": 1, "info": 0},
+                "recommended_next_actions": ["run mdex scan for missing index"],
+            }
+            continue
+        reports[alias] = build_doctor_report(
+            str(spec["path"]),
+            repo_root=repo_root,
+            json_index_path=json_index_path if alias == "repo" else None,
+            config_path=config_path,
+            db_source=str(spec.get("source", "unknown")),
+        )
+
+    status = "ok"
+    if any(str(report.get("status", "ok")) == "error" for report in reports.values() if isinstance(report, dict)):
+        status = "error"
+    elif any(str(report.get("status", "ok")) == "warning" for report in reports.values() if isinstance(report, dict)):
+        status = "warning"
+
+    payload = {
+        "status": status,
+        "summary": {
+            "error": sum(int(report.get("summary", {}).get("error", 0) or 0) for report in reports.values() if isinstance(report, dict)),
+            "warning": sum(int(report.get("summary", {}).get("warning", 0) or 0) for report in reports.values() if isinstance(report, dict)),
+            "info": sum(int(report.get("summary", {}).get("info", 0) or 0) for report in reports.values() if isinstance(report, dict)),
+        },
+        "checks": [],
+        "indexes": reports,
+        "recommended_next_actions": _dedupe_actions(
+            [action for report in reports.values() if isinstance(report, dict) for action in list(report.get("recommended_next_actions", []) or [])]
+        ),
+    }
+    _emit_payload(with_contract_metadata(payload, "status"), pretty=True)
+    return 0
+
+
+def _dedupe_actions(actions: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for action in actions:
+        text = str(action).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        output.append(text)
+    return output
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -566,20 +667,39 @@ def _cmd_context(args: argparse.Namespace) -> int:
     scoring_config, scoring_source = _resolve_context_scoring(db_info)
 
     try:
-        result = select_context(
-            args.query,
-            db_path,
-            budget=int(args.budget),
-            limit=int(args.limit),
-            include_content=bool(args.include_content),
-            actionable=bool(args.actionable),
-            digest=str(args.digest),
-            scoring_config=scoring_config,
-            scoring_config_source=scoring_source,
-        )
+        include = str(getattr(args, "include", "repo") or "repo")
+        if include.strip().lower() in {"repo", ""}:
+            result = select_context(
+                args.query,
+                db_path,
+                budget=int(args.budget),
+                limit=int(args.limit),
+                include_content=bool(args.include_content),
+                actionable=bool(args.actionable),
+                digest=str(args.digest),
+                scoring_config=scoring_config,
+                scoring_config_source=scoring_source,
+            )
+        else:
+            result = build_multi_context_payload(
+                args.query,
+                db_info,
+                include=include,
+                budget=int(args.budget),
+                limit=int(args.limit),
+                include_content=bool(args.include_content),
+                actionable=bool(args.actionable),
+                digest=str(args.digest),
+                scoring_config=scoring_config,
+                scoring_config_source=scoring_source,
+            )
     except Exception as exc:
         _emit_error("context selection failed", detail=str(exc))
         return 2
+
+    for_agent = str(getattr(args, "for_agent", "") or "").strip()
+    if for_agent:
+        result["agent_prompt_pack"] = build_agent_prompt_pack(str(args.query), result, for_agent)
 
     _emit_payload(with_contract_metadata(result, "context"), pretty=True)
     return 0
@@ -593,20 +713,38 @@ def _cmd_start(args: argparse.Namespace) -> int:
     scoring_config, scoring_source = _resolve_context_scoring(db_info)
 
     try:
-        payload = build_start_payload(
-            args.task,
-            db_path,
-            db_source=str(db_info.get("source", "unknown")),
-            budget=int(args.budget),
-            limit=int(args.limit),
-            include_content=bool(args.include_content),
-            digest=str(args.digest),
-            scoring_config=scoring_config,
-            scoring_config_source=scoring_source,
-        )
+        include = str(getattr(args, "include", "repo") or "repo")
+        if include.strip().lower() in {"repo", ""}:
+            payload = build_start_payload(
+                args.task,
+                db_path,
+                db_source=str(db_info.get("source", "unknown")),
+                budget=int(args.budget),
+                limit=int(args.limit),
+                include_content=bool(args.include_content),
+                digest=str(args.digest),
+                scoring_config=scoring_config,
+                scoring_config_source=scoring_source,
+            )
+        else:
+            payload = build_multi_start_payload(
+                args.task,
+                db_info,
+                include=include,
+                budget=int(args.budget),
+                limit=int(args.limit),
+                include_content=bool(args.include_content),
+                digest=str(args.digest),
+                scoring_config=scoring_config,
+                scoring_config_source=scoring_source,
+            )
     except Exception as exc:
         _emit_error("start failed", detail=str(exc))
         return 2
+
+    for_agent = str(getattr(args, "for_agent", "") or "").strip()
+    if for_agent:
+        payload["agent_prompt_pack"] = build_agent_prompt_pack(str(args.task), payload, for_agent)
 
     _emit_payload(with_contract_metadata(payload, "start"), pretty=True)
     return 0
@@ -779,12 +917,19 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--db", help="Output SQLite file path")
     scan_parser.add_argument("--config", help="Path to scan config JSON")
     scan_parser.add_argument("--strict", action="store_true", help="Fail fast when any indexed file cannot be parsed")
+    scan_parser.add_argument("--incremental", action="store_true", help="Record and report mtime/content-hash deltas against the previous index")
     scan_parser.set_defaults(func=_cmd_scan)
 
     doctor_parser = subparsers.add_parser("doctor", help="Inspect index hygiene and generated artifact health")
     doctor_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     doctor_parser.add_argument("--json-index", help="Scan JSON output path to compare with SQLite metadata")
     doctor_parser.set_defaults(func=_cmd_doctor)
+
+    status_parser = subparsers.add_parser("status", help="Summarize freshness and doctor status for one or more indexes")
+    status_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
+    status_parser.add_argument("--json-index", help="Scan JSON output path to compare with SQLite metadata")
+    status_parser.add_argument("--include", default="repo", help="Comma-separated indexes to inspect, for example repo,task,memory")
+    status_parser.set_defaults(func=_cmd_status)
 
     list_parser = subparsers.add_parser("list", help="List nodes with optional filters")
     list_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
@@ -841,6 +986,8 @@ def _build_parser() -> argparse.ArgumentParser:
     context_parser.add_argument("--budget", type=int, default=4000, help="Token budget (soft)")
     context_parser.add_argument("--limit", type=int, default=10, help="Maximum nodes to return")
     context_parser.add_argument("--actionable", action="store_true", help="Return action-oriented output")
+    context_parser.add_argument("--include", default="repo", help="Comma-separated indexes to query, for example repo,task,memory")
+    context_parser.add_argument("--for-agent", choices=["worker", "reviewer", "commander"], help="Include a compact prompt pack for a subagent role")
     context_parser.add_argument(
         "--digest",
         choices=["minimal", "full"],
@@ -859,6 +1006,8 @@ def _build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     start_parser.add_argument("--budget", type=int, default=4000, help="Token budget (soft)")
     start_parser.add_argument("--limit", type=int, default=10, help="Maximum nodes to consider")
+    start_parser.add_argument("--include", default="repo", help="Comma-separated indexes to query, for example repo,task,memory")
+    start_parser.add_argument("--for-agent", choices=["worker", "reviewer", "commander"], help="Include a compact prompt pack for a subagent role")
     start_parser.add_argument(
         "--digest",
         choices=["minimal", "full"],

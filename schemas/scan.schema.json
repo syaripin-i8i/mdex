@@ -90,6 +90,38 @@
         },
         "additionalProperties": true
       }
+    },
+    "incremental": {
+      "type": "object",
+      "description": "Incremental scan manifest comparison summary.",
+      "required": [
+        "requested",
+        "strategy",
+        "unchanged",
+        "changed_or_new",
+        "removed"
+      ],
+      "properties": {
+        "requested": {
+          "type": "boolean"
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changed_or_new": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true
