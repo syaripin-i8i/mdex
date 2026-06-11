@@ -324,7 +324,11 @@ read order と source of truth は同義ではありません。
 
 ## Setup
 
-Current GitHub source install:
+```bash
+python -m pip install mdex-cli
+```
+
+GitHub source install:
 
 ```bash
 python -m pip install git+https://github.com/syaripin-i8i/mdex.git
@@ -335,12 +339,6 @@ Local checkout install:
 ```bash
 python -m pip install -e .
 python -m pip install -e ".[dev]"
-```
-
-After public PyPI publication:
-
-```bash
-python -m pip install mdex-cli
 ```
 
 ロック依存で開発環境を再現する場合:
