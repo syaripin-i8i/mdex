@@ -17,6 +17,15 @@ until PyPI Trusted Publisher registration is complete.
 
 1. Update `pylock.toml`:
    - `python -m pip lock -e ".[dev]" -o pylock.toml`
+   - Regenerate only on an environment that yields the dependency superset
+     (historically Windows + a recent supported Python). `pip lock` resolves
+     the current environment only, and `install_from_pylock.py` filters by
+     marker at install time, so a lock generated on macOS/Linux silently drops
+     Windows-only packages (`colorama`, `pywin32-ctypes`) and can break the
+     Windows CI lane.
+   - Without a Windows environment, keep the committed lock and apply
+     surgical version bumps, or move to a multi-environment lock generator.
+   - `export_release_hashes.py` requires Python >= 3.11 (stdlib `tomllib`).
 2. Update release hash catalog:
    - `python .github/scripts/export_release_hashes.py --lock pylock.toml --output .github/locks/pypi_release_hashes.json`
 3. Update `CHANGELOG.md`.
