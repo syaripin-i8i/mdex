@@ -1,0 +1,4 @@
+# Sponsor button configuration.
+# The "github" entry activates automatically once the GitHub Sponsors
+# account for this owner is approved; it is inert until then.
+github: [syaripin-i8i]
