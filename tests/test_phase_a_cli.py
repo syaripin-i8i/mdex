@@ -262,6 +262,48 @@ def test_scan_cli_root_overrides_scan_roots_config(tmp_path: Path) -> None:
     assert "x.md" not in ids
 
 
+@pytest.mark.parametrize("node_id_root_flag", ["--node-id-root", "--id-root"])
+def test_scan_node_id_root_preserves_repo_relative_ids_for_config_scan_roots(
+    tmp_path: Path,
+    node_id_root_flag: str,
+) -> None:
+    repo = tmp_path / "scan_node_id_root_repo"
+    repo.mkdir()
+    (repo / "docs" / "tasks").mkdir(parents=True)
+    (repo / "docs" / "tasks" / "T20260701000000.md").write_text(
+        "# Task\n\nSee `CLAUDE.md`.\n",
+        encoding="utf-8",
+    )
+    (repo / "CLAUDE.md").write_text("# Claude\n", encoding="utf-8")
+    (repo / "control").mkdir(parents=True, exist_ok=True)
+    _write_json(
+        repo / "control" / "scan_config.json",
+        {
+            "scan_roots": ["docs/tasks"],
+            "include_extensions": [".md"],
+            "exclude_patterns": [],
+            "node_type_map": {"task": ["tasks"]},
+            "summary_max_sentences": 2,
+            "summary_max_chars": 120,
+        },
+    )
+
+    result = _run_cli("scan", node_id_root_flag, ".", cwd=repo)
+    assert result.returncode == 0
+    listed = _run_cli("list", cwd=repo)
+    assert listed.returncode == 0
+    ids = {row["id"] for row in json.loads(listed.stdout)}
+    assert "docs/tasks/T20260701000000.md" in ids
+    assert "CLAUDE.md" not in ids
+
+    context = _run_cli("context", "Task Claude", "--actionable", cwd=repo)
+    assert context.returncode == 0
+    payload = json.loads(context.stdout)
+    read_ids = {row["id"] for row in payload["recommended_read_order"]}
+    assert "docs/tasks/T20260701000000.md" in read_ids
+    assert "CLAUDE.md" not in read_ids
+
+
 def test_scan_warn_continue_with_malformed_file(tmp_path: Path) -> None:
     repo = tmp_path / "scan_warn_continue_repo"
     repo.mkdir()

@@ -473,8 +473,11 @@ def build_index(
     config: dict[str, Any],
     *,
     strict: bool = False,
+    node_id_root: str | Path | None = None,
 ) -> dict[str, Any]:
     root_path, scan_roots = _normalize_root_inputs(root)
+    if node_id_root is not None:
+        root_path = Path(node_id_root).resolve()
     exclude_patterns = _normalize_str_list(config.get("exclude_patterns"))
     include_extensions = _normalize_extensions(config.get("include_extensions"))
     node_type_map = config.get("node_type_map") or {}

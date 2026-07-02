@@ -265,7 +265,8 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             except Exception:
                 previous_fingerprints = {}
 
-        index = build_index(scan_roots, config, strict=bool(args.strict))
+        node_id_root = Path(args.node_id_root).resolve() if args.node_id_root else None
+        index = build_index(scan_roots, config, strict=bool(args.strict), node_id_root=node_id_root)
         fingerprints = index.get("fingerprints", {}) if isinstance(index.get("fingerprints"), dict) else {}
         unchanged = sum(1 for node_id, value in fingerprints.items() if previous_fingerprints.get(node_id) == value)
         changed_or_new = max(0, len(fingerprints) - unchanged)
@@ -913,6 +914,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     scan_parser = subparsers.add_parser("scan", help="Scan indexable files and build an index")
     scan_parser.add_argument("--root", help="Directory to scan")
+    scan_parser.add_argument(
+        "--node-id-root",
+        "--id-root",
+        dest="node_id_root",
+        help="Base directory for node ids when scanning one or more subdirectories",
+    )
     scan_parser.add_argument("--output", help="Output JSON file path")
     scan_parser.add_argument("--db", help="Output SQLite file path")
     scan_parser.add_argument("--config", help="Path to scan config JSON")
