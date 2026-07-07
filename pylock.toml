@@ -285,14 +285,14 @@ sha256 = "6e35b35f818b01f691643c6c611bc0902f2e92b46c18fffa77ae1e7c46e912e4"
 
 [[packages]]
 name = "msgpack"
-version = "1.1.2"
+version = "1.2.1"
 
 [[packages.wheels]]
-name = "msgpack-1.1.2-cp314-cp314-win_amd64.whl"
-url = "https://files.pythonhosted.org/packages/6e/f1/abd09c2ae91228c5f3998dbd7f41353def9eac64253de3c8105efa2082f7/msgpack-1.1.2-cp314-cp314-win_amd64.whl"
+name = "msgpack-1.2.1-cp314-cp314-win_amd64.whl"
+url = "https://files.pythonhosted.org/packages/16/f1/467b81e98b24dd3885d7b1857728797b4ffc76a7a7483af4fb321a07de3c/msgpack-1.2.1-cp314-cp314-win_amd64.whl"
 
 [packages.wheels.hashes]
-sha256 = "9ade919fac6a3e7260b7f64cea89df6bec59104987cbea34d34a2fa15d74310b"
+sha256 = "74847557e28ce71bd3c438a447ca90e4b507e997ddbdef8a12a7b283b86c156b"
 
 [[packages]]
 name = "nh3"
