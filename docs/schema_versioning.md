@@ -64,10 +64,12 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 - `0.4.0` adds optional multi-index, discovery lane, score explanation, budget audit, anomaly, suspicion, status, incremental-scan, and agent prompt-pack fields.
 - `scan.schema.json` adds optional `warnings` for per-file parse failures in non-strict scan mode.
 - `start` and `context --actionable` support `--digest minimal|full`. Minimal digest may omit full-only `actionable_digest` members.
+- `context` and `start` full actionable digests may include `relevant_artifacts` when an artifact index is queried.
 
 ## 0.4.0 Contract Additions
 
 - `context` and `start` may include `multi_index`, `per_index_context` / `per_index_start`, `discovery_candidates`, and `budget_dropped_nodes`.
+- `context` and `start` may include artifact `metadata` and `freshness` fields on node, read-order, discovery, and digest rows.
 - `context` and `start` may include `agent_prompt_pack` when `--for-agent` is requested.
 - Node `score_breakdown` now stabilizes `keyword.matched_terms`, `keyword.matched_fields`, `path_symbol`, `graph_reason`, and `token_cost.budget_drop_reason`.
 - `impact` may include `unusual_neighbors`, `isolated_changes`, `missing_decision_links`, and `unreflected_specs`.

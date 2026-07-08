@@ -163,6 +163,7 @@ def _fallback_actionable_digest(task: str) -> dict[str, Any]:
     return {
         "intent": task.strip(),
         "relevant_docs": [],
+        "relevant_artifacts": [],
         "relevant_task_history": [],
         "likely_code_entrypoints": [],
         "known_guardrails": [],

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from mdex.artifacts import DEFAULT_ARTIFACT_ROOTS, build_artifacts_index
 from mdex.builder import build_index
 from mdex.contract import with_contract_metadata, with_error_contract
 from mdex.context import build_agent_prompt_pack, resolve_context_scoring_config, select_context
@@ -304,6 +305,86 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             "changed_or_new": changed_or_new if bool(getattr(args, "incremental", False)) else node_count,
             "removed": len(set(previous_fingerprints) - set(fingerprints)) if bool(getattr(args, "incremental", False)) else 0,
         },
+    }
+    _emit_payload(with_contract_metadata(payload, "scan"), pretty=True)
+    return 0
+
+
+def _configured_index_spec(config: dict[str, Any], alias: str) -> dict[str, Any]:
+    indexes = config.get("indexes")
+    if isinstance(indexes, dict):
+        spec = indexes.get(alias)
+        if isinstance(spec, dict):
+            return spec
+    multi_index = config.get("multi_index")
+    if isinstance(multi_index, dict):
+        spec = multi_index.get(alias)
+        if isinstance(spec, dict):
+            return spec
+    return {}
+
+
+def _repo_path(context: RuntimeContext, value: str) -> Path:
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (context.repo_root / candidate).resolve()
+
+
+def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
+    try:
+        context = load_runtime_context(Path.cwd())
+        artifact_config = dict(_configured_index_spec(context.config, "artifacts"))
+
+        if getattr(args, "root", None):
+            roots = [Path(item).resolve() for item in args.root if str(item).strip()]
+        else:
+            raw_roots = artifact_config.get("roots")
+            if isinstance(raw_roots, list) and raw_roots:
+                roots = [_repo_path(context, str(item).strip()) for item in raw_roots if str(item).strip()]
+            else:
+                roots = [_repo_path(context, root) for root in DEFAULT_ARTIFACT_ROOTS]
+
+        if args.db:
+            db_path = Path(args.db).resolve()
+        else:
+            raw_db = artifact_config.get("db")
+            if isinstance(raw_db, str) and raw_db.strip():
+                db_path = _repo_path(context, raw_db.strip())
+            else:
+                db_path = (context.repo_root / ".mdex" / "artifacts.db").resolve()
+
+        if args.output:
+            output_path = Path(args.output).resolve()
+        else:
+            raw_output = artifact_config.get("output")
+            if isinstance(raw_output, str) and raw_output.strip():
+                output_path = _repo_path(context, raw_output.strip())
+            else:
+                output_path = (context.repo_root / ".mdex" / "artifacts.json").resolve()
+
+        index = build_artifacts_index(roots, artifact_config, node_id_root=context.repo_root)
+        write_sqlite(index, str(db_path))
+        write_json(index, str(output_path))
+    except Exception as exc:
+        _emit_error("scan-artifacts failed", detail=str(exc))
+        return 2
+
+    payload = {
+        "nodes": len(index.get("nodes", [])),
+        "edges": {
+            "total": 0,
+            "resolved": 0,
+            "unresolved": 0,
+            "resolution_rate": 0.0,
+        },
+        "output": {
+            "json": str(output_path),
+            "db": str(db_path),
+        },
+        "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
+        "index_kind": "artifacts",
+        "roots": [str(path) for path in roots],
     }
     _emit_payload(with_contract_metadata(payload, "scan"), pretty=True)
     return 0
@@ -926,6 +1007,15 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--strict", action="store_true", help="Fail fast when any indexed file cannot be parsed")
     scan_parser.add_argument("--incremental", action="store_true", help="Record and report mtime/content-hash deltas against the previous index")
     scan_parser.set_defaults(func=_cmd_scan)
+
+    scan_artifacts_parser = subparsers.add_parser(
+        "scan-artifacts",
+        help="Scan generated observation artifacts into a separate index",
+    )
+    scan_artifacts_parser.add_argument("--root", action="append", help="Artifact root to scan; may be repeated")
+    scan_artifacts_parser.add_argument("--output", help="Output JSON file path")
+    scan_artifacts_parser.add_argument("--db", help="Output SQLite file path")
+    scan_artifacts_parser.set_defaults(func=_cmd_scan_artifacts)
 
     doctor_parser = subparsers.add_parser("doctor", help="Inspect index hygiene and generated artifact health")
     doctor_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")

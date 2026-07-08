@@ -301,6 +301,7 @@ def test_list_nodes_reads_legacy_schema_without_search_metadata(tmp_path: Path) 
     assert rows[0]["id"] == "legacy.md"
     assert rows[0]["search_terms"] == []
     assert rows[0]["learning_note"] == {}
+    assert rows[0]["metadata"] == {}
 
 
 def test_update_node_summary_uses_source_argument(

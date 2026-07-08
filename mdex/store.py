@@ -103,6 +103,7 @@ def _node_select_sql(conn: sqlite3.Connection) -> str:
         "links_to_json",
         "depends_on_json",
         "relates_to_json",
+        "metadata_json" if _column_exists(conn, "nodes", "metadata_json") else "'{}' AS metadata_json",
     ]
     return f"SELECT {', '.join(columns)} FROM nodes"
 
@@ -344,6 +345,7 @@ def _row_to_node(row: sqlite3.Row) -> dict[str, Any]:
         "links_to": _as_json_list(row["links_to_json"]),
         "depends_on": _as_json_list(row["depends_on_json"]),
         "relates_to": _as_json_list(row["relates_to_json"]),
+        "metadata": _as_json_dict(row["metadata_json"]),
     }
 
 

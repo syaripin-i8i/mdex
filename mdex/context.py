@@ -459,6 +459,74 @@ def _recency_score(value: str) -> float:
     return 0.0
 
 
+def _node_metadata(node: dict[str, Any]) -> dict[str, Any]:
+    metadata = node.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _is_artifact_node(node: dict[str, Any]) -> bool:
+    metadata = _node_metadata(node)
+    node_type = str(node.get("type", "")).strip().lower()
+    return node_type == "artifact" or str(metadata.get("index", "")).strip().lower() == "artifacts"
+
+
+def _node_timestamp(node: dict[str, Any]) -> str:
+    metadata = _node_metadata(node)
+    generated_at = str(metadata.get("generated_at", "")).strip()
+    if generated_at:
+        return generated_at
+    return str(node.get("updated", "")).strip()
+
+
+def _freshness_for_node(node: dict[str, Any]) -> dict[str, Any]:
+    timestamp = _node_timestamp(node)
+    parsed = _parse_updated_timestamp(timestamp)
+    if parsed is None:
+        return {}
+
+    age_days = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 86400.0)
+    metadata = _node_metadata(node)
+    stale_after_raw = metadata.get("stale_after_days", 30 if _is_artifact_node(node) else 90)
+    try:
+        stale_after_days = int(stale_after_raw)
+    except (TypeError, ValueError):
+        stale_after_days = 30 if _is_artifact_node(node) else 90
+    stale_after_days = max(1, stale_after_days)
+    stale = age_days > stale_after_days
+    node_type = str(node.get("type", "")).strip().lower()
+    status = "stale" if stale else "fresh"
+    if stale and node_type in {"decision", "reference", "spec"}:
+        status = "stale_but_authoritative"
+
+    payload: dict[str, Any] = {
+        "generated_at": timestamp,
+        "age_days": round(age_days, 3),
+        "stale": stale,
+        "status": status,
+        "stale_after_days": stale_after_days,
+    }
+    kind = str(metadata.get("kind", "")).strip()
+    if kind:
+        payload["kind"] = kind
+    return payload
+
+
+def _with_node_context_fields(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    metadata = _node_metadata(node)
+    if metadata:
+        public_metadata = {
+            key: value
+            for key, value in metadata.items()
+            if key not in {"path"}
+        }
+        if public_metadata:
+            payload["metadata"] = public_metadata
+    freshness = _freshness_for_node(node)
+    if freshness:
+        payload["freshness"] = freshness
+    return payload
+
+
 def _keyword_match_breakdown(
     node: dict[str, Any],
     keywords: list[str],
@@ -664,13 +732,16 @@ def _read_order(
         seen.add(clean_id)
         node = node_map.get(clean_id, {})
         ordered.append(
-            {
-                "id": clean_id,
-                "title": str(node.get("title", "")),
-                "priority": len(ordered) + 1,
-                "source": source,
-                "reason": reason,
-            }
+            _with_node_context_fields(
+                {
+                    "id": clean_id,
+                    "title": str(node.get("title", "")),
+                    "priority": len(ordered) + 1,
+                    "source": source,
+                    "reason": reason,
+                },
+                node,
+            )
         )
 
     anchors = selected_nodes[:3]
@@ -748,7 +819,7 @@ def _discovery_candidate(
         "recently_updated_neighbor": "recently updated neighbor may contain fresh context",
         "same_type_same_project": "same type/project as a selected node but outside the main read path",
     }
-    return {
+    payload = {
         "id": node_id,
         "title": _node_title(node_map, node_id),
         "type": _node_type(node_map, node_id),
@@ -759,6 +830,7 @@ def _discovery_candidate(
         "score_breakdown": {**{key: round(value, 3) for key, value in score_parts.items()}, "total": score},
         "evidence": evidence or [],
     }
+    return _with_node_context_fields(payload, node_map.get(node_id, {}))
 
 
 def _discovery_candidates(
@@ -1005,7 +1077,8 @@ def _node_brief(
     }
     if priority is not None:
         payload["priority"] = priority
-    return payload
+    node = node_map.get(node_id, {})
+    return _with_node_context_fields(payload, node)
 
 
 def _unique_node_briefs(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
@@ -1126,6 +1199,7 @@ def _build_actionable_digest(
     node_map: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     read_items: list[dict[str, Any]] = []
+    artifact_items: list[dict[str, Any]] = []
     task_items: list[dict[str, Any]] = []
     code_items: list[dict[str, Any]] = []
     guardrail_items: list[dict[str, Any]] = []
@@ -1141,6 +1215,10 @@ def _build_actionable_digest(
         node = node_map.get(node_id, {})
         node_type = _node_type(node_map, node_id)
         reason = str(item.get("reason", "")).strip() or "selected by context score"
+
+        if _is_artifact_node(node):
+            artifact_items.append(_node_brief(node_id, node_map, reason=reason, priority=index))
+            continue
 
         if _is_code_entrypoint(node_id, node):
             code_reason = "likely test entrypoint" if _is_test_entrypoint(node_id) else "likely code entrypoint"
@@ -1171,6 +1249,7 @@ def _build_actionable_digest(
             code_items.append(_node_brief(mentioned_id, node_map, reason=code_reason, priority=index))
 
     relevant_docs = _unique_node_briefs(read_items, limit=6)
+    relevant_artifacts = _unique_node_briefs(artifact_items, limit=6)
     relevant_task_history = _unique_node_briefs(task_items, limit=5)
     likely_code_entrypoints = _unique_node_briefs(code_items, limit=5)
     known_guardrails = _unique_node_briefs(guardrail_items, limit=5)
@@ -1189,6 +1268,7 @@ def _build_actionable_digest(
     return {
         "intent": query.strip(),
         "relevant_docs": relevant_docs,
+        "relevant_artifacts": relevant_artifacts,
         "relevant_task_history": relevant_task_history,
         "likely_code_entrypoints": likely_code_entrypoints,
         "known_guardrails": known_guardrails,
@@ -1216,6 +1296,7 @@ def _empty_actionable_digest(query: str, reason: str) -> dict[str, Any]:
     return {
         "intent": query.strip(),
         "relevant_docs": [],
+        "relevant_artifacts": [],
         "relevant_task_history": [],
         "likely_code_entrypoints": [],
         "known_guardrails": [],
@@ -1558,6 +1639,7 @@ def select_context(
             },
             "estimated_tokens": estimated_tokens,
         }
+        _with_node_context_fields(row, node)
         if include_content:
             summary_fallback = str(node.get("summary", "")) or str(node.get("title", ""))
             row["content"] = _content_for_output(node_id, node, scan_root, summary_fallback)

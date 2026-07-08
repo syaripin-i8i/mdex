@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- `scan-artifacts` builds a separate `.mdex/artifacts.db` index for generated observation artifacts without adding `outputs/` to the main repo index.
+- `context` and `start` full actionable digests include `relevant_artifacts`; artifact rows carry metadata/freshness fields such as kind, generated timestamp, age, and stale status.
+
 ## [0.4.0] - 2026-06-01
 
 ### Added

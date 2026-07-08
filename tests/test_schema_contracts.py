@@ -143,7 +143,7 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     assert full_start.returncode == 0
     full_start_payload = json.loads(full_start.stdout)
     _validate_payload(full_start_payload, "start.schema.json")
-    assert {"relevant_task_history", "likely_code_entrypoints", "known_guardrails"}.issubset(
+    assert {"relevant_artifacts", "relevant_task_history", "likely_code_entrypoints", "known_guardrails"}.issubset(
         full_start_payload["actionable_digest"]
     )
 
@@ -180,7 +180,7 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     assert full_context.returncode == 0
     full_context_payload = json.loads(full_context.stdout)
     _validate_payload(full_context_payload, "context.schema.json")
-    assert {"relevant_task_history", "likely_code_entrypoints", "known_guardrails"}.issubset(
+    assert {"relevant_artifacts", "relevant_task_history", "likely_code_entrypoints", "known_guardrails"}.issubset(
         full_context_payload["actionable_digest"]
     )
 

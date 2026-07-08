@@ -200,6 +200,12 @@
             "$ref": "#/$defs/digestNode"
           }
         },
+        "relevant_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/digestNode"
+          }
+        },
         "relevant_task_history": {
           "type": "array",
           "items": {

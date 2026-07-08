@@ -88,7 +88,8 @@ def _create_schema(cur: sqlite3.Cursor) -> None:
             updated TEXT,
             links_to_json TEXT,
             depends_on_json TEXT,
-            relates_to_json TEXT
+            relates_to_json TEXT,
+            metadata_json TEXT
         )
         """
     )
@@ -148,8 +149,8 @@ def _insert_nodes(cur: sqlite3.Cursor, nodes: list[dict[str, Any]]) -> None:
             INSERT OR REPLACE INTO nodes (
                 id, title, type, project, status, summary, summary_source, summary_updated,
                 estimated_tokens, tags_json, search_terms_json, learning_note_json,
-                updated, links_to_json, depends_on_json, relates_to_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                updated, links_to_json, depends_on_json, relates_to_json, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(node.get("id", "")),
@@ -168,6 +169,7 @@ def _insert_nodes(cur: sqlite3.Cursor, nodes: list[dict[str, Any]]) -> None:
                 json.dumps(node.get("links_to", []), ensure_ascii=False),
                 json.dumps(node.get("depends_on", []), ensure_ascii=False),
                 json.dumps(node.get("relates_to", []), ensure_ascii=False),
+                json.dumps(node.get("metadata", {}), ensure_ascii=False),
             ),
         )
 

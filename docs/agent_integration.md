@@ -101,9 +101,23 @@ def run_action(action):
 --digest full
 ```
 
-`full` is the default and preserves the existing `actionable_digest` shape. `minimal` returns only `intent`, `relevant_docs`, `suggested_rg`, and `context_gaps` to reduce context usage.
+`full` is the default and preserves the existing `actionable_digest` shape, plus optional lanes such as `relevant_artifacts` when artifact indexes are included.
+`minimal` returns only `intent`, `relevant_docs`, `suggested_rg`, and `context_gaps` to reduce context usage.
 
-Use `minimal` when the agent only needs a short bridge into docs and exact search. Use `full` when task history, likely code entrypoints, and known guardrails are needed.
+Use `minimal` when the agent only needs a short bridge into docs and exact search.
+Use `full` when task history, artifact observations, likely code entrypoints, and known guardrails are needed.
+
+## Artifact Indexes
+
+Generated observations should stay out of the main repo index.
+Use a separate artifact lane when ignored `outputs/` content is relevant:
+
+```bash
+mdex scan-artifacts --root outputs --db .mdex/artifacts.db
+mdex context "<task>" --include repo,artifacts --actionable
+```
+
+Artifact rows include `metadata` and `freshness` so agents can distinguish current observations from stale history.
 
 ## Common Recovery Loops
 

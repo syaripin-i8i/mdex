@@ -12,6 +12,8 @@ DEFAULT_INDEX_ALIASES = {
     "tasks": ".mdex/task_history.db",
     "task_history": ".mdex/task_history.db",
     "memory": ".mdex/memory.db",
+    "artifact": ".mdex/artifacts.db",
+    "artifacts": ".mdex/artifacts.db",
 }
 
 
@@ -127,6 +129,10 @@ def merge_actionable_digests(payloads: list[dict[str, Any]], *, digest: str) -> 
             [row for digest_item in digests for row in list(digest_item.get("relevant_docs", []) or [])],
             key_fields=("index", "id"),
         ),
+        "relevant_artifacts": _dedupe_sequence(
+            [row for digest_item in digests for row in list(digest_item.get("relevant_artifacts", []) or [])],
+            key_fields=("index", "id"),
+        ),
         "relevant_task_history": _dedupe_sequence(
             [row for digest_item in digests for row in list(digest_item.get("relevant_task_history", []) or [])],
             key_fields=("index", "id"),
@@ -170,6 +176,7 @@ def _stamp_digest(payload: dict[str, Any], alias: str) -> None:
         return
     for key in (
         "relevant_docs",
+        "relevant_artifacts",
         "relevant_task_history",
         "likely_code_entrypoints",
         "known_guardrails",

@@ -223,6 +223,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | command | primary keys |
 |---|---|
 | `scan` | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
+| `scan-artifacts` | `nodes`, `output.db`, `output.json`, `index_kind`, `roots` |
 | `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
 | `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
 | `doctor` | `status`, `summary`, `checks`, `recommended_next_actions` |
@@ -385,6 +386,17 @@ local/secret らしいファイルが index に入ると `warnings` に表示さ
 - `outputs/`
 - `tmp/`
 - `*.db`, `*.sqlite`, `*.sqlite3`
+
+`outputs/` は main repo index からは除外したままにしてください。
+生成済み観測を検索したい場合は、別 lane として artifact index を作ります。
+
+```bash
+mdex scan-artifacts --root outputs --db .mdex/artifacts.db
+mdex context "2026-07-08 audit attribution" --include repo,artifacts --actionable
+```
+
+artifact 結果は `metadata.kind`, `metadata.generated_at`, `freshness.age_days`, `freshness.stale` を含みます。
+古い観測は削除されず、stale として明示されます。
 
 ## Quick Verification
 
