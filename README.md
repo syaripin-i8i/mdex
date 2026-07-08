@@ -397,6 +397,9 @@ mdex context "2026-07-08 audit attribution" --include repo,artifacts --actionabl
 
 artifact 結果は `metadata.kind`, `metadata.generated_at`, `freshness.age_days`, `freshness.stale` を含みます。
 古い観測は削除されず、stale として明示されます。
+`--include repo,artifacts` で artifact DB が不在または古い場合、`recommended_next_actions_v2` に
+`mdex scan-artifacts --db .mdex/artifacts.db` が入ります。DB が存在する場合は
+`multi_index.indexes.artifacts.artifacts_index_age` で artifact index 自体の freshness を確認できます。
 `scan-artifacts` は scan 中に消えたファイル、壊れた JSON、サイズ上限超過を fatal error ではなく `warnings` に落とします。
 `warning_summary` で警告件数を確認できます。
 ライブ状態の `runtime_state/**` は artifact lane からデフォルト除外されます。

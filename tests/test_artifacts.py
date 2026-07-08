@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -255,6 +256,11 @@ def test_multi_index_context_merges_artifact_digest(tmp_path: Path) -> None:
     assert any(row["index"] == "artifacts" for row in payload["nodes"])
     assert payload["multi_index"]["indexes"]["repo"]["path"] == ".mdex/mdex_index.db"
     assert payload["multi_index"]["indexes"]["artifacts"]["path"] == ".mdex/artifacts.db"
+    age = payload["multi_index"]["indexes"]["artifacts"]["artifacts_index_age"]
+    assert age["ready"] is True
+    assert age["source"] == "index_metadata.generated"
+    assert age["fresh"] is True
+    assert age["stale_after_hours"] == 24
     assert repo.as_posix() not in json.dumps(payload, ensure_ascii=False)
 
     start_payload = build_multi_start_payload(
@@ -271,8 +277,122 @@ def test_multi_index_context_merges_artifact_digest(tmp_path: Path) -> None:
 
     assert start_payload["db"]["path"] == ".mdex/mdex_index.db"
     assert start_payload["multi_index"]["indexes"]["repo"]["path"] == ".mdex/mdex_index.db"
+    assert start_payload["multi_index"]["indexes"]["artifacts"]["artifacts_index_age"]["ready"] is True
     assert start_payload["per_index_start"]["artifacts"]["db"]["path"] == ".mdex/artifacts.db"
     assert repo.as_posix() not in json.dumps(start_payload, ensure_ascii=False)
+
+
+def test_multi_index_context_recommends_artifact_scan_when_index_missing(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir()
+    (repo / "decision.md").write_text("# Decision\n\nselector attribution\n", encoding="utf-8")
+    repo_db = mdex_dir / "mdex_index.db"
+    write_sqlite(build_index(repo, {"include_extensions": [".md"], "exclude_patterns": []}), str(repo_db))
+
+    payload = build_multi_context_payload(
+        "selector attribution",
+        {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}},
+        include="repo,artifacts",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    artifact_index = payload["multi_index"]["indexes"]["artifacts"]
+    assert artifact_index["ok"] is False
+    assert artifact_index["reason"] == "index_db_missing"
+    assert artifact_index["artifacts_index_age"]["reason"] == "index_db_missing"
+    assert "run mdex scan-artifacts --db .mdex/artifacts.db" in payload["recommended_next_actions"]
+    assert {
+        "command": "mdex",
+        "args": ["scan-artifacts", "--db", ".mdex/artifacts.db"],
+        "reason": "scan missing artifact index before querying the artifacts lane",
+    } in payload["recommended_next_actions_v2"]
+
+    start_payload = build_multi_start_payload(
+        "selector attribution",
+        {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}},
+        include="repo,artifacts",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    assert "run mdex scan-artifacts --db .mdex/artifacts.db" in start_payload["recommended_next_actions"]
+    assert start_payload["multi_index"]["indexes"]["artifacts"]["artifacts_index_age"]["stale"] is True
+
+
+def test_multi_index_context_recommends_rescan_when_artifact_index_is_stale(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir()
+    outputs = repo / "outputs"
+    outputs.mkdir()
+    (repo / "decision.md").write_text("# Decision\n\nselector attribution\n", encoding="utf-8")
+    (outputs / "audit.json").write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "ok",
+                "summary": "selector attribution audit",
+            }
+        ),
+        encoding="utf-8",
+    )
+    repo_db = mdex_dir / "mdex_index.db"
+    artifact_db = mdex_dir / "artifacts.db"
+    write_sqlite(build_index(repo, {"include_extensions": [".md"], "exclude_patterns": []}), str(repo_db))
+    write_sqlite(build_artifacts_index([outputs], {"stale_after_days": 9999}, node_id_root=repo), str(artifact_db))
+    old_generated = "2000-01-01T00:00:00+00:00"
+    db = sqlite3.connect(str(artifact_db))
+    try:
+        db.execute(
+            "UPDATE index_metadata SET value = ? WHERE key = 'generated'",
+            (old_generated,),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    payload = build_multi_context_payload(
+        "selector attribution",
+        {
+            "path": str(repo_db),
+            "source": "arg",
+            "repo_root": str(repo),
+            "config": {"indexes": {"artifacts": {"index_stale_after_hours": 1}}},
+        },
+        include="repo,artifacts",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    age = payload["multi_index"]["indexes"]["artifacts"]["artifacts_index_age"]
+    assert age["generated"] == old_generated
+    assert age["source"] == "index_metadata.generated"
+    assert age["stale"] is True
+    assert age["stale_after_hours"] == 1
+    assert "run mdex scan-artifacts --db .mdex/artifacts.db" in payload["recommended_next_actions"]
+    assert {
+        "command": "mdex",
+        "args": ["scan-artifacts", "--db", ".mdex/artifacts.db"],
+        "reason": "refresh stale artifact index before trusting artifacts lane coverage",
+    } in payload["recommended_next_actions_v2"]
 
 
 def test_old_decision_rows_are_marked_stale_but_authoritative(tmp_path: Path) -> None:

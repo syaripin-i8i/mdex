@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from mdex.context import project_actionable_digest, select_context
 from mdex.start import build_start_payload
+from mdex.store import list_index_metadata
+
+DEFAULT_ARTIFACT_INDEX_STALE_AFTER_HOURS = 24
 
 DEFAULT_INDEX_ALIASES = {
     "repo": ".mdex/mdex_index.db",
@@ -84,6 +88,113 @@ def _public_start_payload(payload: dict[str, Any], repo_root: Path) -> dict[str,
             public_db["path"] = _display_path(str(public_db["path"]), repo_root)
         output["db"] = public_db
     return output
+
+
+def _parse_utc_timestamp(value: str) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _artifact_index_stale_after_hours(config: dict[str, Any]) -> int:
+    if not isinstance(config, dict):
+        config = {}
+    raw = config.get("index_stale_after_hours")
+    if raw is None:
+        raw = config.get("stale_after_hours")
+    return _positive_int(raw, DEFAULT_ARTIFACT_INDEX_STALE_AFTER_HOURS)
+
+
+def _is_artifact_alias(alias: str) -> bool:
+    return alias in {"artifact", "artifacts"}
+
+
+def _index_timestamp(path: Path) -> tuple[str, datetime | None, str]:
+    try:
+        generated = str(list_index_metadata(str(path)).get("generated", "") or "").strip()
+    except Exception:
+        generated = ""
+    parsed = _parse_utc_timestamp(generated)
+    if parsed is not None:
+        return generated, parsed, "index_metadata.generated"
+
+    try:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return generated, None, "unavailable"
+    return mtime.isoformat(), mtime, "db_mtime"
+
+
+def _artifact_index_age(spec: dict[str, Any]) -> dict[str, Any]:
+    stale_after_hours = _artifact_index_stale_after_hours(spec.get("config", {}))
+    if not bool(spec.get("exists", False)):
+        return {
+            "ready": False,
+            "generated": "",
+            "source": "missing",
+            "fresh": False,
+            "stale": True,
+            "age_hours": None,
+            "age_days": None,
+            "stale_after_hours": stale_after_hours,
+            "reason": "index_db_missing",
+        }
+
+    generated, parsed, source = _index_timestamp(Path(str(spec["path"])))
+    if parsed is None:
+        return {
+            "ready": True,
+            "generated": generated,
+            "source": source,
+            "fresh": False,
+            "stale": True,
+            "age_hours": None,
+            "age_days": None,
+            "stale_after_hours": stale_after_hours,
+            "reason": "missing_or_invalid_generated_timestamp",
+        }
+
+    age_hours = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0)
+    age_days = age_hours / 24.0
+    fresh = age_hours <= float(stale_after_hours)
+    return {
+        "ready": True,
+        "generated": generated,
+        "source": source,
+        "fresh": fresh,
+        "stale": not fresh,
+        "age_hours": round(age_hours, 2),
+        "age_days": round(age_days, 2),
+        "stale_after_hours": stale_after_hours,
+        "reason": "fresh_index" if fresh else "stale_index",
+    }
+
+
+def _with_artifact_index_age(spec: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    output = _public_index_spec(spec, repo_root)
+    if _is_artifact_alias(str(spec.get("alias", ""))):
+        output["artifacts_index_age"] = _artifact_index_age(spec)
+    return output
+
+
+def _artifact_scan_action(spec: dict[str, Any], repo_root: Path, *, reason: str) -> tuple[str, dict[str, Any]]:
+    db_path = _display_path(str(spec.get("path", "")), repo_root)
+    legacy = f"run mdex scan-artifacts --db {db_path}"
+    structured = {
+        "command": "mdex",
+        "args": ["scan-artifacts", "--db", db_path],
+        "reason": reason,
+    }
+    return legacy, structured
 
 
 def _configured_indexes(db_info: dict[str, Any]) -> dict[str, Any]:
@@ -261,11 +372,21 @@ def build_multi_context_payload(
     existing_specs = [spec for spec in specs if bool(spec.get("exists", False))]
     shared_budget = max(1, safe_budget // max(1, len(existing_specs)))
     shared_limit = max(1, safe_limit // max(1, len(existing_specs)))
+    index_actions: list[str] = []
+    index_actions_v2: list[dict[str, Any]] = []
     for spec in specs:
         alias = str(spec["alias"])
-        public_spec = _public_index_spec(spec, repo_root)
+        public_spec = _with_artifact_index_age(spec, repo_root)
         if not bool(spec.get("exists", False)):
             per_index[alias] = {"ok": False, **public_spec, "reason": "index_db_missing"}
+            if _is_artifact_alias(alias):
+                legacy, structured = _artifact_scan_action(
+                    spec,
+                    repo_root,
+                    reason="scan missing artifact index before querying the artifacts lane",
+                )
+                index_actions.append(legacy)
+                index_actions_v2.append(structured)
             continue
         payload = select_context(
             query,
@@ -289,6 +410,15 @@ def build_multi_context_payload(
                 "total_tokens": int(payload.get("total_tokens", 0) or 0),
             },
         }
+        age = public_spec.get("artifacts_index_age")
+        if isinstance(age, dict) and bool(age.get("stale", False)):
+            legacy, structured = _artifact_scan_action(
+                spec,
+                repo_root,
+                reason="refresh stale artifact index before trusting artifacts lane coverage",
+            )
+            index_actions.append(legacy)
+            index_actions_v2.append(structured)
 
     merged_nodes = [
         {**row, "index": str(payload.get("index", ""))}
@@ -313,11 +443,13 @@ def build_multi_context_payload(
             key_fields=("index", "id"),
         )
         output["recommended_next_actions"] = _dedupe_sequence(
-            [row for item in contexts for row in list(item.get("recommended_next_actions", []) or [])],
+            [row for item in contexts for row in list(item.get("recommended_next_actions", []) or [])]
+            + index_actions,
             key_fields=(),
         )
         output["recommended_next_actions_v2"] = _dedupe_sequence(
-            [row for item in contexts for row in list(item.get("recommended_next_actions_v2", []) or [])],
+            [row for item in contexts for row in list(item.get("recommended_next_actions_v2", []) or [])]
+            + index_actions_v2,
             key_fields=("command", "args"),
         )
         output["deferred_nodes"] = _dedupe_sequence(
@@ -360,7 +492,7 @@ def build_multi_start_payload(
     shared_limit = max(1, safe_limit // max(1, len(existing_specs)))
     for spec in specs:
         alias = str(spec["alias"])
-        public_spec = _public_index_spec(spec, repo_root)
+        public_spec = _with_artifact_index_age(spec, repo_root)
         if not bool(spec.get("exists", False)):
             per_index[alias] = {"ok": False, **public_spec, "reason": "index_db_missing"}
             continue

@@ -140,6 +140,7 @@ Artifact freshness accepts a default and kind-specific overrides:
         "investigation": 14,
         "eval_result": 7
       },
+      "index_stale_after_hours": 24,
       "max_file_size_bytes": 26214400,
       "max_jsonl_rows_read": 20
     }
@@ -148,6 +149,8 @@ Artifact freshness accepts a default and kind-specific overrides:
 ```
 
 Use object roots for repository-external paths. `id_prefix` gives stable node ids, and `expose_source_root: false` prevents absolute local roots from appearing in artifact metadata or scan output.
+
+When `--include repo,artifacts` is used, `multi_index.indexes.artifacts.artifacts_index_age` reports the artifact index freshness. If the artifact DB is missing or older than `index_stale_after_hours`, `recommended_next_actions_v2` includes a structured `mdex scan-artifacts --db ...` action. Agents should surface the action, not auto-run it.
 
 `scan-artifacts` treats files that disappear during a scan, malformed artifacts, and files over `max_file_size_bytes` as warnings rather than fatal errors.
 The scan payload includes `warning_summary` so agents can report counts without reading every warning row.
