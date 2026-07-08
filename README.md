@@ -397,6 +397,8 @@ mdex context "2026-07-08 audit attribution" --include repo,artifacts --actionabl
 
 artifact 結果は `metadata.kind`, `metadata.generated_at`, `freshness.age_days`, `freshness.stale` を含みます。
 古い観測は削除されず、stale として明示されます。
+`scan-artifacts` は scan 中に消えたファイル、壊れた JSON、サイズ上限超過を fatal error ではなく `warnings` に落とします。
+`warning_summary` で警告件数を確認できます。
 
 ## Quick Verification
 

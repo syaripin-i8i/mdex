@@ -124,16 +124,23 @@ Artifact freshness accepts a default and kind-specific overrides:
 {
   "indexes": {
     "artifacts": {
+      "include_globs": ["**/*.json", "**/*.jsonl", "**/*.md", "**/*.txt"],
+      "exclude_globs": ["**/raw_logs/**", "**/quarantine/**"],
       "stale_after_days": 14,
       "stale_after_days_by_kind": {
         "voice_monitor": 3,
         "investigation": 14,
         "eval_result": 7
-      }
+      },
+      "max_file_size_bytes": 26214400,
+      "max_jsonl_rows_read": 20
     }
   }
 }
 ```
+
+`scan-artifacts` treats files that disappear during a scan, malformed artifacts, and files over `max_file_size_bytes` as warnings rather than fatal errors.
+The scan payload includes `warning_summary` so agents can report counts without reading every warning row.
 
 ## Common Recovery Loops
 

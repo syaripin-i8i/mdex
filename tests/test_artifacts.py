@@ -7,6 +7,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mdex import artifacts
 from mdex.artifacts import build_artifacts_index
 from mdex.builder import build_index
 from mdex.context import select_context
@@ -108,6 +109,70 @@ def test_artifacts_index_uses_filename_timestamp_and_jsonl_headline(tmp_path: Pa
     assert "voice monitor latency" in node["title"]
 
 
+def test_artifacts_index_warns_when_enumerated_file_disappears(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    outputs = repo / "outputs"
+    outputs.mkdir(parents=True)
+    disappearing = outputs / "disappearing.json"
+    keep = outputs / "keep.json"
+    disappearing.write_text('{"summary":"gone"}\n', encoding="utf-8")
+    keep.write_text('{"summary":"kept artifact"}\n', encoding="utf-8")
+
+    def fake_list_artifact_files(*_args, **_kwargs):
+        disappearing.unlink()
+        return [disappearing, keep]
+
+    monkeypatch.setattr(artifacts, "_list_artifact_files", fake_list_artifact_files)
+
+    index = build_artifacts_index([outputs], {}, node_id_root=repo)
+
+    assert [node["id"] for node in index["nodes"]] == ["outputs/keep.json"]
+    assert index["warnings"][0]["path"] == "outputs/disappearing.json"
+    assert index["warnings"][0]["code"] == "file_disappeared"
+
+
+def test_artifacts_index_skips_files_over_size_limit(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    outputs = repo / "outputs"
+    outputs.mkdir(parents=True)
+    (outputs / "large.json").write_text('{"summary":"' + ("x" * 80) + '"}\n', encoding="utf-8")
+
+    index = build_artifacts_index([outputs], {"max_file_size_bytes": 20}, node_id_root=repo)
+
+    assert index["nodes"] == []
+    assert index["warnings"][0]["code"] == "file_too_large"
+    assert index["warnings"][0]["max_file_size_bytes"] == 20
+
+
+def test_artifacts_jsonl_row_limit_keeps_latest_tail_rows(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    outputs = repo / "outputs"
+    outputs.mkdir(parents=True)
+    artifact = outputs / "2026-07-08_eval_result.jsonl"
+    artifact.write_text(
+        "\n".join(
+            [
+                json.dumps({"status": "old", "summary": "old eval result"}),
+                json.dumps({"status": "latest", "summary": "latest eval result"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    index = build_artifacts_index(
+        [outputs],
+        {"max_jsonl_rows_read": 1},
+        node_id_root=repo,
+    )
+
+    assert index["nodes"][0]["title"] == "latest eval result"
+    assert index["nodes"][0]["status"] == "latest"
+
+
 def test_multi_index_context_merges_artifact_digest(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -189,6 +254,7 @@ def test_scan_artifacts_cli_writes_separate_index(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    (outputs / "broken.json").write_text("", encoding="utf-8")
     db_path = repo / ".mdex" / "artifacts.db"
     json_path = repo / ".mdex" / "artifacts.json"
 
@@ -206,6 +272,8 @@ def test_scan_artifacts_cli_writes_separate_index(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["index_kind"] == "artifacts"
-    assert payload["nodes"] == 1
+    assert payload["nodes"] == 2
+    assert payload["warning_summary"]["total"] == 1
+    assert payload["warning_summary"]["by_code"] == {"read_warning": 1}
     assert db_path.exists()
     assert json_path.exists()

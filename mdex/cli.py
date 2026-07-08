@@ -131,6 +131,17 @@ def _count_edge_resolution(edges: list[dict[str, Any]]) -> tuple[int, int, int, 
     return total, resolved, unresolved, rate
 
 
+def _warning_summary(warnings: list[dict[str, Any]]) -> dict[str, Any]:
+    by_code: dict[str, int] = {}
+    for warning in warnings:
+        code = str(warning.get("code", "")).strip() or "warning"
+        by_code[code] = by_code.get(code, 0) + 1
+    return {
+        "total": len(warnings),
+        "by_code": dict(sorted(by_code.items())),
+    }
+
+
 def _print_node_table(nodes: list[dict[str, Any]]) -> None:
     _mark_stdout_payload(nodes)
     for node in sorted(nodes, key=lambda item: str(item.get("id", ""))):
@@ -285,6 +296,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     edges = [edge for edge in index.get("edges", []) if isinstance(edge, dict)]
     total_edges, resolved_edges, unresolved_edges, rate = _count_edge_resolution(edges)
 
+    warnings = [item for item in index.get("warnings", []) if isinstance(item, dict)]
     payload = {
         "nodes": node_count,
         "edges": {
@@ -297,7 +309,8 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             "json": str(output_path),
             "db": db_path,
         },
-        "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
+        "warnings": warnings,
+        "warning_summary": _warning_summary(warnings),
         "incremental": {
             "requested": bool(getattr(args, "incremental", False)),
             "strategy": "mtime_size_sha256_manifest",
@@ -370,6 +383,7 @@ def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
         _emit_error("scan-artifacts failed", detail=str(exc))
         return 2
 
+    warnings = [item for item in index.get("warnings", []) if isinstance(item, dict)]
     payload = {
         "nodes": len(index.get("nodes", [])),
         "edges": {
@@ -382,7 +396,8 @@ def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
             "json": str(output_path),
             "db": str(db_path),
         },
-        "warnings": [item for item in index.get("warnings", []) if isinstance(item, dict)],
+        "warnings": warnings,
+        "warning_summary": _warning_summary(warnings),
         "index_kind": "artifacts",
         "roots": [str(path) for path in roots],
     }

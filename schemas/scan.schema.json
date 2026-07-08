@@ -91,6 +91,27 @@
         "additionalProperties": true
       }
     },
+    "warning_summary": {
+      "type": "object",
+      "required": [
+        "total",
+        "by_code"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_code": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "incremental": {
       "type": "object",
       "description": "Incremental scan manifest comparison summary.",

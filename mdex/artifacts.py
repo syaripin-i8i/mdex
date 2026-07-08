@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+from collections import deque
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,8 @@ DEFAULT_ARTIFACT_ROOTS = ("outputs",)
 DEFAULT_INCLUDE_GLOBS = ("**/*.json", "**/*.jsonl", "**/*.md", "**/*.txt")
 DEFAULT_EXCLUDE_GLOBS = ("**/raw_logs/**", "**/quarantine/**")
 DEFAULT_STALE_AFTER_DAYS = 14
+DEFAULT_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
+DEFAULT_MAX_JSONL_ROWS_READ = 20
 TIMESTAMP_FIELD_CANDIDATES = (
     "generated_at",
     "created_at",
@@ -56,6 +59,20 @@ def _config_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _config_optional_positive_int(value: Any, default: int | None) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "none", "null", "unlimited", "false"}:
+            return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else None
 
 
 def _pattern_variants(pattern: str) -> list[str]:
@@ -296,17 +313,16 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _read_jsonl(path: Path) -> list[Any]:
-    rows: list[Any] = []
+def _read_jsonl(path: Path, max_rows: int) -> list[Any]:
+    safe_max_rows = max(1, max_rows)
+    rows: deque[Any] = deque(maxlen=safe_max_rows)
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
-            if len(rows) >= 20:
-                break
             text = line.strip()
             if not text:
                 continue
             rows.append(json.loads(text))
-    return rows
+    return list(rows)
 
 
 def _text_headline(text: str, fallback: str) -> str:
@@ -321,7 +337,7 @@ def _text_headline(text: str, fallback: str) -> str:
     return fallback
 
 
-def _load_artifact_payload(path: Path) -> tuple[Any, str, list[str]]:
+def _load_artifact_payload(path: Path, *, max_jsonl_rows_read: int) -> tuple[Any, str, list[str]]:
     suffix = path.suffix.lower()
     warnings: list[str] = []
     fallback = path.stem.replace("_", " ").replace("-", " ").strip() or path.name
@@ -330,7 +346,7 @@ def _load_artifact_payload(path: Path) -> tuple[Any, str, list[str]]:
             data = _read_json(path)
             return data, _headline_from_json(data, fallback), warnings
         if suffix == ".jsonl":
-            data = _read_jsonl(path)
+            data = _read_jsonl(path, max_jsonl_rows_read)
             return data, _headline_from_json(data, fallback), warnings
         text = path.read_text(encoding="utf-8", errors="replace")
         return {"text": text}, _text_headline(text, fallback), warnings
@@ -379,6 +395,12 @@ def _fingerprint(file_path: Path) -> dict[str, Any]:
     }
 
 
+def _warning(path: str, code: str, error: str, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"path": path, "error": error, "code": code}
+    payload.update(extra)
+    return payload
+
+
 def build_artifacts_index(
     roots: Iterable[str | Path],
     config: dict[str, Any] | None = None,
@@ -392,6 +414,14 @@ def build_artifacts_index(
     include_globs = _normalize_list(active_config.get("include_globs"), DEFAULT_INCLUDE_GLOBS)
     exclude_globs = _normalize_list(active_config.get("exclude_globs"), DEFAULT_EXCLUDE_GLOBS)
     stale_after_days = _config_int(active_config.get("stale_after_days"), DEFAULT_STALE_AFTER_DAYS)
+    max_file_size_bytes = _config_optional_positive_int(
+        active_config.get("max_file_size_bytes"),
+        DEFAULT_MAX_FILE_SIZE_BYTES,
+    )
+    max_jsonl_rows_read = _config_int(
+        active_config.get("max_jsonl_rows_read"),
+        DEFAULT_MAX_JSONL_ROWS_READ,
+    )
     kind_stale_after = active_config.get("stale_after_days_by_kind")
     if not isinstance(kind_stale_after, dict):
         kind_stale_after = active_config.get("kind_stale_after_days")
@@ -407,10 +437,49 @@ def build_artifacts_index(
         except ValueError:
             node_id = _to_posix(str(file_path.resolve()))
 
-        data, headline, load_warnings = _load_artifact_payload(file_path)
+        try:
+            stat = file_path.stat()
+        except FileNotFoundError:
+            warnings.append(_warning(node_id, "file_disappeared", "artifact file disappeared during scan"))
+            continue
+        except OSError as exc:
+            warnings.append(_warning(node_id, "stat_failed", str(exc)))
+            continue
+
+        if max_file_size_bytes is not None and int(stat.st_size) > max_file_size_bytes:
+            warnings.append(
+                _warning(
+                    node_id,
+                    "file_too_large",
+                    "artifact file exceeds max_file_size_bytes",
+                    size=int(stat.st_size),
+                    max_file_size_bytes=max_file_size_bytes,
+                )
+            )
+            continue
+
+        try:
+            data, headline, load_warnings = _load_artifact_payload(
+                file_path,
+                max_jsonl_rows_read=max_jsonl_rows_read,
+            )
+        except FileNotFoundError:
+            warnings.append(_warning(node_id, "file_disappeared", "artifact file disappeared during scan"))
+            continue
+        except OSError as exc:
+            warnings.append(_warning(node_id, "read_failed", str(exc)))
+            continue
+
         relative_hint = node_id
         kind = _infer_kind(relative_hint, data)
-        generated_at = _timestamp_for_artifact(file_path, data).isoformat()
+        try:
+            generated_at = _timestamp_for_artifact(file_path, data).isoformat()
+        except FileNotFoundError:
+            warnings.append(_warning(node_id, "file_disappeared", "artifact file disappeared during scan"))
+            continue
+        except OSError as exc:
+            warnings.append(_warning(node_id, "stat_failed", str(exc)))
+            continue
         status = _status_from_data(data)
         task_ids = _task_ids_from_text(node_id, headline, json.dumps(data, ensure_ascii=False)[:2000])
         stale_days = _config_int(kind_stale_after_days.get(kind), stale_after_days)
@@ -456,9 +525,16 @@ def build_artifacts_index(
                 "metadata": metadata,
             }
         )
-        fingerprints[node_id] = _fingerprint(file_path)
+        try:
+            fingerprints[node_id] = _fingerprint(file_path)
+        except FileNotFoundError:
+            warnings.append(
+                _warning(node_id, "file_disappeared_after_index", "artifact file disappeared after indexing")
+            )
+        except OSError as exc:
+            warnings.append(_warning(node_id, "fingerprint_failed", str(exc)))
         for warning in load_warnings:
-            warnings.append({"path": node_id, "error": warning})
+            warnings.append(_warning(node_id, "read_warning", warning))
 
     return {
         "generated": _now_iso(),
