@@ -87,15 +87,24 @@ def test_artifacts_index_uses_filename_timestamp_and_jsonl_headline(tmp_path: Pa
     monitor_dir.mkdir(parents=True)
     artifact = monitor_dir / "2026-07-08_voice_monitor.jsonl"
     artifact.write_text(
-        json.dumps({"status": "ok", "message": "voice monitor latency p95 observed"}, ensure_ascii=False) + "\n",
+        json.dumps({"status": "old", "message": "earlier run should not be representative"}, ensure_ascii=False)
+        + "\n"
+        + json.dumps({"status": "ok", "message": "voice monitor latency p95 observed"}, ensure_ascii=False)
+        + "\n",
         encoding="utf-8",
     )
 
-    index = build_artifacts_index([outputs], {"stale_after_days": 9999}, node_id_root=repo)
+    index = build_artifacts_index(
+        [outputs],
+        {"stale_after_days": 9999, "stale_after_days_by_kind": {"voice_monitor": 3}},
+        node_id_root=repo,
+    )
     node = index["nodes"][0]
 
     assert node["metadata"]["kind"] == "voice_monitor"
     assert node["metadata"]["generated_at"].startswith("2026-07-08T00:00:00")
+    assert node["metadata"]["stale_after_days"] == 3
+    assert node["status"] == "ok"
     assert "voice monitor latency" in node["title"]
 
 

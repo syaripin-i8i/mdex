@@ -190,6 +190,12 @@ def _timestamp_from_mtime(path: Path) -> datetime:
 
 
 def _find_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, list):
+        for item in reversed(value):
+            parsed = _find_timestamp(item)
+            if parsed is not None:
+                return parsed
+        return None
     if isinstance(value, dict):
         for key in TIMESTAMP_FIELD_CANDIDATES:
             if key in value:
@@ -230,7 +236,7 @@ def _infer_kind(relative_path: str, data: Any) -> str:
 
 def _status_from_data(data: Any) -> str:
     if isinstance(data, list):
-        for item in data:
+        for item in reversed(data):
             status = _status_from_data(item)
             if status != "unknown":
                 return status
@@ -282,7 +288,7 @@ def _headline_from_json(data: Any, fallback: str) -> str:
             suffix = "; ".join(metric_bits[:4])
             return f"{prefix}: {suffix}" if suffix else prefix
     if isinstance(data, list) and data:
-        return _headline_from_json(data[0], fallback)
+        return _headline_from_json(data[-1], fallback)
     return fallback
 
 
@@ -386,7 +392,9 @@ def build_artifacts_index(
     include_globs = _normalize_list(active_config.get("include_globs"), DEFAULT_INCLUDE_GLOBS)
     exclude_globs = _normalize_list(active_config.get("exclude_globs"), DEFAULT_EXCLUDE_GLOBS)
     stale_after_days = _config_int(active_config.get("stale_after_days"), DEFAULT_STALE_AFTER_DAYS)
-    kind_stale_after = active_config.get("kind_stale_after_days")
+    kind_stale_after = active_config.get("stale_after_days_by_kind")
+    if not isinstance(kind_stale_after, dict):
+        kind_stale_after = active_config.get("kind_stale_after_days")
     kind_stale_after_days = kind_stale_after if isinstance(kind_stale_after, dict) else {}
 
     nodes: list[dict[str, Any]] = []

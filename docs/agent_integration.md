@@ -118,6 +118,22 @@ mdex context "<task>" --include repo,artifacts --actionable
 ```
 
 Artifact rows include `metadata` and `freshness` so agents can distinguish current observations from stale history.
+Artifact freshness accepts a default and kind-specific overrides:
+
+```json
+{
+  "indexes": {
+    "artifacts": {
+      "stale_after_days": 14,
+      "stale_after_days_by_kind": {
+        "voice_monitor": 3,
+        "investigation": 14,
+        "eval_result": 7
+      }
+    }
+  }
+}
+```
 
 ## Common Recovery Loops
 
