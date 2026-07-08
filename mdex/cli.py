@@ -344,6 +344,21 @@ def _repo_path(context: RuntimeContext, value: str) -> Path:
     return (context.repo_root / candidate).resolve()
 
 
+def _artifact_root_item(context: RuntimeContext, item: Any) -> Any:
+    if isinstance(item, dict):
+        raw_path = item.get("path", item.get("root"))
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return None
+        spec = dict(item)
+        spec["path"] = str(_repo_path(context, raw_path.strip()))
+        spec.pop("root", None)
+        return spec
+    text = str(item).strip()
+    if not text:
+        return None
+    return _repo_path(context, text)
+
+
 def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
     try:
         context = load_runtime_context(Path.cwd())
@@ -354,7 +369,11 @@ def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
         else:
             raw_roots = artifact_config.get("roots")
             if isinstance(raw_roots, list) and raw_roots:
-                roots = [_repo_path(context, str(item).strip()) for item in raw_roots if str(item).strip()]
+                roots = [
+                    item
+                    for item in (_artifact_root_item(context, raw_item) for raw_item in raw_roots)
+                    if item is not None
+                ]
             else:
                 roots = [_repo_path(context, root) for root in DEFAULT_ARTIFACT_ROOTS]
 
@@ -399,7 +418,7 @@ def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
         "warnings": warnings,
         "warning_summary": _warning_summary(warnings),
         "index_kind": "artifacts",
-        "roots": [str(path) for path in roots],
+        "roots": list(index.get("scan_roots", []) or []),
     }
     _emit_payload(with_contract_metadata(payload, "scan"), pretty=True)
     return 0

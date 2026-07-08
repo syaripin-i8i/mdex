@@ -173,6 +173,41 @@ def test_artifacts_jsonl_row_limit_keeps_latest_tail_rows(tmp_path: Path) -> Non
     assert index["nodes"][0]["status"] == "latest"
 
 
+def test_external_artifact_root_can_hide_source_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    external = tmp_path / "private_memory"
+    external.mkdir()
+    (external / "note.json").write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "summary": "external root artifact",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    index = build_artifacts_index(
+        [
+            {
+                "path": str(external),
+                "id_prefix": "agent/claude",
+                "expose_source_root": False,
+            }
+        ],
+        {},
+        node_id_root=repo,
+    )
+
+    node = index["nodes"][0]
+    assert node["id"] == "agent/claude/note.json"
+    assert index["scan_roots"] == ["agent/claude"]
+    assert "source_root" not in node["metadata"]
+    assert "path" not in node["metadata"]
+    assert external.as_posix() not in json.dumps(index, ensure_ascii=False)
+
+
 def test_multi_index_context_merges_artifact_digest(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -277,3 +312,47 @@ def test_scan_artifacts_cli_writes_separate_index(tmp_path: Path) -> None:
     assert payload["warning_summary"]["by_code"] == {"read_warning": 1}
     assert db_path.exists()
     assert json_path.exists()
+
+
+def test_scan_artifacts_cli_accepts_private_root_specs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir(parents=True)
+    external = tmp_path / "private_memory"
+    external.mkdir()
+    (external / "memory.json").write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "summary": "private memory artifact",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (mdex_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "indexes": {
+                    "artifacts": {
+                        "roots": [
+                            {
+                                "path": str(external),
+                                "id_prefix": "agent/codex",
+                                "expose_source_root": False,
+                            }
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_cli("scan-artifacts", cwd=repo)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["roots"] == ["agent/codex"]
+    artifact_json = (mdex_dir / "artifacts.json").read_text(encoding="utf-8")
+    assert "agent/codex/memory.json" in artifact_json
+    assert external.as_posix() not in artifact_json

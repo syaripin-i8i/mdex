@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import re
 from collections import deque
@@ -75,6 +76,18 @@ def _config_optional_positive_int(value: Any, default: int | None) -> int | None
     return parsed if parsed > 0 else None
 
 
+def _config_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
 def _pattern_variants(pattern: str) -> list[str]:
     normalized = _to_posix(pattern.strip())
     if not normalized:
@@ -101,17 +114,103 @@ def _matches_any(path_value: str, patterns: Iterable[str]) -> bool:
     return False
 
 
-def _resolve_roots(roots: Iterable[str | Path]) -> list[Path]:
+def _normalize_root_items(roots: Iterable[Any], default: Iterable[str]) -> list[Any]:
+    items = list(roots)
+    if items:
+        return items
+    return [str(item) for item in default]
+
+
+def _root_path_from_item(item: Any) -> Path | None:
+    raw_path: Any
+    if isinstance(item, dict):
+        raw_path = item.get("path", item.get("root"))
+    else:
+        raw_path = item
+    if raw_path is None:
+        return None
+    text = str(raw_path).strip()
+    if not text:
+        return None
+    return Path(text).resolve()
+
+
+def _resolve_root_paths(root_items: Iterable[Any]) -> list[Path]:
     resolved: list[Path] = []
     seen: set[str] = set()
-    for root in roots:
-        path = Path(root).resolve()
+    for item in root_items:
+        path = _root_path_from_item(item)
+        if path is None:
+            continue
         key = path.as_posix().lower()
         if key in seen:
             continue
         seen.add(key)
         resolved.append(path)
     return resolved
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _sanitize_id_prefix(value: Any) -> str:
+    raw = str(value or "").replace("\\", "/").strip().strip("/")
+    if not raw:
+        return ""
+    parts: list[str] = []
+    for part in raw.split("/"):
+        clean = re.sub(r"[^A-Za-z0-9_.:-]+", "_", part).strip("._")
+        if not clean or clean in {".", ".."}:
+            continue
+        parts.append(clean)
+    return "/".join(parts)
+
+
+def _external_id_prefix(path: Path) -> str:
+    name = _sanitize_id_prefix(path.name) or "root"
+    digest = hashlib.sha256(path.as_posix().encode("utf-8")).hexdigest()[:8]
+    return f"external/{name}-{digest}"
+
+
+def _root_specs(root_items: Iterable[Any], root_path: Path) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in root_items:
+        path = _root_path_from_item(item)
+        if path is None:
+            continue
+        key = path.as_posix().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        external = not _is_relative_to(path, root_path)
+        if isinstance(item, dict):
+            id_prefix = _sanitize_id_prefix(item.get("id_prefix", ""))
+            expose_source_root = _config_bool(
+                item.get("expose_source_root"),
+                default=not external,
+            )
+        else:
+            id_prefix = ""
+            expose_source_root = not external
+        if external and not id_prefix:
+            id_prefix = _external_id_prefix(path)
+
+        specs.append(
+            {
+                "path": path,
+                "id_prefix": id_prefix,
+                "expose_source_root": expose_source_root,
+                "external": external,
+            }
+        )
+    return specs
 
 
 def _common_root(roots: list[Path]) -> Path:
@@ -126,6 +225,42 @@ def _common_root(roots: list[Path]) -> Path:
 
 def _node_id_for_path(file_path: Path, root_path: Path) -> str:
     return _to_posix(str(file_path.resolve().relative_to(root_path.resolve())))
+
+
+def _node_id_for_artifact(file_path: Path, root_path: Path, spec: dict[str, Any] | None) -> str:
+    if spec is not None:
+        prefix = str(spec.get("id_prefix", "")).strip("/")
+        if prefix:
+            relative = _to_posix(str(file_path.resolve().relative_to(Path(spec["path"]).resolve())))
+            return f"{prefix}/{relative}" if relative else prefix
+    return _node_id_for_path(file_path, root_path)
+
+
+def _matching_root_spec(file_path: Path, specs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    matches = [
+        spec
+        for spec in specs
+        if _is_relative_to(file_path, Path(spec["path"]))
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda spec: len(Path(spec["path"]).as_posix()), reverse=True)
+    return matches[0]
+
+
+def _display_path(path: Path, root_path: Path) -> str:
+    try:
+        relative = _to_posix(str(path.resolve().relative_to(root_path.resolve())))
+    except ValueError:
+        return _to_posix(str(path.resolve()))
+    return relative or "."
+
+
+def _display_root(spec: dict[str, Any], root_path: Path) -> str:
+    if bool(spec.get("expose_source_root", True)):
+        return _display_path(Path(spec["path"]), root_path)
+    prefix = str(spec.get("id_prefix", "")).strip()
+    return prefix or "<hidden>"
 
 
 def _list_artifact_files(roots: list[Path], include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
@@ -408,9 +543,10 @@ def build_artifacts_index(
     node_id_root: str | Path | None = None,
 ) -> dict[str, Any]:
     active_config = config if isinstance(config, dict) else {}
-    root_values = _normalize_list(roots, DEFAULT_ARTIFACT_ROOTS)
-    resolved_roots = _resolve_roots(root_values)
+    root_values = _normalize_root_items(roots, DEFAULT_ARTIFACT_ROOTS)
+    resolved_roots = _resolve_root_paths(root_values)
     root_path = Path(node_id_root).resolve() if node_id_root is not None else _common_root(resolved_roots)
+    specs = _root_specs(root_values, root_path)
     include_globs = _normalize_list(active_config.get("include_globs"), DEFAULT_INCLUDE_GLOBS)
     exclude_globs = _normalize_list(active_config.get("exclude_globs"), DEFAULT_EXCLUDE_GLOBS)
     stale_after_days = _config_int(active_config.get("stale_after_days"), DEFAULT_STALE_AFTER_DAYS)
@@ -432,10 +568,14 @@ def build_artifacts_index(
     fingerprints: dict[str, dict[str, Any]] = {}
 
     for file_path in _list_artifact_files(resolved_roots, include_globs, exclude_globs):
+        root_spec = _matching_root_spec(file_path, specs)
         try:
-            node_id = _node_id_for_path(file_path, root_path)
+            node_id = _node_id_for_artifact(file_path, root_path, root_spec)
         except ValueError:
-            node_id = _to_posix(str(file_path.resolve()))
+            if root_spec is not None:
+                node_id = _external_id_prefix(Path(root_spec["path"])) + "/" + file_path.name
+            else:
+                node_id = _external_id_prefix(file_path.parent) + "/" + file_path.name
 
         try:
             stat = file_path.stat()
@@ -490,19 +630,18 @@ def build_artifacts_index(
         if task_ids:
             summary_parts.append(f"tasks={','.join(task_ids[:4])}")
         summary = "; ".join(part for part in summary_parts if part)
-        matching_roots = [root for root in resolved_roots if file_path.is_relative_to(root)]
-        source_root = _common_root(matching_roots or [file_path.parent])
         metadata = {
             "index": "artifacts",
             "kind": kind,
             "generated_at": generated_at,
-            "source_root": _to_posix(str(source_root)),
-            "path": _to_posix(str(file_path)),
             "status": status,
             "headline": headline,
             "task_ids": task_ids,
             "stale_after_days": stale_days,
         }
+        if root_spec is None or bool(root_spec.get("expose_source_root", True)):
+            metadata["source_root"] = _display_root(root_spec or {"path": file_path.parent}, root_path)
+            metadata["path"] = _display_path(file_path, root_path)
         if task_ids:
             metadata["task_id"] = task_ids[0]
 
@@ -539,7 +678,7 @@ def build_artifacts_index(
     return {
         "generated": _now_iso(),
         "scan_root": _to_posix(str(root_path)),
-        "scan_roots": [_to_posix(str(path)) for path in resolved_roots],
+        "scan_roots": [_display_root(spec, root_path) for spec in specs],
         "nodes": nodes,
         "edges": [],
         "warnings": warnings,

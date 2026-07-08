@@ -124,6 +124,14 @@ Artifact freshness accepts a default and kind-specific overrides:
 {
   "indexes": {
     "artifacts": {
+      "roots": [
+        "outputs/",
+        {
+          "path": "/absolute/private/artifact/root",
+          "id_prefix": "private/artifacts",
+          "expose_source_root": false
+        }
+      ],
       "include_globs": ["**/*.json", "**/*.jsonl", "**/*.md", "**/*.txt"],
       "exclude_globs": ["**/raw_logs/**", "**/quarantine/**"],
       "stale_after_days": 14,
@@ -138,6 +146,8 @@ Artifact freshness accepts a default and kind-specific overrides:
   }
 }
 ```
+
+Use object roots for repository-external paths. `id_prefix` gives stable node ids, and `expose_source_root: false` prevents absolute local roots from appearing in artifact metadata or scan output.
 
 `scan-artifacts` treats files that disappear during a scan, malformed artifacts, and files over `max_file_size_bytes` as warnings rather than fatal errors.
 The scan payload includes `warning_summary` so agents can report counts without reading every warning row.

@@ -399,6 +399,8 @@ artifact 結果は `metadata.kind`, `metadata.generated_at`, `freshness.age_days
 古い観測は削除されず、stale として明示されます。
 `scan-artifacts` は scan 中に消えたファイル、壊れた JSON、サイズ上限超過を fatal error ではなく `warnings` に落とします。
 `warning_summary` で警告件数を確認できます。
+repo 外の root を使う場合は `.mdex/config.json` の object root で `id_prefix` を指定し、
+`expose_source_root: false` にするとローカル絶対パスを出力に含めません。
 
 ## Quick Verification
 
