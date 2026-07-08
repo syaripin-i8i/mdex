@@ -133,7 +133,7 @@ Artifact freshness accepts a default and kind-specific overrides:
         }
       ],
       "include_globs": ["**/*.json", "**/*.jsonl", "**/*.md", "**/*.txt"],
-      "exclude_globs": ["**/raw_logs/**", "**/quarantine/**"],
+      "exclude_globs": ["**/raw_logs/**", "**/quarantine/**", "**/runtime_state/**"],
       "stale_after_days": 14,
       "stale_after_days_by_kind": {
         "voice_monitor": 3,

@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `context` and `start` full actionable digests include `relevant_artifacts`; artifact rows carry metadata/freshness fields such as kind, generated timestamp, age, and stale status.
 - Artifact scans tolerate disappeared files and oversized files as warnings, expose `warning_summary`, and support `max_file_size_bytes` / `max_jsonl_rows_read` controls.
 - Artifact roots may be configured as objects with `id_prefix` and `expose_source_root: false` to keep repository-external local paths out of node ids and metadata.
+- Artifact scans default-exclude `runtime_state/**`, and multi-index output uses repo-relative DB paths when possible.
 
 ## [0.4.0] - 2026-06-01
 

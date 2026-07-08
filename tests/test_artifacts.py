@@ -12,7 +12,7 @@ from mdex.artifacts import build_artifacts_index
 from mdex.builder import build_index
 from mdex.context import select_context
 from mdex.indexer import write_sqlite
-from mdex.multiindex import build_multi_context_payload
+from mdex.multiindex import build_multi_context_payload, build_multi_start_payload
 from mdex.store import list_nodes
 
 
@@ -46,6 +46,8 @@ def test_artifacts_index_extracts_metadata_and_actionable_digest(tmp_path: Path)
     attribution_dir.mkdir(parents=True)
     raw_logs = outputs / "raw_logs"
     raw_logs.mkdir()
+    runtime_state = outputs / "runtime_state"
+    runtime_state.mkdir()
     now = datetime.now(timezone.utc).isoformat()
 
     (attribution_dir / "CDEV.24_attribution.json").write_text(
@@ -61,6 +63,7 @@ def test_artifacts_index_extracts_metadata_and_actionable_digest(tmp_path: Path)
         encoding="utf-8",
     )
     (raw_logs / "ignored.json").write_text('{"summary":"should not be indexed"}\n', encoding="utf-8")
+    (runtime_state / "live.json").write_text('{"summary":"live state should not be indexed"}\n', encoding="utf-8")
 
     index = build_artifacts_index([outputs], {"stale_after_days": 9999}, node_id_root=repo)
     assert [node["id"] for node in index["nodes"]] == ["outputs/attribution/CDEV.24_attribution.json"]
@@ -250,6 +253,26 @@ def test_multi_index_context_merges_artifact_digest(tmp_path: Path) -> None:
     assert artifact["index"] == "artifacts"
     assert artifact["metadata"]["kind"] == "attribution"
     assert any(row["index"] == "artifacts" for row in payload["nodes"])
+    assert payload["multi_index"]["indexes"]["repo"]["path"] == ".mdex/mdex_index.db"
+    assert payload["multi_index"]["indexes"]["artifacts"]["path"] == ".mdex/artifacts.db"
+    assert repo.as_posix() not in json.dumps(payload, ensure_ascii=False)
+
+    start_payload = build_multi_start_payload(
+        "CDEV.24 attribution",
+        {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}},
+        include="repo,artifacts",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    assert start_payload["db"]["path"] == ".mdex/mdex_index.db"
+    assert start_payload["multi_index"]["indexes"]["repo"]["path"] == ".mdex/mdex_index.db"
+    assert start_payload["per_index_start"]["artifacts"]["db"]["path"] == ".mdex/artifacts.db"
+    assert repo.as_posix() not in json.dumps(start_payload, ensure_ascii=False)
 
 
 def test_old_decision_rows_are_marked_stale_but_authoritative(tmp_path: Path) -> None:

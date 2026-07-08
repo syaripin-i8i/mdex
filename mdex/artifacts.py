@@ -14,7 +14,7 @@ from mdex.tokens import estimate_tokens
 
 DEFAULT_ARTIFACT_ROOTS = ("outputs",)
 DEFAULT_INCLUDE_GLOBS = ("**/*.json", "**/*.jsonl", "**/*.md", "**/*.txt")
-DEFAULT_EXCLUDE_GLOBS = ("**/raw_logs/**", "**/quarantine/**")
+DEFAULT_EXCLUDE_GLOBS = ("**/raw_logs/**", "**/quarantine/**", "**/runtime_state/**")
 DEFAULT_STALE_AFTER_DAYS = 14
 DEFAULT_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_JSONL_ROWS_READ = 20

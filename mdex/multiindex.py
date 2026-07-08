@@ -59,6 +59,33 @@ def _repo_root_from_db_info(db_info: dict[str, Any]) -> Path:
     return Path(repo_root_raw).resolve() if repo_root_raw else Path.cwd().resolve()
 
 
+def _display_path(path: str | Path, repo_root: Path) -> str:
+    resolved = Path(path).resolve()
+    try:
+        relative = resolved.relative_to(repo_root.resolve())
+    except ValueError:
+        return str(resolved)
+    return relative.as_posix() or "."
+
+
+def _public_index_spec(spec: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    output = dict(spec)
+    if "path" in output:
+        output["path"] = _display_path(str(output["path"]), repo_root)
+    return output
+
+
+def _public_start_payload(payload: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    output = dict(payload)
+    db = output.get("db")
+    if isinstance(db, dict):
+        public_db = dict(db)
+        if "path" in public_db:
+            public_db["path"] = _display_path(str(public_db["path"]), repo_root)
+        output["db"] = public_db
+    return output
+
+
 def _configured_indexes(db_info: dict[str, Any]) -> dict[str, Any]:
     config = db_info.get("config", {})
     if not isinstance(config, dict):
@@ -226,6 +253,7 @@ def build_multi_context_payload(
     scoring_config_source: str,
 ) -> dict[str, Any]:
     specs = resolve_index_specs(db_info, include)
+    repo_root = _repo_root_from_db_info(db_info)
     per_index: dict[str, Any] = {}
     contexts: list[dict[str, Any]] = []
     safe_budget = _positive_int(budget, 4000)
@@ -235,8 +263,9 @@ def build_multi_context_payload(
     shared_limit = max(1, safe_limit // max(1, len(existing_specs)))
     for spec in specs:
         alias = str(spec["alias"])
+        public_spec = _public_index_spec(spec, repo_root)
         if not bool(spec.get("exists", False)):
-            per_index[alias] = {"ok": False, **spec, "reason": "index_db_missing"}
+            per_index[alias] = {"ok": False, **public_spec, "reason": "index_db_missing"}
             continue
         payload = select_context(
             query,
@@ -252,7 +281,14 @@ def build_multi_context_payload(
         _stamp_digest(payload, alias)
         payload["index"] = alias
         contexts.append(payload)
-        per_index[alias] = {"ok": True, **spec, "summary": {"nodes": len(payload.get("nodes", [])), "total_tokens": int(payload.get("total_tokens", 0) or 0)}}
+        per_index[alias] = {
+            "ok": True,
+            **public_spec,
+            "summary": {
+                "nodes": len(payload.get("nodes", [])),
+                "total_tokens": int(payload.get("total_tokens", 0) or 0),
+            },
+        }
 
     merged_nodes = [
         {**row, "index": str(payload.get("index", ""))}
@@ -314,6 +350,7 @@ def build_multi_start_payload(
     scoring_config_source: str,
 ) -> dict[str, Any]:
     specs = resolve_index_specs(db_info, include)
+    repo_root = _repo_root_from_db_info(db_info)
     starts: list[dict[str, Any]] = []
     per_index: dict[str, Any] = {}
     safe_budget = _positive_int(budget, 4000)
@@ -323,8 +360,9 @@ def build_multi_start_payload(
     shared_limit = max(1, safe_limit // max(1, len(existing_specs)))
     for spec in specs:
         alias = str(spec["alias"])
+        public_spec = _public_index_spec(spec, repo_root)
         if not bool(spec.get("exists", False)):
-            per_index[alias] = {"ok": False, **spec, "reason": "index_db_missing"}
+            per_index[alias] = {"ok": False, **public_spec, "reason": "index_db_missing"}
             continue
         payload = build_start_payload(
             task,
@@ -340,7 +378,7 @@ def build_multi_start_payload(
         _stamp_digest(payload, alias)
         payload["index"] = alias
         starts.append(payload)
-        per_index[alias] = {"ok": True, **spec, "index_status": payload.get("index_status", {})}
+        per_index[alias] = {"ok": True, **public_spec, "index_status": payload.get("index_status", {})}
 
     contextish = build_multi_context_payload(
         task,
@@ -356,9 +394,15 @@ def build_multi_start_payload(
     )
     return {
         "task": task,
-        "db": {"path": str(db_info.get("path", "")), "source": str(db_info.get("source", "unknown"))},
+        "db": {
+            "path": _display_path(str(db_info.get("path", "")), repo_root),
+            "source": str(db_info.get("source", "unknown")),
+        },
         "multi_index": {"include": [spec["alias"] for spec in specs], "indexes": per_index},
-        "per_index_start": {str(item.get("index", "")): item for item in starts},
+        "per_index_start": {
+            str(item.get("index", "")): _public_start_payload(item, repo_root)
+            for item in starts
+        },
         "index_status": {
             "ready": bool(starts) and len(starts) == len(specs),
             "fresh": bool(starts)
