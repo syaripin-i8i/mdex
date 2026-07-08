@@ -15,6 +15,7 @@ venv/
 /outputs/
 /tmp/
 /dist/
+/uv.lock
 *.db
 *.sqlite
 *.sqlite3
