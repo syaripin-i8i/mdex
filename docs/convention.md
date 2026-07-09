@@ -20,7 +20,7 @@ AI エージェントが残す Markdown / JSON を `mdex` で安定して索引�
 ### 書いてよい内容
 
 - frontmatter の必須/推奨キー
-- `depends_on` / `relates_to` の使い分け
+- `depends_on` / `relates_to` / `links_to` の使い分け
 - summary の書式
 
 ### 書いてはいけない内容
@@ -33,7 +33,7 @@ AI エージェントが残す Markdown / JSON を `mdex` で安定して索引�
 ## 基本ルール
 
 1. frontmatter に `type` / `status` / `updated` を置く
-2. 前提は `depends_on`、関連は `relates_to` に分離
+2. 前提は `depends_on`、関連は `relates_to`、本文参照は `[[wikilink]]` 由来の `links_to` に分離
 3. 本文先頭に 1〜2 文 summary を置く
 4. 可能な限り `mdex new` と `mdex stamp` を使う
 
@@ -52,10 +52,14 @@ relates_to:
 ---
 ```
 
-## `depends_on` と `relates_to`
+## `depends_on` / `relates_to` / `links_to`
 
 - `depends_on`: この文書が成立するための前提（読まないと誤読しうる）
 - `relates_to`: 関連はあるが前提ではない近傍文書
+- `links_to`: 本文の `[[target]]` や Markdown link から scan 時に抽出される参照
+
+`[[target]]` が index 内の node id に解決できない場合も edge は残ります。未解決 target は
+`mdex query <node-id>` の `outgoing.links_to` または `mdex orphans --missing` で確認できます。
 
 ## summary の書き方
 

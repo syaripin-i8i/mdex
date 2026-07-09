@@ -34,7 +34,7 @@
 | `ripgrep` / full-text search | exact string search across source | `mdex` can recommend where to search, but does not replace it |
 | codegraph tools | symbol and dependency structure | `mdex` points to docs and decisions; codegraph explains code topology |
 | embedding/RAG systems | broad semantic recall over large corpora | `mdex` favors small, deterministic, contract-shaped context |
-| knowledge graphs | rich typed relationships | `mdex` keeps only lightweight links such as `depends_on` and `relates_to` |
+| knowledge graphs | rich typed relationships | `mdex` keeps lightweight links: `depends_on` / `relates_to` from frontmatter and `links_to` from body `[[wikilinks]]` |
 
 Use `mdex` for first-pass judgment and workflow contracts. Use the other tools for deep code search, broad recall, or detailed graph analysis.
 In other words: `mdex` is the compass before `rg`, not a replacement for `rg`.
@@ -85,7 +85,21 @@ mdex finish --task "<task>" --db <db> --summary-file ./summary.txt --scan
 
 - frontmatter の `type` / `status` / `updated` を推奨
 - 前提は `depends_on`、関連は `relates_to`
+- 本文の `[[target]]` は scan 時に `links_to` として抽出される
 - 先頭 summary があるほど `start` / `context` / `finish` が安定
+
+## Links
+
+`mdex` の link model は軽量です。
+
+- `depends_on`: frontmatter の前提リンク
+- `relates_to`: frontmatter の関連リンク
+- `links_to`: 本文 `[[wikilink]]`、Markdown link、明示 frontmatter `links_to`
+
+`[[target]]` は scan 時に index 内の node id へ解決されます。解決できない target は edge として残り、
+`query --node <id>` または `query <id>` の `outgoing.links_to` で `resolved: false`, `missing: true` として見えます。
+コーパス全体の未解決 target は `mdex orphans --missing` で、target ごとの `referenced_by` として確認できます。
+`related <node-id>` は解決済み edge だけを使い、`incoming:links_to` / `outgoing:links_to` の理由を返します。
 
 ## Non-goals
 
@@ -186,7 +200,14 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 
 ```json
 {
-  "inputs": ["design/root.md"],
+  "inputs": [
+    {
+      "path": "design/root.md",
+      "exists": true,
+      "indexed": true
+    }
+  ],
+  "warnings": [],
   "read_first": [
     { "id": "design/root.md" }
   ],
@@ -224,12 +245,23 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 |---|---|
 | `scan` | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
 | `scan-artifacts` | `nodes`, `output.db`, `output.json`, `index_kind`, `roots` |
-| `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
-| `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
 | `doctor` | `status`, `summary`, `checks`, `recommended_next_actions` |
 | `status` | `status`, `summary`, `indexes`, `recommended_next_actions` |
-| `impact` | `inputs`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
+| `list` | array of node objects, or table rows when `--format table` |
+| `open` | node body text |
+| `query` | `node`, `outgoing`, `incoming`, `stats` |
+| `find` | array of matching node objects, or table rows when `--format table` |
+| `orphans` | array of orphan node objects; with `--missing`, unresolved `links_to` targets with `referenced_by` |
+| `stale` | array of stale node summary rows, or table rows when `--format table` |
+| `first` | `node`, `prerequisites` |
+| `related` | `node`, `related` |
+| `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
+| `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
+| `impact` | `inputs`, `warnings`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
 | `finish` | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
+| `enrich` | `id`, `status`, `summary_source`, `summary_updated` |
+| `new task` / `new decision` | `path`, `id`, `kind`, `title` |
+| `stamp` | `status`, `id`, `path`, `updated` |
 | db resolution error | `code`, `error`, `resolution_attempts` |
 
 `finish --dry-run` の成功判定:
@@ -375,7 +407,7 @@ not include raw task/query strings or absolute repo paths.
 local/secret らしいファイルが index に入ると `warnings` に表示されます。
 再 scan 時、現在の index に存在しない node の agent override は SQLite から削除されます。
 `mdex doctor` は scan warnings、JSON/SQLite の生成時刻ズレ、orphan override、legacy artifact、
-`old/`・`archive/`・fixtures/evals/logs/dumps などの review path が index に入っている状態を検出します。
+未解決 `links_to` target、`old/`・`archive/`・fixtures/evals/logs/dumps などの review path が index に入っている状態を検出します。
 
 ## Artifact Hygiene
 

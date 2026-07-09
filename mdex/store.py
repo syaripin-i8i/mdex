@@ -510,6 +510,30 @@ def list_edges(
     ]
 
 
+def list_missing_links(db_path: str, *, limit: int | None = None) -> list[dict[str, Any]]:
+    references: dict[str, set[str]] = {}
+    for edge in list_edges(db_path, edge_type="links_to", resolved=False):
+        target = str(edge.get("to", "")).strip()
+        source = str(edge.get("from", "")).strip()
+        if not target or not source:
+            continue
+        references.setdefault(target, set()).add(source)
+
+    rows = [
+        {
+            "id": target,
+            "type": "links_to",
+            "count": len(sources),
+            "referenced_by": sorted(sources),
+        }
+        for target, sources in references.items()
+    ]
+    rows.sort(key=lambda row: (-int(row["count"]), str(row["id"])))
+    if limit is None:
+        return rows
+    return rows[: _coerce_positive_int(limit, 20)]
+
+
 def list_edges_for_nodes(
     db_path: str,
     node_ids: Iterable[str],

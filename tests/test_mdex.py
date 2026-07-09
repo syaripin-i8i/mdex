@@ -285,6 +285,11 @@ def test_query_direction_preserved(build_config: dict[str, object], fixture_repo
     assert payload["stats"]["incoming_resolved"] == incoming_resolved
     assert payload["stats"]["incoming_unresolved"] == incoming_unresolved
 
+    positional = _run_cli("query", "--db", str(db_path), "docs/source.md")
+    assert positional.returncode == 0
+    positional_payload = json.loads(positional.stdout)
+    assert positional_payload["node"]["id"] == "docs/source.md"
+
 
 def test_related_uses_tag_and_type_signals(
     build_config: dict[str, object],
@@ -355,6 +360,17 @@ def test_orphans_lists_nodes_without_resolved_edges(
     table_output = _run_cli("orphans", "--db", str(db_path), "--format", "table")
     assert table_output.returncode == 0
     assert "docs/no_frontmatter.md\tPlain Note\tunknown\tunknown" in table_output.stdout
+
+    missing_output = _run_cli("orphans", "--db", str(db_path), "--missing")
+    assert missing_output.returncode == 0
+    missing_payload = json.loads(missing_output.stdout)
+    missing_map = {item["id"]: item for item in missing_payload}
+    assert missing_map["missing-note.md"]["referenced_by"] == ["docs/source.md"]
+    assert missing_map["missing.md"]["referenced_by"] == ["docs/source.md"]
+
+    missing_table = _run_cli("orphans", "--db", str(db_path), "--missing", "--format", "table")
+    assert missing_table.returncode == 0
+    assert "missing-note.md\t1\tdocs/source.md" in missing_table.stdout
 
 
 def test_list_json_format(

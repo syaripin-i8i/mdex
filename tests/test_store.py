@@ -12,6 +12,7 @@ from mdex.indexer import write_sqlite
 from mdex.store import (
     _search_terms,
     list_edges,
+    list_missing_links,
     list_nodes,
     list_orphan_nodes,
     list_stale_nodes,
@@ -129,6 +130,23 @@ See [Remove](remove.md).
             for row in conn.execute("SELECT id FROM node_overrides ORDER BY id").fetchall()
         ]
     assert override_ids == []
+
+
+def test_list_missing_links_groups_unresolved_links_to_targets(tmp_path: Path) -> None:
+    repo = tmp_path / "missing_links_repo"
+    repo.mkdir()
+    (repo / "a.md").write_text("# A\n\n[[ghost]]\n", encoding="utf-8")
+    (repo / "b.md").write_text("# B\n\n[[ghost]] [[other]]\n", encoding="utf-8")
+    db_path = tmp_path / "missing_links.db"
+    config = {"include_extensions": [".md"], "exclude_patterns": []}
+    write_sqlite(build_index(str(repo), config), str(db_path))
+
+    rows = list_missing_links(str(db_path))
+
+    assert rows == [
+        {"id": "ghost.md", "type": "links_to", "count": 2, "referenced_by": ["a.md", "b.md"]},
+        {"id": "other.md", "type": "links_to", "count": 1, "referenced_by": ["b.md"]},
+    ]
 
 
 def test_search_nodes_uses_override_summary(

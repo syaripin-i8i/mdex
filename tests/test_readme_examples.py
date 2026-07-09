@@ -48,9 +48,12 @@ def test_readme_quality_repo_expected_outputs_are_in_sync() -> None:
     assert '"command": "mdex"' in start_block
     assert '"args": ["open", "spec/b.md"]' in start_block
 
-    impact_start = section.index('"inputs": ["design/root.md"]')
+    impact_start = section.index('"inputs": [')
     impact_end = section.index("```", impact_start)
     impact_block = section[impact_start:impact_end]
+    assert '"path": "design/root.md"' in impact_block
+    assert '"exists": true' in impact_block
+    assert '"indexed": true' in impact_block
     assert '"id": "design/root.md"' in impact_block
     assert '"id": "tasks/pending/T20260101000001.md"' in impact_block
     assert '"id": "decision/a.md"' in impact_block

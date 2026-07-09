@@ -93,3 +93,29 @@ def test_doctor_reports_orphan_overrides_and_json_mismatch(tmp_path: Path) -> No
         if isinstance(finding, dict)
     )
     assert json_sync["status"] == "warning"
+
+
+def test_doctor_reports_unresolved_links_as_info(tmp_path: Path) -> None:
+    repo = tmp_path / "doctor_unresolved_repo"
+    repo.mkdir()
+    (repo / "a.md").write_text("# A\n\n[[ghost]]\n", encoding="utf-8")
+    (repo / "b.md").write_text("# B\n\n[[ghost]]\n", encoding="utf-8")
+    config = {"include_extensions": [".md"], "exclude_patterns": []}
+    db_path = tmp_path / "doctor_unresolved.db"
+    write_sqlite(build_index(str(repo), config), str(db_path))
+
+    report = build_doctor_report(str(db_path), repo_root=repo)
+    unresolved = _check(report, "unresolved_links")
+
+    assert report["status"] == "ok"
+    assert unresolved["status"] == "info"
+    assert report["summary"]["info"] == 1
+    assert unresolved["findings"] == [
+        {
+            "severity": "info",
+            "path": "ghost.md",
+            "message": "unresolved links_to target is referenced by indexed nodes",
+            "count": 2,
+            "referenced_by": ["a.md", "b.md"],
+        }
+    ]

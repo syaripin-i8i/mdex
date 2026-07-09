@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mdex.store import list_nodes, list_stale_nodes
+from mdex.store import get_scan_root, list_nodes, list_stale_nodes
 
 
 @dataclass
@@ -15,7 +15,56 @@ class _ScoredNode:
 
 
 def _normalize_path(path: str) -> str:
-    return path.strip().replace("\\", "/").lstrip("./")
+    normalized = path.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _resolve_input_root(db_path: str, repo_root: Path | None) -> Path:
+    if repo_root is not None:
+        return repo_root
+    try:
+        return Path(get_scan_root(db_path, default="."))
+    except Exception:
+        return Path(".")
+
+
+def _input_exists(path: str, root: Path) -> bool:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate.exists()
+    return (root / candidate).exists()
+
+
+def _annotate_inputs(
+    db_path: str,
+    normalized_inputs: list[str],
+    node_ids: set[str],
+    *,
+    repo_root: Path | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    root = _resolve_input_root(db_path, repo_root)
+    inputs: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    for path in normalized_inputs:
+        exists = _input_exists(path, root)
+        indexed = path in node_ids
+        item = {
+            "path": path,
+            "exists": bool(exists),
+            "indexed": bool(indexed),
+        }
+        inputs.append(item)
+        if not exists and not indexed:
+            warnings.append(
+                {
+                    "code": "input_not_found",
+                    "path": path,
+                    "message": "input path does not exist on disk and is not indexed",
+                }
+            )
+    return inputs, warnings
 
 
 def _basename(path: str) -> str:
@@ -139,11 +188,18 @@ def _dedupe_reasons(items: list[str]) -> list[str]:
     return ordered
 
 
-def build_impact_report(db_path: str, changed_paths: list[str], *, limit: int = 10) -> dict[str, Any]:
+def build_impact_report(
+    db_path: str,
+    changed_paths: list[str],
+    *,
+    limit: int = 10,
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
     normalized_inputs = [_normalize_path(path) for path in changed_paths if _normalize_path(path)]
     nodes = list_nodes(db_path)
     stale_ids = {str(row.get("id", "")) for row in list_stale_nodes(db_path, days=30)}
     node_map = {str(node.get("id", "")): node for node in nodes if str(node.get("id", "")).strip()}
+    input_rows, warnings = _annotate_inputs(db_path, normalized_inputs, set(node_map), repo_root=repo_root)
 
     scored: dict[str, _ScoredNode] = {}
     for node in nodes:
@@ -224,7 +280,8 @@ def build_impact_report(db_path: str, changed_paths: list[str], *, limit: int = 
 
     safe_limit = max(1, int(limit))
     return {
-        "inputs": normalized_inputs,
+        "inputs": input_rows,
+        "warnings": warnings,
         "read_first": read_first[:safe_limit],
         "related_tasks": related_tasks[:safe_limit],
         "decision_records": decision_records[:safe_limit],

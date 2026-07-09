@@ -7,7 +7,7 @@ from typing import Any
 from datetime import datetime, timezone
 
 from mdex.observe import telemetry_health_findings
-from mdex.store import list_index_metadata, list_node_override_ids, list_node_overrides, list_nodes
+from mdex.store import list_index_metadata, list_missing_links, list_node_override_ids, list_node_overrides, list_nodes
 
 LOCAL_SECRET_PATTERNS = (
     ".env*",
@@ -276,6 +276,23 @@ def _legacy_artifact_findings(repo_root: Path | None, db_path: Path) -> list[dic
     return findings
 
 
+def _unresolved_link_findings(db_path: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for row in list_missing_links(db_path, limit=10):
+        target = str(row.get("id", "")).strip()
+        referenced_by = [str(item) for item in row.get("referenced_by", []) if str(item).strip()]
+        findings.append(
+            {
+                "severity": "info",
+                "path": target,
+                "message": "unresolved links_to target is referenced by indexed nodes",
+                "count": int(row.get("count", 0) or 0),
+                "referenced_by": referenced_by,
+            }
+        )
+    return findings
+
+
 def _summary(checks: list[dict[str, Any]]) -> dict[str, int]:
     counts = {"error": 0, "warning": 0, "info": 0}
     for check in checks:
@@ -396,6 +413,7 @@ def build_doctor_report(
         _check_result("override_freshness", _override_freshness_findings(nodes, overrides)),
         _check_result("json_sqlite_sync", _json_sync_findings(metadata, json_index_path)),
         _check_result("legacy_artifacts", _legacy_artifact_findings(repo_root, db_path_obj)),
+        _check_result("unresolved_links", _unresolved_link_findings(db_path)),
         _check_result("telemetry_health", telemetry_health_findings(repo_root)),
     ]
     summary = _summary(checks)

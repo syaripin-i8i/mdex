@@ -96,6 +96,7 @@ mdex/
 ### Phase 2（探索）: 完了
 
 - `find` / `first` / `related` / `orphans` / `stale`
+- `orphans --missing` で unresolved `links_to` target を集計
 
 ### Phase A（導線）: 完了
 
@@ -123,7 +124,7 @@ mdex/
 ### impact
 
 - 入力: changed file path 群または `--changed-files-from-git`
-- 出力: `read_first`, `related_tasks`, `decision_records`, `stale_watch`
+- 出力: `inputs` (`path`, `exists`, `indexed`), `warnings`, `read_first`, `related_tasks`, `decision_records`, `stale_watch`
 
 ### finish
 

@@ -795,7 +795,8 @@ def test_impact_with_paths_and_with_git(
     assert by_git.returncode == 0
     by_git_payload = json.loads(by_git.stdout)
     assert by_git_payload["inputs"]
-    assert any(item.endswith("design/root.md") for item in by_git_payload["inputs"])
+    assert any(item["path"].endswith("design/root.md") for item in by_git_payload["inputs"])
+    assert all({"path", "exists", "indexed"}.issubset(item) for item in by_git_payload["inputs"])
 
 
 def test_finish_apply_and_scan(

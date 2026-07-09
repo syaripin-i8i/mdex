@@ -25,7 +25,13 @@
     "inputs": {
       "type": "array",
       "items": {
-        "type": "string"
+        "$ref": "#/$defs/inputItem"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/warningItem"
       }
     },
     "read_first": {
@@ -78,6 +84,46 @@
     }
   },
   "$defs": {
+    "inputItem": {
+      "type": "object",
+      "required": [
+        "path",
+        "exists",
+        "indexed"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "indexed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "warningItem": {
+      "type": "object",
+      "required": [
+        "code",
+        "path",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
     "impactItem": {
       "type": "object",
       "required": [

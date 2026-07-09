@@ -91,7 +91,14 @@
           "type": "array",
           "description": "Normalized changed-file inputs used for impact scoring.",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/inputItem"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "description": "Non-fatal input annotations such as missing unindexed paths.",
+          "items": {
+            "$ref": "#/$defs/warningItem"
           }
         },
         "read_first": {
@@ -202,6 +209,48 @@
     }
   },
   "$defs": {
+    "inputItem": {
+      "type": "object",
+      "description": "One impact input annotated with filesystem and index status.",
+      "required": [
+        "path",
+        "exists",
+        "indexed"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "indexed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "warningItem": {
+      "type": "object",
+      "description": "Non-fatal warning emitted by nested impact analysis.",
+      "required": [
+        "code",
+        "path",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
     "changedFileItem": {
       "type": "object",
       "description": "One changed file row with its origin.",

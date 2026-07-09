@@ -34,6 +34,7 @@ from mdex.store import (
     get_node,
     get_scan_root,
     list_edges,
+    list_missing_links,
     list_nodes,
     list_orphan_nodes,
     list_stale_nodes,
@@ -606,6 +607,13 @@ def _cmd_query(args: argparse.Namespace) -> int:
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
+    start_id = str(getattr(args, "node", "") or getattr(args, "node_arg", "") or "").strip()
+    if getattr(args, "node", None) and getattr(args, "node_arg", None):
+        _emit_error("invalid arguments", detail="use either --node or positional node id")
+        return 2
+    if not start_id:
+        _emit_error("invalid arguments", detail="specify --node or positional node id")
+        return 2
 
     try:
         node_map = _node_map_from_rows(list_nodes(db_path))
@@ -614,7 +622,6 @@ def _cmd_query(args: argparse.Namespace) -> int:
         _emit_error("failed to load graph", detail=str(exc))
         return 2
 
-    start_id = args.node
     if start_id not in node_map:
         loaded_node = get_node(db_path, start_id)
         if loaded_node is not None:
@@ -671,6 +678,13 @@ def _cmd_query(args: argparse.Namespace) -> int:
     }
     _emit_payload(output, pretty=True)
     return 0
+
+
+def _print_missing_links_table(rows: list[dict[str, Any]]) -> None:
+    _mark_stdout_payload(rows)
+    for row in rows:
+        referenced_by = ",".join(str(item) for item in row.get("referenced_by", []) if str(item).strip())
+        print(f"{row.get('id', '')}\t{row.get('count', 0)}\t{referenced_by}")
 
 
 def _cmd_related(args: argparse.Namespace) -> int:
@@ -733,6 +747,14 @@ def _cmd_orphans(args: argparse.Namespace) -> int:
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
+
+    if bool(getattr(args, "missing", False)):
+        rows = list_missing_links(db_path)
+        if args.format == "table":
+            _print_missing_links_table(rows)
+        else:
+            _emit_payload(rows, pretty=True)
+        return 0
 
     orphans = list_orphan_nodes(db_path)
     _print_nodes(orphans, args.format)
@@ -1077,8 +1099,9 @@ def _build_parser() -> argparse.ArgumentParser:
     open_parser.set_defaults(func=_cmd_open)
 
     query_parser = subparsers.add_parser("query", help="Query one node and its neighbors")
+    query_parser.add_argument("node_arg", nargs="?", help="Node id; equivalent to --node")
     query_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
-    query_parser.add_argument("--node", required=True, help="Node id")
+    query_parser.add_argument("--node", help="Node id")
     query_parser.set_defaults(func=_cmd_query)
 
     find_parser = subparsers.add_parser("find", help="Find nodes by keyword")
@@ -1091,6 +1114,7 @@ def _build_parser() -> argparse.ArgumentParser:
     orphan_parser = subparsers.add_parser("orphans", help="List nodes with no resolved edges")
     orphan_parser.add_argument("--db", help="Index SQLite file (auto-resolved when omitted)")
     orphan_parser.add_argument("--format", choices=["table", "json"], default="json")
+    orphan_parser.add_argument("--missing", action="store_true", help="List unresolved links_to targets with referrers")
     orphan_parser.set_defaults(func=_cmd_orphans)
 
     stale_parser = subparsers.add_parser("stale", help="List stale seed summaries for enrich planning")
