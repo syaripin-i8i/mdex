@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover
     tomllib = None  # type: ignore[assignment]
 
 
-SKIP_PACKAGES = {"mdex-cli", "pip", "setuptools", "wheel"}
+SKIP_PACKAGES = {"mdex-cli", "pip"}
 NAME_NORMALIZE_RE = re.compile(r"[-_.]+")
 TARGET_MATRIX = (
     ("3.10", "linux", "Linux", "posix"),

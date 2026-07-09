@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject scan outputs that collide with each other, their lock files, or an indexed source file, and write JSON indexes atomically.
+- Persist a versioned scan manifest and make `finish --scan` fail closed on stale config, scope, lane, output identity, or concurrent rescans.
+- Make `finish --scan` refresh both SQLite and JSON outputs and propagate scan failures.
+- Report SQLite-written/JSON-failed rescans as explicit partial updates.
+- Preserve spaces and non-ASCII Git paths when collecting changed files.
+- Prune virtual environments, dependency trees, and build caches before recursive scan traversal.
+- Fail scans on root traversal errors instead of replacing an index with a false empty result.
+- Serialize complete SQLite/JSON scan pairs and summary enrichment so concurrent agent updates or output generations are not lost.
+- Confine config/default-generated DB and JSON paths to `.mdex/`; explicit CLI paths remain available for one-shot scans.
+
+### Changed
+
+- The public main-index config moves completed `tasks/**` into a documented task-history lane.
+- The manual PyPI workflow now requires a version-matching tag, runs the full tests, hash-locks build tools, and publishes only the immutable smoke-tested artifact from an OIDC-isolated job.
+- Security, installation, and release documentation now reflect the published `0.4.x` line.
+
 ### Added
 
 - `scan-artifacts` builds a separate `.mdex/artifacts.db` index for generated observation artifacts without adding `outputs/` to the main repo index.

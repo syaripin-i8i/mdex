@@ -62,6 +62,8 @@ mdex finish --task "<task>" --db <db> --summary-file ./summary.txt --scan
 
 `scan` の既定出力は `.mdex/mdex_index.db` と `.mdex/mdex_index.json`。  
 `--db` / `--output` 指定時はそれを優先します。
+設定ファイルまたは既定値から解決する生成先は `.mdex/` 内に限定されます。
+`finish --scan` は直前の通常 `mdex scan` が保存した manifest を検証するため、旧DBは先に再scanしてください。
 
 ## Command Selection Rules
 
@@ -317,6 +319,8 @@ Agent integration guidance, including safe argv execution for structured actions
 - `scan_roots` は `"."`（repo root 前提）
 - `output_file` は `.mdex/mdex_index.json`
 - `.mdex/**` は scan 対象外
+- virtualenv / build cache は既定で scan 対象外
+- この repo の完了済み `tasks/**` は main index から外し、task-history index に分離
 - fixtures / evals / logs / dumps / archive は通常の repo index から除外し、必要時に直接読むか専用 index を使う
 
 ```bash
@@ -324,6 +328,7 @@ mdex scan --root . --config control/scan_config.json
 ```
 
 詳しい方針は `docs/context_hygiene.md` を参照してください。
+Task-history index の作成方法は `docs/task_index.md` を参照してください。
 
 ## Source of Truth
 
@@ -340,6 +345,7 @@ read order と source of truth は同義ではありません。
 | architecture / persistence / schema | `docs/design.md` |
 | input note contract | `docs/convention.md` |
 | context hygiene policy | `docs/context_hygiene.md` |
+| task-history index | `docs/task_index.md` |
 | agent integration | `docs/agent_integration.md` |
 | update / versioning policy | `docs/update_policy.md` |
 | schema versioning policy | `docs/schema_versioning.md` |
@@ -418,6 +424,7 @@ local/secret らしいファイルが index に入ると `warnings` に表示さ
 - `outputs/`
 - `tmp/`
 - `*.db`, `*.sqlite`, `*.sqlite3`
+- `*.db.lock`, `*.sqlite.lock`, `*.sqlite3.lock`, `*.json.lock`
 
 `outputs/` は main repo index からは除外したままにしてください。
 生成済み観測を検索したい場合は、別 lane として artifact index を作ります。
@@ -441,7 +448,7 @@ repo 外の root を使う場合は `.mdex/config.json` の object root で `id_
 ## Quick Verification
 
 ```bash
-mdex scan --root tests/fixtures/quality_repo --config control/scan_config.json
+mdex scan --root tests/fixtures/quality_repo --config tests/fixtures/quality_scan_config.json
 mdex doctor --db .mdex/mdex_index.db
 mdex start "root decision" --db .mdex/mdex_index.db --limit 5
 mdex impact design/root.md --db .mdex/mdex_index.db

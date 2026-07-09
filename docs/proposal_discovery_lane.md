@@ -1,15 +1,17 @@
 ---
 type: design
 project: mdex
-status: draft
-updated: 2026-04-20
+status: active
+updated: 2026-07-10
 ---
 
 # mdex を「気づきをもたらすツール」に寄せる提案 (Discovery Lane)
 
 ## ステータス
 
-未決定 (draft)。採用するか迷っている段階のメモ。0.1.x では入れず、将来の方向性メモとして保存する。
+部分採用済み。`discovery_candidates`、impact anomaly lanes、finish suspicion
+signals は 0.4.x で実装された。`related --mode surprising` など未採用の案は、
+golden-case 評価で価値を確認してから判断する。
 
 ## 現状確認
 

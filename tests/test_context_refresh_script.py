@@ -36,6 +36,12 @@ def test_context_refresh_classifies_repo_task_and_memory_paths() -> None:
     assert report["repo"]["files"] == ["mdex/context.py"]
     assert report["task"]["needed"] is True
     assert report["task"]["files"] == ["tasks/T20260101010101.md"]
+    assert report["task"]["command"][-4:] == [
+        "--db",
+        ".mdex/task_history.db",
+        "--output",
+        ".mdex/task_history.json",
+    ]
     assert report["memory"]["needed"] is True
     assert report["memory"]["files"] == ["memory/user.jsonl"]
 
@@ -49,6 +55,26 @@ def test_context_refresh_preserves_dot_directory_paths() -> None:
     assert report["repo"]["files"] == [".mdex/config.json"]
     assert report["memory"]["needed"] is True
     assert report["memory"]["files"] == [".mdex/memory/user.jsonl"]
+
+
+def test_context_refresh_index_engine_change_refreshes_repo_and_task() -> None:
+    script = _load_script()
+
+    report = script.classify_refresh_targets(["mdex/parser.py"])
+
+    assert report["repo"]["needed"] is True
+    assert report["repo"]["files"] == ["mdex/parser.py"]
+    assert report["task"]["needed"] is True
+    assert report["task"]["files"] == ["mdex/parser.py"]
+
+
+def test_context_refresh_does_not_treat_legacy_docs_tasks_as_task_lane() -> None:
+    script = _load_script()
+
+    report = script.classify_refresh_targets(["docs/tasks/legacy.md"])
+
+    assert report["repo"]["needed"] is True
+    assert report["task"]["needed"] is False
 
 
 def test_context_refresh_dry_run_does_not_execute_scan(tmp_path: Path) -> None:
@@ -109,3 +135,21 @@ def test_context_refresh_git_changed_files_handles_staged_unborn_head(tmp_path: 
     changed = script._git_changed_files(tmp_path)
 
     assert "tasks/T20260101010101.md" in changed
+
+
+def test_context_refresh_git_changed_files_preserves_non_ascii_and_spaces(tmp_path: Path) -> None:
+    script = _load_script()
+    probe = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False)
+    if probe.returncode != 0:
+        pytest.skip("git not available")
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    task_dir = tmp_path / "tasks"
+    task_dir.mkdir()
+    path = task_dir / "日本語 task.md"
+    path.write_text("# task\n", encoding="utf-8")
+    subprocess.run(["git", "add", path.relative_to(tmp_path).as_posix()], cwd=tmp_path, check=True)
+
+    changed = script._git_changed_files(tmp_path)
+
+    assert "tasks/日本語 task.md" in changed

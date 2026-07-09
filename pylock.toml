@@ -559,6 +559,17 @@ url = "https://files.pythonhosted.org/packages/3e/d2/1aaac33287e8cfb07aab2e6b8ac
 sha256 = "95f0802447ac2d10bcc69f6dc28fe95fdf17940367b21d34e34c737870758950"
 
 [[packages]]
+name = "setuptools"
+version = "83.0.0"
+
+[[packages.wheels]]
+name = "setuptools-83.0.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/5d/40/e1e72872c6354b306daef1703549e8e83b4d43cfea356311bf722a043752/setuptools-83.0.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"
+
+[[packages]]
 name = "sortedcontainers"
 version = "2.4.0"
 
@@ -612,3 +623,14 @@ url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a
 
 [packages.wheels.hashes]
 sha256 = "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897"
+
+[[packages]]
+name = "wheel"
+version = "0.47.0"
+
+[[packages.wheels]]
+name = "wheel-0.47.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/87/1b/9e33c09813d65e248f7f773119148a612516a4bea93e9c6f545f78455b7c/wheel-0.47.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "212281cab4dff978f6cedd499cd893e1f620791ca6ff7107cf270781e587eced"

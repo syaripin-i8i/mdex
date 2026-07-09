@@ -23,7 +23,16 @@ REPO_REFRESH_PATTERNS = (
 
 TASK_REFRESH_PATTERNS = (
     "tasks/",
-    "docs/tasks/",
+    "control/task_scan_config.json",
+)
+
+INDEX_ENGINE_REFRESH_PATTERNS = (
+    "mdex/builder.py",
+    "mdex/indexer.py",
+    "mdex/parser.py",
+    "mdex/scanner.py",
+    "mdex/store.py",
+    "mdex/tokens.py",
 )
 
 MEMORY_REFRESH_PATTERNS = (
@@ -58,7 +67,11 @@ def _matches(path: str, patterns: tuple[str, ...]) -> bool:
 def classify_refresh_targets(changed_files: list[str]) -> dict[str, Any]:
     normalized = [_to_posix(path) for path in changed_files if str(path).strip()]
     repo_files = [path for path in normalized if _matches(path, REPO_REFRESH_PATTERNS)]
-    task_files = [path for path in normalized if _matches(path, TASK_REFRESH_PATTERNS)]
+    task_files = [
+        path
+        for path in normalized
+        if _matches(path, TASK_REFRESH_PATTERNS) or _matches(path, INDEX_ENGINE_REFRESH_PATTERNS)
+    ]
     memory_files = [path for path in normalized if _matches(path, MEMORY_REFRESH_PATTERNS)]
 
     return {
@@ -73,8 +86,22 @@ def classify_refresh_targets(changed_files: list[str]) -> dict[str, Any]:
             "needed": bool(task_files),
             "reason": "task-history source changed" if task_files else "no task-history source change detected",
             "files": task_files,
-            "command": None,
-            "note": "configure a task-history index command in the owning repo wrapper",
+            "command": [
+                sys.executable,
+                "-m",
+                "mdex.cli",
+                "scan",
+                "--root",
+                "tasks",
+                "--node-id-root",
+                ".",
+                "--config",
+                "control/task_scan_config.json",
+                "--db",
+                ".mdex/task_history.db",
+                "--output",
+                ".mdex/task_history.json",
+            ],
         },
         "memory": {
             "needed": bool(memory_files),
@@ -87,51 +114,57 @@ def classify_refresh_targets(changed_files: list[str]) -> dict[str, Any]:
 
 
 def _git_changed_files(repo_root: Path) -> list[str]:
-    cached_result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
+    head_result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD"],
         cwd=repo_root,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
+        text=False,
+        check=False,
+    )
+    head_exists = head_result.returncode == 0
+
+    cached_result = subprocess.run(
+        ["git", "-c", "core.quotepath=false", "diff", "--cached", "--name-only", "-z"],
+        cwd=repo_root,
+        capture_output=True,
+        text=False,
         check=False,
     )
     if cached_result.returncode != 0:
-        raise RuntimeError(cached_result.stderr.strip() or "git diff --cached failed")
+        detail = cached_result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or "git diff --cached failed")
 
-    diff_result = subprocess.run(
-        ["git", "diff", "--name-only", "HEAD"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    diff_stdout = diff_result.stdout
-    if diff_result.returncode != 0:
-        detail = diff_result.stderr.strip() or "git diff failed"
-        unborn_markers = ("ambiguous argument 'HEAD'", "unknown revision", "bad revision 'HEAD'")
-        if any(marker.lower() in detail.lower() for marker in unborn_markers):
-            diff_stdout = ""
-        else:
-            raise RuntimeError(detail)
+    diff_stdout = b""
+    if head_exists:
+        diff_result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--name-only", "HEAD", "-z"],
+            cwd=repo_root,
+            capture_output=True,
+            text=False,
+            check=False,
+        )
+        if diff_result.returncode != 0:
+            detail = diff_result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(detail or "git diff failed")
+        diff_stdout = diff_result.stdout
 
     untracked_result = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
+        ["git", "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard", "-z"],
         cwd=repo_root,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
+        text=False,
         check=False,
     )
     if untracked_result.returncode != 0:
-        raise RuntimeError(untracked_result.stderr.strip() or "git ls-files failed")
+        detail = untracked_result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or "git ls-files failed")
 
     return sorted(
         {
-            line.strip()
+            path
             for output in (cached_result.stdout, diff_stdout, untracked_result.stdout)
-            for line in output.splitlines()
-            if line.strip()
+            for path in output.decode("utf-8", errors="surrogateescape").split("\0")
+            if path
         }
     )
 
@@ -180,6 +213,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if report["repo"]["needed"] and not args.dry_run:
             report["executed"].append({"target": "repo", **_run_repo_scan(repo_root, report["repo"]["command"])})
+        if report["task"]["needed"] and not args.dry_run:
+            report["executed"].append({"target": "task", **_run_repo_scan(repo_root, report["task"]["command"])})
 
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if any(item.get("exit_code", 0) != 0 for item in report["executed"]):

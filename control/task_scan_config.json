@@ -1,0 +1,40 @@
+{
+  "index_kind": "task",
+  "scan_roots": ["tasks"],
+  "include_extensions": [".md"],
+  "use_default_exclude_patterns": true,
+  "exclude_patterns": [
+    ".git/**",
+    ".mdex/**",
+    ".venv/**",
+    "venv/**",
+    "env/**",
+    ".tox/**",
+    ".nox/**",
+    "**/site-packages/**",
+    ".mypy_cache/**",
+    ".ruff_cache/**",
+    "__pycache__/**",
+    "*.egg-info/**",
+    "node_modules/**",
+    "dist/**",
+    "build/**",
+    ".env*",
+    "**/.env*",
+    "*.local.md",
+    "**/*.local.md",
+    "secrets.*",
+    "**/secrets.*",
+    "credentials.*",
+    "**/credentials.*",
+    "*.tmp.md",
+    ".tmp/**",
+    "**/.tmp/**"
+  ],
+  "node_type_map": {
+    "task": ["task", "tasks", "todo"]
+  },
+  "summary_max_sentences": 3,
+  "summary_max_chars": 200,
+  "output_file": ".mdex/task_history.json"
+}

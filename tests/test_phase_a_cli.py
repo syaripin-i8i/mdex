@@ -804,11 +804,32 @@ def test_finish_apply_and_scan(
     quality_config: dict[str, object],
     tmp_path: Path,
 ) -> None:
-    (quality_repo / ".gitignore").write_text("*.db\n", encoding="utf-8")
+    (quality_repo / ".gitignore").write_text(".mdex/\n*.db\n", encoding="utf-8")
+    config_path = quality_repo / "control" / "scan_config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                **quality_config,
+                "index_kind": "repo",
+                "scan_roots": ["."],
+                "output_file": ".mdex/mdex_index.json",
+            }
+        ),
+        encoding="utf-8",
+    )
     _init_git_repo(quality_repo)
 
-    db_path = quality_repo / "mdex_index.db"
-    _build_db(quality_repo, quality_config, db_path)
+    db_path = quality_repo / ".mdex" / "mdex_index.db"
+    scanned = _run_cli(
+        "scan",
+        "--config",
+        str(config_path),
+        "--db",
+        str(db_path),
+        cwd=quality_repo,
+    )
+    assert scanned.returncode == 0, scanned.stderr
 
     changed = quality_repo / "design" / "root.md"
     changed.write_text(changed.read_text(encoding="utf-8") + "\nfinish apply change\n", encoding="utf-8")

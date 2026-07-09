@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mdex.path_identity import deduplicate_directory_paths
+
 DEFAULT_CONFIG_RELATIVE = ".mdex/config.json"
 DEFAULT_DB_RELATIVE = ".mdex/mdex_index.db"
 FALLBACK_DB_RELATIVE = "mdex_index.db"
@@ -167,15 +169,9 @@ def resolve_scan_roots(
     if not values:
         values = [DEFAULT_SCAN_ROOT]
 
-    resolved: list[Path] = []
-    seen = set()
-    for value in values:
-        path = _as_path(context.repo_root, value, key="scan_roots")
-        normalized = path.as_posix().lower()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        resolved.append(path)
+    resolved = deduplicate_directory_paths(
+        _as_path(context.repo_root, value, key="scan_roots") for value in values
+    )
 
     if not resolved:
         resolved = [_as_path(context.repo_root, DEFAULT_SCAN_ROOT, key="scan_roots")]
@@ -247,6 +243,24 @@ def _ensure_parent(path: Path) -> bool:
     return True
 
 
+def _ensure_generated_db_path(repo_root: Path, candidate: Path, *, key: str) -> Path:
+    resolved = _ensure_within_repo(repo_root, candidate, key=key)
+    generated_root = (repo_root.resolve() / ".mdex").resolve()
+    try:
+        relative = resolved.relative_to(generated_root)
+    except ValueError as exc:
+        if resolved.exists():
+            raise ValueError(
+                f"{key} must not overwrite existing repository file outside .mdex: {_to_display_path(resolved)}"
+            ) from exc
+        raise ValueError(
+            f"{key} must stay within the repo .mdex directory: {_to_display_path(resolved)}"
+        ) from exc
+    if not relative.parts:
+        raise ValueError(f"{key} must name a file within the repo .mdex directory")
+    return resolved
+
+
 def resolve_db_path(
     explicit_db: str | None,
     *,
@@ -281,6 +295,9 @@ def resolve_db_path(
                 "config": context.config,
                 "resolution_attempts": attempts,
             }
+
+        if source in {"config", "repo_default"}:
+            candidate = _ensure_generated_db_path(context.repo_root, candidate, key="db")
 
         if _ensure_parent(candidate):
             return {

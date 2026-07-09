@@ -8,13 +8,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from mdex import artifacts
 from mdex.artifacts import build_artifacts_index
 from mdex.builder import build_index
 from mdex.context import select_context
 from mdex.indexer import write_sqlite
 from mdex.multiindex import build_multi_context_payload, build_multi_start_payload
-from mdex.store import list_nodes
+from mdex.store import list_index_metadata, list_nodes
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +40,32 @@ def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         stdin=subprocess.DEVNULL,
         env=env,
     )
+
+
+def test_artifact_walk_permission_error_is_not_treated_as_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+
+    def _walk(
+        _root: Path,
+        *,
+        topdown: bool,
+        followlinks: bool,
+        onerror: object,
+    ) -> list[object]:
+        assert topdown is True
+        assert followlinks is False
+        assert callable(onerror)
+        onerror(PermissionError("artifact scan denied"))
+        return []
+
+    monkeypatch.setattr(artifacts.os, "walk", _walk)
+
+    with pytest.raises(PermissionError, match="artifact scan denied"):
+        build_artifacts_index([outputs], {}, node_id_root=tmp_path)
 
 
 def test_artifacts_index_extracts_metadata_and_actionable_digest(tmp_path: Path) -> None:
@@ -499,3 +527,5 @@ def test_scan_artifacts_cli_accepts_private_root_specs(tmp_path: Path) -> None:
     artifact_json = (mdex_dir / "artifacts.json").read_text(encoding="utf-8")
     assert "agent/codex/memory.json" in artifact_json
     assert external.as_posix() not in artifact_json
+    artifact_metadata = list_index_metadata(str(mdex_dir / "artifacts.db"))
+    assert external.as_posix() not in artifact_metadata["scan_manifest"]

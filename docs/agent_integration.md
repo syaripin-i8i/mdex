@@ -174,7 +174,10 @@ python tools/context_refresh.py --dry-run
 python tools/context_refresh.py docs/design.md tasks/T20260101010101.md
 ```
 
-The script classifies changed files into repo/task/memory refresh targets and runs the repo `mdex scan` unless `--dry-run` is set. Task-history and memory indexes are reported as required refreshes with notes because their commands are repo-wrapper specific.
+The script classifies changed files into repo/task/memory refresh targets. Unless
+`--dry-run` is set, it refreshes the main repo index and the documented task-history
+index when either lane is affected. Memory refresh remains repo-wrapper specific and
+is reported without being executed.
 
 ## Local Telemetry
 

@@ -460,10 +460,15 @@ def test_scan_does_not_refresh_json_when_sqlite_write_fails(
     output_json = tmp_path / "scan_out.json"
     output_db = tmp_path / "scan_out.db"
 
-    def _fail_write_sqlite(index: dict[str, object], db_path: str) -> None:
+    def _fail_write_scan_outputs(
+        index: dict[str, object],
+        db_path: str,
+        json_path: str,
+        **_kwargs: object,
+    ) -> None:
         raise OSError("db locked")
 
-    monkeypatch.setattr(cli, "write_sqlite", _fail_write_sqlite)
+    monkeypatch.setattr(cli, "write_scan_outputs", _fail_write_scan_outputs)
 
     result = cli._cmd_scan(
         Namespace(
@@ -472,11 +477,187 @@ def test_scan_does_not_refresh_json_when_sqlite_write_fails(
             output=str(output_json),
             db=str(output_db),
             strict=False,
+            incremental=False,
+            node_id_root=None,
         )
     )
 
     assert result == 2
     assert not output_json.exists()
+
+
+def test_scan_rejects_config_changed_while_index_is_built(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "config_race_repo"
+    repo.mkdir()
+    (repo / "keep.md").write_text("# Keep\n", encoding="utf-8")
+    config_path = tmp_path / "scan_config.json"
+    config_path.write_text(
+        json.dumps({"include_extensions": [".md"], "exclude_patterns": []}),
+        encoding="utf-8",
+    )
+    output_json = tmp_path / "scan_out.json"
+    output_db = tmp_path / "scan_out.db"
+    original_build_index = cli.build_index
+
+    def _build_then_change_config(*args: object, **kwargs: object) -> dict[str, object]:
+        index = original_build_index(*args, **kwargs)
+        config_path.write_text(
+            json.dumps({"include_extensions": [".md"], "exclude_patterns": ["keep.md"]}),
+            encoding="utf-8",
+        )
+        return index
+
+    monkeypatch.setattr(cli, "build_index", _build_then_change_config)
+
+    result = cli._cmd_scan(
+        Namespace(
+            root=str(repo),
+            config=str(config_path),
+            output=str(output_json),
+            db=str(output_db),
+            strict=False,
+            incremental=False,
+            node_id_root=None,
+        )
+    )
+
+    assert result == 2
+    assert not output_db.exists()
+    assert not output_json.exists()
+
+
+def test_scan_rejects_root_identity_changed_while_index_is_built(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "root_race_repo"
+    repo.mkdir()
+    docs = repo / "docs"
+    docs.mkdir()
+    (docs / "keep.md").write_text("# Keep\n", encoding="utf-8")
+    config_path = tmp_path / "scan_config.json"
+    config_path.write_text(
+        json.dumps({"include_extensions": [".md"], "exclude_patterns": []}),
+        encoding="utf-8",
+    )
+    output_json = tmp_path / "scan_out.json"
+    output_db = tmp_path / "scan_out.db"
+    original_build_index = cli.build_index
+
+    def _build_then_move_root(*args: object, **kwargs: object) -> dict[str, object]:
+        index = original_build_index(*args, **kwargs)
+        docs.rename(repo / "moved-docs")
+        return index
+
+    monkeypatch.setattr(cli, "build_index", _build_then_move_root)
+
+    result = cli._cmd_scan(
+        Namespace(
+            root=str(docs),
+            config=str(config_path),
+            output=str(output_json),
+            db=str(output_db),
+            strict=False,
+            incremental=False,
+            node_id_root=None,
+        )
+    )
+
+    assert result == 2
+    assert not output_db.exists()
+    assert not output_json.exists()
+
+
+def test_scan_rejects_stale_build_after_concurrent_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "scan_cas_repo"
+    repo.mkdir()
+    (repo / "keep.md").write_text("# Keep\n", encoding="utf-8")
+    config_path = tmp_path / "scan_config.json"
+    config_path.write_text(
+        json.dumps({"include_extensions": [".md"], "exclude_patterns": []}),
+        encoding="utf-8",
+    )
+    output_json = tmp_path / "scan_out.json"
+    output_db = tmp_path / "scan_out.db"
+    real_write = cli.write_scan_outputs
+    injected = False
+
+    def _write_after_concurrent_scan(
+        index: dict[str, object],
+        db_path: str,
+        json_path: str,
+        **kwargs: object,
+    ) -> None:
+        nonlocal injected
+        if not injected:
+            injected = True
+            real_write(index, db_path, json_path)
+        real_write(index, db_path, json_path, **kwargs)
+
+    monkeypatch.setattr(cli, "write_scan_outputs", _write_after_concurrent_scan)
+
+    result = cli._cmd_scan(
+        Namespace(
+            root=str(repo),
+            config=str(config_path),
+            output=str(output_json),
+            db=str(output_db),
+            strict=False,
+            incremental=False,
+            node_id_root=None,
+        )
+    )
+
+    assert result == 2
+    assert output_db.exists()
+    assert output_json.exists()
+
+
+def test_artifact_scan_rejects_stale_build_after_concurrent_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "artifact_scan_cas_repo"
+    outputs = repo / "outputs"
+    outputs.mkdir(parents=True)
+    (outputs / "result.json").write_text('{"status":"ok"}\n', encoding="utf-8")
+    output_json = repo / ".mdex" / "artifacts.json"
+    output_db = repo / ".mdex" / "artifacts.db"
+    real_write = cli.write_scan_outputs
+    injected = False
+
+    def _write_after_concurrent_scan(
+        index: dict[str, object],
+        db_path: str,
+        json_path: str,
+        **kwargs: object,
+    ) -> None:
+        nonlocal injected
+        if not injected:
+            injected = True
+            real_write(index, db_path, json_path)
+        real_write(index, db_path, json_path, **kwargs)
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(cli, "write_scan_outputs", _write_after_concurrent_scan)
+
+    result = cli._cmd_scan_artifacts(
+        Namespace(
+            root=[str(outputs)],
+            output=str(output_json),
+            db=str(output_db),
+        )
+    )
+
+    assert result == 2
+    assert output_db.exists()
+    assert output_json.exists()
 
 
 def test_context_include_content(build_config: dict[str, object], fixture_repo: Path, tmp_path: Path) -> None:

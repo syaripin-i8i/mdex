@@ -13,6 +13,12 @@ This guide is the shortest path to seeing whether `mdex` helps your repo.
 
 ## 1. Install
 
+From PyPI:
+
+```bash
+python -m pip install mdex-cli
+```
+
 For the current GitHub source version:
 
 ```bash
@@ -23,12 +29,6 @@ For local development from this checkout:
 
 ```bash
 python -m pip install -e .
-```
-
-After public PyPI publication:
-
-```bash
-python -m pip install mdex-cli
 ```
 
 Supported Python versions are documented in `docs/support_matrix.md`.
@@ -59,11 +59,14 @@ If your repo does not have `control/scan_config.json`, create it before scanning
 
 ```json
 {
+  "index_kind": "repo",
   "scan_roots": ["."],
   "include_extensions": [".md"],
   "exclude_patterns": [
     ".git/**",
     ".mdex/**",
+    ".venv/**",
+    "venv/**",
     "node_modules/**",
     "outputs/**",
     "tmp/**",
@@ -84,6 +87,10 @@ mdex doctor --db .mdex/mdex_index.db
 mdex start "the task you are about to do" --db .mdex/mdex_index.db
 ```
 
+Configured/default DB and JSON outputs must stay under `.mdex/`. A successful
+`mdex scan` records their versioned manifest; run a normal scan once before using
+`finish --scan` with an index created by an older mdex version.
+
 Add `.json` / `.jsonl` only after you know which JSON files should influence first-pass judgment:
 
 ```json
@@ -92,6 +99,9 @@ Add `.json` / `.jsonl` only after you know which JSON files should influence fir
   "exclude_patterns": ["data/**", "logs/**", "fixtures/**"]
 }
 ```
+
+If a repository has a large completed task history, exclude `tasks/**` from the main
+index and build a separate task-history index as described in `docs/task_index.md`.
 
 ## 4. Add Just Enough Metadata
 

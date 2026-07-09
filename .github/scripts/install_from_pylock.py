@@ -30,7 +30,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in py3.10 runtime
     tomllib = None  # type: ignore[assignment]
 
 
-SKIP_PACKAGES = {"mdex-cli", "pip", "setuptools", "wheel"}
+SKIP_PACKAGES = {"mdex-cli", "pip"}
 ALLOWED_HASH_ALGORITHMS = {"sha256"}
 PACKAGE_BLOCK_RE = re.compile(r"(?ms)^\s*\[\[packages\]\]\s*(.*?)(?=^\s*\[\[packages\]\]|\Z)")
 TOP_LEVEL_KV_RE = re.compile(r'^([a-zA-Z0-9_-]+)\s*=\s*"([^"]*)"')
@@ -400,7 +400,18 @@ def main() -> int:
         )
         editable = (args.editable or "").strip()
         if editable:
-            _run([sys.executable, "-m", "pip", "install", "--editable", editable, "--no-deps"])
+            _run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--editable",
+                    editable,
+                    "--no-deps",
+                    "--no-build-isolation",
+                ]
+            )
     finally:
         req_path.unlink(missing_ok=True)
 

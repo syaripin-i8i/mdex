@@ -1,0 +1,13 @@
+{
+  "include_extensions": [".md", ".json", ".jsonl"],
+  "exclude_patterns": [],
+  "node_type_map": {
+    "design": ["design"],
+    "decision": ["decision"],
+    "spec": ["spec"],
+    "task": ["tasks", "task"],
+    "reference": ["notes", "note"]
+  },
+  "summary_max_sentences": 3,
+  "summary_max_chars": 200
+}

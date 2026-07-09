@@ -44,17 +44,80 @@ def test_collect_changed_files_combines_and_dedupes(
     def _fake_run(_base: Path, *args: str) -> subprocess.CompletedProcess[str]:
         if args == ("rev-parse", "--show-toplevel"):
             return _completed(["git", *args], 0, f"{repo}\n")
-        if args == ("diff", "--name-only", "--cached"):
-            return _completed(["git", *args], 0, "src\\a.py\nsrc\\b.py\n")
-        if args == ("diff", "--name-only"):
-            return _completed(["git", *args], 0, "src/b.py\n")
-        if args == ("ls-files", "--others", "--exclude-standard"):
-            return _completed(["git", *args], 0, "docs/new.md\n")
+        if args == ("diff", "--name-only", "--cached", "-z"):
+            return _completed(["git", *args], 0, "src/日本語 file.py\0src/shared.py\0")
+        if args == ("diff", "--name-only", "-z"):
+            return _completed(["git", *args], 0, "src/shared.py\0notes/quote'name.md\0")
+        if args == ("ls-files", "--others", "--exclude-standard", "-z"):
+            return _completed(["git", *args], 0, "docs/new file.md\0")
         raise AssertionError(f"unexpected args: {args}")
 
     monkeypatch.setattr(gittools, "_run_git", _fake_run)
     changed = collect_changed_files(repo)
-    assert changed == ["src/a.py", "src/b.py", "docs/new.md"]
+    assert changed == [
+        "src/日本語 file.py",
+        "src/shared.py",
+        "notes/quote'name.md",
+        "docs/new file.md",
+    ]
+
+
+def test_collect_paths_preserves_newlines_spaces_and_quotes() -> None:
+    result = _completed(
+        ["git", "diff", "--name-only", "-z"],
+        0,
+        "docs/line\nbreak.md\0docs/space file.md\0notes/quote'name.md\0",
+    )
+
+    assert gittools._collect_paths(result) == [
+        "docs/line\nbreak.md",
+        "docs/space file.md",
+        "notes/quote'name.md",
+    ]
+
+
+def test_collect_changed_files_round_trips_real_git_paths(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _git(*args: str) -> None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+        except FileNotFoundError:
+            pytest.skip("git is not installed")
+        assert result.returncode == 0, result.stderr
+
+    _git("init")
+    _git("config", "user.name", "mdex test")
+    _git("config", "user.email", "mdex@example.invalid")
+    _git("config", "commit.gpgsign", "false")
+
+    tracked = repo / "src" / "日本語 space.py"
+    tracked.parent.mkdir()
+    tracked.write_text("before\n", encoding="utf-8")
+    _git("add", "--", tracked.relative_to(repo).as_posix())
+    _git("commit", "--no-verify", "-m", "baseline")
+
+    tracked.write_text("after\n", encoding="utf-8")
+    staged = repo / "docs" / "追加 staged.md"
+    staged.parent.mkdir()
+    staged.write_text("staged\n", encoding="utf-8")
+    _git("add", "--", staged.relative_to(repo).as_posix())
+    untracked = repo / "notes" / "quote'name.md"
+    untracked.parent.mkdir()
+    untracked.write_text("untracked\n", encoding="utf-8")
+
+    assert collect_changed_files(repo) == [
+        "docs/追加 staged.md",
+        "src/日本語 space.py",
+        "notes/quote'name.md",
+    ]
 
 
 def test_collect_changed_files_raises_when_git_required(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -382,6 +382,36 @@ def test_real_pylock_is_covered_by_supplemental_release_hash_catalog() -> None:
     assert not missing, f"supplemental release hash catalog missing coverage: {missing}"
 
 
+def test_build_system_tools_are_exactly_pinned_in_dev_lock_and_hash_catalog() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((repo_root / "pylock.toml").read_text(encoding="utf-8"))
+    catalog = json.loads(
+        (repo_root / ".github" / "locks" / "pypi_release_hashes.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    locked_versions = {
+        str(package.get("name", "")).lower(): str(package.get("version", ""))
+        for package in lock.get("packages", [])
+        if isinstance(package, dict)
+    }
+    dev_names = {
+        Requirement(value).name.lower()
+        for value in project["project"]["optional-dependencies"]["dev"]
+    }
+
+    for raw_requirement in project["build-system"]["requires"]:
+        requirement = Requirement(raw_requirement)
+        name = requirement.name.lower()
+        assert str(requirement.specifier).startswith("==")
+        assert name in dev_names
+        assert name in locked_versions
+        assert Version(locked_versions[name]) in requirement.specifier
+        assert catalog[name]["version"] == locked_versions[name]
+        assert catalog[name]["hashes"]
+
+
 def test_ci_python_matrix_matches_release_hash_targets() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     export_module = _load_export_script_module()

@@ -2,7 +2,7 @@
 type: design
 project: mdex
 status: active
-updated: 2026-04-07
+updated: 2026-07-10
 ---
 
 # Markdown知識探索基盤 開発提案
@@ -19,10 +19,10 @@ updated: 2026-04-07
 
 ## フェーズ計画
 
-- Phase 1: Markdownパース + ノード/エッジJSON生成 + 簡易CLI
-- Phase 2: タスク抽出・見出し分割・逆参照・孤立検出
-- Phase 3: AI最適化（要約自動生成・探索順序制御）
-- Phase 4: 軽量WebUI + ノード可視化
+- Phase 1（完了）: Markdownパース + ノード/エッジJSON生成 + 簡易CLI
+- Phase 2（完了）: タスク抽出・逆参照・孤立検出
+- Phase 3（実装・評価中）: 要約override・探索順序制御・discovery・multi-index
+- Phase 4（提案）: 軽量WebUI + ノード可視化。評価基盤とAPI契約の安定後に判断
 
 ## 次に見る
 

@@ -2,7 +2,7 @@
 type: design
 project: mdex
 status: active
-updated: 2026-04-19
+updated: 2026-07-10
 ---
 
 # mdex 設計書
@@ -42,6 +42,9 @@ index_metadata
 ```
 
 `list_nodes` / `get_node` は `node_overrides` をマージして返す。
+`index_metadata.scan_manifest` は repo/root/config hash/index lane/DB/JSON/scan ID
+を保持し、DB と JSON に同じ generation を対応づける。`finish --scan` はこの
+manifest を fail-closed で再検証し、lock 内でも旧 scan ID を照合する。
 
 ## DB 自動解決
 
@@ -61,24 +64,36 @@ index_metadata
 - `scan_root` (string) は後方互換 alias として扱います
 - `scan_roots` と `scan_root` が同時にある場合は `scan_roots` を優先し、warning を返します
 - 複数 root で同一 `node_id` が衝突した場合は fail-closed で `scan` を失敗させます
+- config/default の DB/JSON 出力は `.mdex/` 内に限定します
+- DB と JSON、および相互の lock path が衝突する設定は拒否します
+- DB/JSON pair 全体を canonical path 順で lock し、別DBが同じJSONを共有する場合も競合を拒否します
 
 ## モジュール責務
 
 ```
 mdex/
   cli.py         コマンド入口
+  contract.py    JSON contract metadata / error code
+  db_ownership.py SQLite ownership / legacy schema recognition
   dbresolve.py   repo/config/db 解決
   scanner.py     対象ファイル列挙
   parser.py      frontmatter/link/summary 抽出
   builder.py     ノード・エッジ生成
   indexer.py     JSON / SQLite 出力
+  locking.py     scan / enrich の DB 別排他制御
+  output_paths.py scan output の境界・衝突検証
+  path_identity.py path alias / root identity 検証
+  scan_manifest.py scan generation / scope / config identity
   store.py       SQLite API
   resolver.py    first / related
   context.py     context 選別（actionable digest 出力あり）
+  multiindex.py  repo / task / memory / artifact index 統合
   start.py       start JSON 生成
   gittools.py    git changed files 収集
   impact.py      changed file 起点の分類
   finish.py      finish の dry-run / apply / scan 制御
+  artifacts.py   生成済み観測の分離 index
+  observe.py     opt-in local telemetry
   scaffold.py    new / stamp
   enrich.py      summary 更新
   reader.py      node-id から本文取得
@@ -107,6 +122,17 @@ mdex/
 - `finish` (`--dry-run`, `--summary-file`, `--scan`)
 - `new` / `stamp`
 - DB 自動解決
+
+### Phase 3（AI最適化）: 実装・評価中
+
+- explainable context scoring / discovery candidates
+- actionable digest / agent prompt pack
+- repo / task / memory / artifact の multi-index
+- 次段階は golden cases による relevance / latency 評価
+
+### Phase 4（可視化）: 提案段階
+
+- 軽量 Web UI / graph 表示は、検索品質評価と API 契約の安定化後に判断する
 
 ## コマンド設計
 

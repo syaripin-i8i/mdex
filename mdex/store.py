@@ -9,6 +9,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from mdex.db_ownership import has_legacy_mdex_metadata, has_mdex_schema
+from mdex.locking import DEFAULT_DB_LOCK_TIMEOUT_SECONDS, exclusive_db_lock
+from mdex.output_paths import ensure_scan_output_resource
+from mdex.path_identity import validated_mutable_resource
+from mdex.scan_manifest import ScanManifestError, load_scan_manifest
+
 OVERRIDE_SELECT_SQL = (
     "SELECT id, summary, summary_source, summary_updated "
     "FROM node_overrides"
@@ -78,6 +84,23 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
         (name,),
     ).fetchone()
     return row is not None
+
+
+def _ensure_owned_mdex_database(conn: sqlite3.Connection, db_path: Path) -> None:
+    if not has_mdex_schema(conn):
+        raise ValueError(f"refusing to mutate an unowned SQLite database: {db_path}")
+    metadata = {
+        str(row[0]): str(row[1])
+        for row in conn.execute("SELECT key, value FROM index_metadata").fetchall()
+    }
+    if not has_legacy_mdex_metadata(metadata):
+        raise ValueError(f"refusing to mutate an unowned SQLite database: {db_path}")
+    raw_manifest = metadata.get("scan_manifest", "").strip()
+    if raw_manifest:
+        try:
+            load_scan_manifest(metadata)
+        except ScanManifestError as exc:
+            raise ValueError(f"refusing to mutate database with invalid scan manifest: {db_path}") from exc
 
 
 def _column_exists(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
@@ -631,36 +654,91 @@ def update_node_summary(
     summary: str,
     *,
     source: str = "agent",
+    lock_timeout: float = DEFAULT_DB_LOCK_TIMEOUT_SECONDS,
 ) -> bool:
+    result = apply_node_summary(
+        db_path,
+        node_id,
+        summary,
+        source=source,
+        overwrite_existing_agent=True,
+        lock_timeout=lock_timeout,
+    )
+    return result.get("status") == "updated"
+
+
+def apply_node_summary(
+    db_path: str,
+    node_id: str,
+    summary: str,
+    *,
+    source: str = "agent",
+    overwrite_existing_agent: bool = False,
+    lock_timeout: float = DEFAULT_DB_LOCK_TIMEOUT_SECONDS,
+) -> dict[str, str]:
     clean_id = node_id.strip()
     if not clean_id:
-        return False
+        return {"status": "missing"}
     clean_summary = summary.strip()
     clean_source = source.strip() if source and source.strip() else "agent"
-    now = datetime.now(timezone.utc).isoformat()
+    ensure_scan_output_resource(db_path)
+    safe_db_path = validated_mutable_resource(db_path, label="database")
+    with exclusive_db_lock(safe_db_path, timeout=lock_timeout):
+        safe_db_path = validated_mutable_resource(safe_db_path, label="database")
+        with _connect(str(safe_db_path)) as conn:
+            _ensure_owned_mdex_database(conn, safe_db_path)
+            _ensure_node_overrides_table(conn)
+            row = conn.execute(
+                """
+                SELECT
+                    nodes.summary AS seed_summary,
+                    nodes.summary_source AS seed_source,
+                    node_overrides.id AS override_id,
+                    node_overrides.summary AS override_summary,
+                    node_overrides.summary_source AS override_source
+                FROM nodes
+                LEFT JOIN node_overrides ON node_overrides.id = nodes.id
+                WHERE nodes.id = ?
+                """,
+                (clean_id,),
+            ).fetchone()
+            if row is None:
+                return {"status": "missing"}
 
-    with _connect(db_path) as conn:
-        node_exists = conn.execute(
-            "SELECT 1 FROM nodes WHERE id = ?",
-            (clean_id,),
-        ).fetchone()
-        if node_exists is None:
-            return False
+            has_override = row["override_id"] is not None
+            previous_summary = str(
+                row["override_summary"] if has_override else row["seed_summary"] or ""
+            )
+            previous_source = str(
+                row["override_source"] if has_override else row["seed_source"] or "seed"
+            ).strip().lower()
+            if previous_source == "agent" and not overwrite_existing_agent:
+                return {
+                    "status": "skipped",
+                    "previous_summary": previous_summary,
+                    "previous_source": previous_source,
+                }
 
-        _ensure_node_overrides_table(conn)
-        cursor = conn.execute(
-            """
-            INSERT INTO node_overrides (id, summary, summary_source, summary_updated)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                summary = excluded.summary,
-                summary_source = excluded.summary_source,
-                summary_updated = excluded.summary_updated
-            """,
-            (clean_id, clean_summary, clean_source, now),
-        )
-        conn.commit()
-        return int(cursor.rowcount or 0) > 0
+            now = datetime.now(timezone.utc).isoformat()
+            cursor = conn.execute(
+                """
+                INSERT INTO node_overrides (id, summary, summary_source, summary_updated)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    summary = excluded.summary,
+                    summary_source = excluded.summary_source,
+                    summary_updated = excluded.summary_updated
+                """,
+                (clean_id, clean_summary, clean_source, now),
+            )
+            conn.commit()
+            if int(cursor.rowcount or 0) <= 0:
+                return {"status": "failed"}
+            return {
+                "status": "updated",
+                "previous_summary": previous_summary,
+                "previous_source": previous_source,
+            }
 
 
 def resolve_node_id_from_path(db_path: str, absolute_path: str) -> str | None:

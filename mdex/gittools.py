@@ -24,7 +24,7 @@ def git_top_level(base_dir: str | Path) -> Path | None:
     probe = _run_git(root, "rev-parse", "--show-toplevel")
     if probe.returncode != 0:
         return None
-    text = probe.stdout.strip()
+    text = probe.stdout.rstrip("\r\n")
     if not text:
         return None
     return Path(text).resolve()
@@ -34,15 +34,10 @@ def is_git_repo(base_dir: str | Path) -> bool:
     return git_top_level(base_dir) is not None
 
 
-def _collect_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
+def _collect_paths(result: subprocess.CompletedProcess[str]) -> list[str]:
     if result.returncode != 0:
         return []
-    rows: list[str] = []
-    for raw in result.stdout.splitlines():
-        clean = raw.strip().replace("\\", "/")
-        if clean:
-            rows.append(clean)
-    return rows
+    return [path for path in result.stdout.split("\0") if path]
 
 
 def _dedupe_keep_order(items: list[str]) -> list[str]:
@@ -64,8 +59,8 @@ def collect_changed_files(base_dir: str | Path, *, require_git: bool = False) ->
             raise GitError("not a git repository")
         return []
 
-    staged = _run_git(git_root, "diff", "--name-only", "--cached")
-    unstaged = _run_git(git_root, "diff", "--name-only")
-    untracked = _run_git(git_root, "ls-files", "--others", "--exclude-standard")
-    combined = _collect_lines(staged) + _collect_lines(unstaged) + _collect_lines(untracked)
+    staged = _run_git(git_root, "diff", "--name-only", "--cached", "-z")
+    unstaged = _run_git(git_root, "diff", "--name-only", "-z")
+    untracked = _run_git(git_root, "ls-files", "--others", "--exclude-standard", "-z")
+    combined = _collect_paths(staged) + _collect_paths(unstaged) + _collect_paths(untracked)
     return _dedupe_keep_order(combined)

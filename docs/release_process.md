@@ -1,21 +1,23 @@
 # Release Process
 
-This workflow is intentionally manual-first. Publishing stays disabled in practice
-until PyPI Trusted Publisher registration is complete.
+Releases are intentionally manual-first. PyPI Trusted Publishing is configured and
+was used for the `0.4.0` release. The workflow accepts only a version-matching tag.
 
-## Trusted Publisher Setup (PyPI)
+## Trusted Publisher Configuration
 
-1. Create a PyPI account and project ownership for `mdex-cli`.
-2. In PyPI, add a Trusted Publisher:
-   - Project name: `mdex-cli`
-   - Repository: `syaripin-i8i/mdex`
-   - Workflow: `.github/workflows/release.yml`
-   - Environment: optional (recommended if you use protected environments)
-3. Keep `.github/workflows/release.yml` on `workflow_dispatch` only until setup is verified.
+- Project name: `mdex-cli`
+- Repository: `syaripin-i8i/mdex`
+- Workflow: `.github/workflows/release.yml`
+
+Keep the workflow on `workflow_dispatch` until tag-triggered releases are
+intentionally enabled. If a protected GitHub environment is added later, update the
+PyPI Trusted Publisher identity at the same time.
 
 ## Pre-release Checklist
 
-1. Update `pylock.toml`:
+1. Update the version in `pyproject.toml` and `mdex/__init__.py`.
+2. Move the intended entries out of `Unreleased` in `CHANGELOG.md`.
+3. Update `pylock.toml`:
    - `python -m pip lock -e ".[dev]" -o pylock.toml`
    - Regenerate only on an environment that yields the dependency superset
      (historically Windows + a recent supported Python). `pip lock` resolves
@@ -26,30 +28,40 @@ until PyPI Trusted Publisher registration is complete.
    - Without a Windows environment, keep the committed lock and apply
      surgical version bumps, or move to a multi-environment lock generator.
    - `export_release_hashes.py` requires Python >= 3.11 (stdlib `tomllib`).
-2. Update release hash catalog:
+4. Update release hash catalog:
    - `python .github/scripts/export_release_hashes.py --lock pylock.toml --output .github/locks/pypi_release_hashes.json`
-3. Update `CHANGELOG.md`.
-4. Run local verification:
+5. Run local verification:
    - `python -m pytest -q`
-   - `python -m build`
+   - `python -m build --no-isolation`
    - `python -m twine check dist/*`
 
 ## Manual Release Run
 
-Run from CLI:
+Create and push an annotated version tag, then dispatch the workflow at that tag:
 
 ```bash
-gh workflow run release.yml
+git tag -a vX.Y.Z -m "Release X.Y.Z"
+git push origin vX.Y.Z
+gh workflow run release.yml --ref vX.Y.Z
 ```
+
+The workflow rejects branch refs and tags that do not equal `v<project.version>`.
 
 The workflow performs:
 
-1. lockfile-driven install (`python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .`)
-2. build (`python -m build`)
-3. metadata validation (`python -m twine check dist/*`)
-4. sdist install smoke (`pip install dist/*.tar.gz` then `mdex --help`)
-5. wheel install smoke (`pip install dist/*.whl` then `mdex --help`)
-6. Trusted Publishing upload with attestation
+1. tag/package-version validation
+2. lockfile-driven install (`python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .`)
+3. full test suite
+4. build with hash-locked `setuptools` / `wheel` (`python -m build --no-isolation`)
+5. metadata validation (`python -m twine check dist/*`)
+6. immutable artifact upload before any package install smoke
+7. separate dependency-free sdist smoke (`pip install --no-deps --no-build-isolation dist/*.tar.gz` then `mdex --help`)
+8. separate dependency-free wheel smoke (`pip install --no-deps dist/*.whl` then `mdex --help`)
+9. fresh download of the validated immutable artifact into the isolated publish job
+10. Trusted Publishing upload with attestation
+
+Only the publish job receives `id-token: write`; checkout, dependency installation,
+tests, and builds run without OIDC minting permission.
 
 ## Future Automation
 

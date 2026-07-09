@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import os
 import re
 from collections import deque
 from collections.abc import Iterable
@@ -10,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mdex.output_paths import ScanIndex
+from mdex.path_identity import canonical_path_key, deduplicate_directory_paths
 from mdex.tokens import estimate_tokens
 
 DEFAULT_ARTIFACT_ROOTS = ("outputs",)
@@ -137,17 +140,12 @@ def _root_path_from_item(item: Any) -> Path | None:
 
 def _resolve_root_paths(root_items: Iterable[Any]) -> list[Path]:
     resolved: list[Path] = []
-    seen: set[str] = set()
     for item in root_items:
         path = _root_path_from_item(item)
         if path is None:
             continue
-        key = path.as_posix().lower()
-        if key in seen:
-            continue
-        seen.add(key)
         resolved.append(path)
-    return resolved
+    return deduplicate_directory_paths(resolved)
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -184,7 +182,7 @@ def _root_specs(root_items: Iterable[Any], root_path: Path) -> list[dict[str, An
         path = _root_path_from_item(item)
         if path is None:
             continue
-        key = path.as_posix().lower()
+        key = canonical_path_key(path)
         if key in seen:
             continue
         seen.add(key)
@@ -266,22 +264,39 @@ def _display_root(spec: dict[str, Any], root_path: Path) -> str:
 def _list_artifact_files(roots: list[Path], include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
     files: list[Path] = []
     seen: set[str] = set()
+
+    def _raise_walk_error(error: OSError) -> None:
+        raise error
+
     for root in roots:
         if not root.exists() or not root.is_dir():
             continue
-        for file_path in root.rglob("*"):
-            if file_path.is_symlink() or not file_path.is_file():
-                continue
-            relative = _to_posix(str(file_path.relative_to(root)))
-            if not _matches_any(relative, include_globs):
-                continue
-            if _matches_any(relative, exclude_globs):
-                continue
-            key = file_path.resolve().as_posix()
-            if key in seen:
-                continue
-            seen.add(key)
-            files.append(file_path.resolve())
+        for current_dir, directory_names, file_names in os.walk(
+            root,
+            topdown=True,
+            followlinks=False,
+            onerror=_raise_walk_error,
+        ):
+            current_path = Path(current_dir)
+            directory_names[:] = [
+                name
+                for name in directory_names
+                if not (current_path / name).is_symlink()
+            ]
+            for file_name in file_names:
+                file_path = current_path / file_name
+                if file_path.is_symlink() or not file_path.is_file():
+                    continue
+                relative = _to_posix(str(file_path.relative_to(root)))
+                if not _matches_any(relative, include_globs):
+                    continue
+                if _matches_any(relative, exclude_globs):
+                    continue
+                key = file_path.resolve().as_posix()
+                if key in seen:
+                    continue
+                seen.add(key)
+                files.append(file_path.resolve())
     return sorted(files, key=lambda item: item.as_posix())
 
 
@@ -566,8 +581,9 @@ def build_artifacts_index(
     nodes: list[dict[str, Any]] = []
     warnings: list[dict[str, str]] = []
     fingerprints: dict[str, dict[str, Any]] = {}
+    source_paths = _list_artifact_files(resolved_roots, include_globs, exclude_globs)
 
-    for file_path in _list_artifact_files(resolved_roots, include_globs, exclude_globs):
+    for file_path in source_paths:
         root_spec = _matching_root_spec(file_path, specs)
         try:
             node_id = _node_id_for_artifact(file_path, root_path, root_spec)
@@ -675,7 +691,7 @@ def build_artifacts_index(
         for warning in load_warnings:
             warnings.append(_warning(node_id, "read_warning", warning))
 
-    return {
+    return ScanIndex({
         "generated": _now_iso(),
         "scan_root": _to_posix(str(root_path)),
         "scan_roots": [_display_root(spec, root_path) for spec in specs],
@@ -684,4 +700,4 @@ def build_artifacts_index(
         "warnings": warnings,
         "fingerprints": fingerprints,
         "index_kind": "artifacts",
-    }
+    }, source_paths=source_paths)

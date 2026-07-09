@@ -19,6 +19,10 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+*.db.lock
+*.sqlite.lock
+*.sqlite3.lock
+*.json.lock
 /list_out.tmp
 /*_index*.json
 /*_index*.db

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -24,9 +25,22 @@ from mdex.enrich import enrich_node, resolve_node_id
 from mdex.finish import FinishError, run_finish
 from mdex.gittools import GitError, collect_changed_files
 from mdex.impact import build_impact_report
-from mdex.indexer import write_json, write_sqlite
+from mdex.indexer import snapshot_database_state, write_scan_outputs
 from mdex.multiindex import build_multi_context_payload, build_multi_start_payload, resolve_index_specs
 from mdex.observe import record_command_event
+from mdex.output_paths import (
+    configured_generated_output_path,
+    ensure_distinct_scan_outputs,
+    ensure_outputs_do_not_overwrite_sources,
+)
+from mdex.path_identity import canonical_path_key, capture_directory_identities
+from mdex.scan_manifest import (
+    ScanManifestError,
+    build_scan_manifest,
+    load_scan_manifest,
+    normalized_index_kind,
+    set_scan_manifest,
+)
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
 from mdex.start import build_start_payload
@@ -34,6 +48,7 @@ from mdex.store import (
     get_node,
     get_scan_root,
     list_edges,
+    list_index_metadata,
     list_missing_links,
     list_nodes,
     list_orphan_nodes,
@@ -97,13 +112,24 @@ class JsonArgumentParser(argparse.ArgumentParser):
 
 
 def _load_json(path: str, *, optional: bool = False) -> dict[str, Any]:
+    data, _identity = _load_json_with_identity(path, optional=optional)
+    return data
+
+
+def _load_json_with_identity(
+    path: str,
+    *,
+    optional: bool = False,
+) -> tuple[dict[str, Any], str]:
     source = Path(path)
     if optional and not source.exists():
-        return {}
-    data = json.loads(source.read_text(encoding="utf-8"))
+        payload = b""
+        return {}, hashlib.sha256(payload).hexdigest()
+    payload = source.read_bytes()
+    data = json.loads(payload.decode("utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"JSON root must be object: {path}")
-    return data
+    return data, hashlib.sha256(payload).hexdigest()
 
 
 def _node_map_from_rows(nodes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -212,6 +238,25 @@ def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) 
         return None
 
     repo_root = Path(repo_root_raw)
+    db_path = Path(str(db_info.get("path", ""))).resolve()
+    try:
+        metadata = list_index_metadata(str(db_path))
+    except Exception:
+        metadata = {}
+    if str(metadata.get("scan_manifest", "")).strip():
+        try:
+            manifest = load_scan_manifest(metadata)
+            manifest_output = manifest["output"]
+            if canonical_path_key(str(manifest_output["db"])) != canonical_path_key(db_path):
+                return None
+            return configured_generated_output_path(
+                repo_root,
+                str(manifest_output["json"]),
+                key="scan manifest output.json",
+            )
+        except (OSError, ValueError, ScanManifestError):
+            return None
+
     runtime_config = db_info.get("config", {})
     if not isinstance(runtime_config, dict):
         runtime_config = {}
@@ -230,8 +275,17 @@ def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) 
 
     output_setting = scan_config.get("output_file")
     if isinstance(output_setting, str) and output_setting.strip():
-        return (repo_root / output_setting.strip()).resolve()
-    return (repo_root / ".mdex" / "mdex_index.json").resolve()
+        output_value = output_setting.strip()
+    else:
+        output_value = ".mdex/mdex_index.json"
+    try:
+        return configured_generated_output_path(
+            repo_root,
+            output_value,
+            key="output_file",
+        )
+    except ValueError:
+        return None
 
 
 def _cmd_scan(args: argparse.Namespace) -> int:
@@ -242,8 +296,19 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
     try:
         context = load_runtime_context(Path.cwd())
+        if str(db_info.get("source", "")) in {"config", "repo_default"}:
+            db_path = str(
+                configured_generated_output_path(
+                    context.repo_root,
+                    db_path,
+                    key="db",
+                )
+            )
         config_path = Path(args.config).resolve() if args.config else resolve_scan_config_path(context)
-        config = _load_json(str(config_path), optional=not bool(args.config))
+        config, config_file_sha256 = _load_json_with_identity(
+            str(config_path),
+            optional=not bool(args.config),
+        )
 
         scan_root_warnings: list[str] = []
         if args.root:
@@ -257,14 +322,29 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             else:
                 scan_roots, scan_root_warnings = resolve_scan_roots(context)
 
+        for scan_root in scan_roots:
+            if not scan_root.exists() or not scan_root.is_dir():
+                raise ValueError(f"scan root is missing or not a directory: {scan_root}")
+
         if args.output:
             output_path = Path(args.output).resolve()
+            output_origin = "arg"
         else:
             output_setting = config.get("output_file")
             if isinstance(output_setting, str) and output_setting.strip():
-                output_path = (context.repo_root / output_setting.strip()).resolve()
+                output_value = output_setting.strip()
+                output_origin = "config"
             else:
-                output_path = (context.repo_root / ".mdex" / "mdex_index.json").resolve()
+                output_value = ".mdex/mdex_index.json"
+                output_origin = "default"
+            output_path = configured_generated_output_path(
+                context.repo_root,
+                output_value,
+                key="output_file",
+            )
+
+        ensure_distinct_scan_outputs(db_path, output_path)
+        expected_database_state = snapshot_database_state(db_path)
 
         previous_fingerprints: dict[str, Any] = {}
         if bool(getattr(args, "incremental", False)) and Path(db_path).exists():
@@ -279,7 +359,21 @@ def _cmd_scan(args: argparse.Namespace) -> int:
                 previous_fingerprints = {}
 
         node_id_root = Path(args.node_id_root).resolve() if args.node_id_root else None
+        if node_id_root is not None:
+            if not node_id_root.exists() or not node_id_root.is_dir():
+                raise ValueError(f"node-id root is missing or not a directory: {node_id_root}")
+            for scan_root in scan_roots:
+                try:
+                    scan_root.relative_to(node_id_root)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"node-id root must contain every scan root: {node_id_root}"
+                    ) from exc
+        root_identities = capture_directory_identities(
+            [*scan_roots, *([node_id_root] if node_id_root is not None else [])]
+        )
         index = build_index(scan_roots, config, strict=bool(args.strict), node_id_root=node_id_root)
+        ensure_outputs_do_not_overwrite_sources(index, db_path, output_path)
         fingerprints = index.get("fingerprints", {}) if isinstance(index.get("fingerprints"), dict) else {}
         unchanged = sum(1 for node_id, value in fingerprints.items() if previous_fingerprints.get(node_id) == value)
         changed_or_new = max(0, len(fingerprints) - unchanged)
@@ -287,8 +381,29 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         for warning in scan_root_warnings:
             index_warnings.append({"path": "scan_config", "error": warning})
         index["warnings"] = index_warnings
-        write_sqlite(index, db_path)
-        write_json(index, str(output_path))
+        set_scan_manifest(
+            index,
+            build_scan_manifest(
+                repo_root=context.repo_root,
+                scan_roots=scan_roots,
+                node_id_root=str(index.get("scan_root", context.repo_root)),
+                config_path=config_path,
+                config=config,
+                db_output=db_path,
+                output_json=output_path,
+                output_origin=output_origin,
+                index_kind=normalized_index_kind(config.get("index_kind"), default="repo"),
+                config_file_sha256=config_file_sha256,
+                strict=bool(args.strict),
+            ),
+        )
+        write_scan_outputs(
+            index,
+            db_path,
+            str(output_path),
+            expected_database_state=expected_database_state,
+            expected_root_identities=root_identities,
+        )
     except Exception as exc:
         _emit_error("scan failed", detail=str(exc))
         return 2
@@ -363,7 +478,11 @@ def _artifact_root_item(context: RuntimeContext, item: Any) -> Any:
 def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
     try:
         context = load_runtime_context(Path.cwd())
-        artifact_config = dict(_configured_index_spec(context.config, "artifacts"))
+        runtime_config, config_file_sha256 = _load_json_with_identity(
+            str(context.config_path),
+            optional=True,
+        )
+        artifact_config = dict(_configured_index_spec(runtime_config, "artifacts"))
 
         if getattr(args, "root", None):
             roots = [Path(item).resolve() for item in args.root if str(item).strip()]
@@ -378,27 +497,78 @@ def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
             else:
                 roots = [_repo_path(context, root) for root in DEFAULT_ARTIFACT_ROOTS]
 
+        if not roots:
+            raise ValueError("at least one valid artifact scan root is required")
+        resolved_artifact_roots = [
+            Path(root.get("path")) if isinstance(root, dict) else Path(root)
+            for root in roots
+        ]
+        for artifact_root in resolved_artifact_roots:
+            if not artifact_root.exists() or not artifact_root.is_dir():
+                raise ValueError(
+                    f"artifact scan root is missing or not a directory: {artifact_root}"
+                )
+        root_identities = capture_directory_identities(resolved_artifact_roots)
+
         if args.db:
             db_path = Path(args.db).resolve()
         else:
             raw_db = artifact_config.get("db")
             if isinstance(raw_db, str) and raw_db.strip():
-                db_path = _repo_path(context, raw_db.strip())
+                db_path = configured_generated_output_path(
+                    context.repo_root,
+                    raw_db.strip(),
+                    key="indexes.artifacts.db",
+                )
             else:
                 db_path = (context.repo_root / ".mdex" / "artifacts.db").resolve()
 
         if args.output:
             output_path = Path(args.output).resolve()
+            output_origin = "arg"
         else:
             raw_output = artifact_config.get("output")
             if isinstance(raw_output, str) and raw_output.strip():
-                output_path = _repo_path(context, raw_output.strip())
+                output_value = raw_output.strip()
+                output_origin = "config"
             else:
-                output_path = (context.repo_root / ".mdex" / "artifacts.json").resolve()
+                output_value = ".mdex/artifacts.json"
+                output_origin = "default"
+            output_path = configured_generated_output_path(
+                context.repo_root,
+                output_value,
+                key="indexes.artifacts.output",
+            )
+
+        ensure_distinct_scan_outputs(db_path, output_path)
+        expected_database_state = snapshot_database_state(db_path)
 
         index = build_artifacts_index(roots, artifact_config, node_id_root=context.repo_root)
-        write_sqlite(index, str(db_path))
-        write_json(index, str(output_path))
+        ensure_outputs_do_not_overwrite_sources(index, db_path, output_path)
+        set_scan_manifest(
+            index,
+            build_scan_manifest(
+                repo_root=context.repo_root,
+                scan_roots=list(index.get("scan_roots", []) or []),
+                node_id_root=context.repo_root,
+                config_path=context.config_path,
+                config=artifact_config,
+                db_output=db_path,
+                output_json=output_path,
+                output_origin=output_origin,
+                index_kind="artifacts",
+                canonicalize_scan_roots=False,
+                config_file_sha256=config_file_sha256,
+                strict=False,
+            ),
+        )
+        write_scan_outputs(
+            index,
+            str(db_path),
+            str(output_path),
+            expected_database_state=expected_database_state,
+            expected_root_identities=root_identities,
+        )
     except Exception as exc:
         _emit_error("scan-artifacts failed", detail=str(exc))
         return 2

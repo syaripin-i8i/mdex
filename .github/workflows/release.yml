@@ -3,15 +3,16 @@ name: Release
 on:
   workflow_dispatch:
 
-# Enable actual publishing after configuring PyPI Trusted Publisher
-# for project "mdex-cli" and this workflow file.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
-    name: build + verify + publish
+  build:
+    name: build + validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,26 +23,79 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies from lock
+      - name: Verify release tag and package version
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
+          project_version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          package_version=$(python -c 'from mdex import __version__; print(__version__)')
+          expected_ref="refs/tags/v${project_version}"
+          test "${project_version}" = "${package_version}"
+          test "${GITHUB_REF}" = "${expected_ref}"
+
+      - name: Install dependencies from lock
+        run: python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .
+
+      - name: Run tests
+        run: python -m pytest -q
 
       - name: Build distribution artifacts
-        run: python -m build
+        run: python -m build --no-isolation
 
       - name: Validate artifacts
         run: python -m twine check dist/*
 
+      - name: Upload verified distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke:
+    name: immutable artifact smoke
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install runtime dependencies from lock
+        run: python .github/scripts/install_from_pylock.py --lock pylock.toml --editable ""
+
+      - name: Download immutable distributions
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: distributions
+          path: dist
+
       - name: sdist install smoke
         run: |
-          python -m pip install --force-reinstall dist/*.tar.gz
+          python -m pip install --force-reinstall --no-deps --no-build-isolation dist/*.tar.gz
           mdex --help
 
       - name: wheel install smoke
         run: |
-          python -m pip install --force-reinstall dist/*.whl
+          python -m pip install --force-reinstall --no-deps dist/*.whl
           mdex --help
+
+  publish:
+    name: publish
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: distributions
+          path: dist
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0

@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mdex.output_paths import ScanIndex
+from mdex.path_identity import deduplicate_directory_paths
 from mdex.parser import parse_file
 from mdex.scanner import DEFAULT_INDEX_EXTENSIONS, list_indexable_files
 
@@ -68,15 +70,7 @@ def _normalize_root_inputs(root: str | Path | Iterable[str | Path]) -> tuple[Pat
         base = Path(".").resolve()
         return base, [base]
 
-    roots: list[Path] = []
-    seen = set()
-    for item in raw_items:
-        resolved = Path(item).resolve()
-        key = resolved.as_posix().lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        roots.append(resolved)
+    roots = deduplicate_directory_paths(raw_items)
 
     if not roots:
         base = Path(".").resolve()
@@ -652,7 +646,7 @@ def build_index(
                     {"from": node_id, "to": target, "type": edge_type, "resolved": is_resolved}
                 )
 
-    return {
+    return ScanIndex({
         "generated": _to_iso_now(),
         "scan_root": _to_posix(str(root_path)),
         "scan_roots": [_to_posix(str(path)) for path in scan_roots],
@@ -660,7 +654,7 @@ def build_index(
         "edges": edges,
         "warnings": warnings,
         "fingerprints": fingerprints,
-    }
+    }, source_paths=indexed_files)
 
 
 if __name__ == "__main__":

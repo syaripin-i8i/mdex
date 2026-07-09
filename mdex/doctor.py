@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import fnmatch
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from datetime import datetime, timezone
 
 from mdex.observe import telemetry_health_findings
+from mdex.path_identity import canonical_path_key
 from mdex.store import list_index_metadata, list_missing_links, list_node_override_ids, list_node_overrides, list_nodes
 
 LOCAL_SECRET_PATTERNS = (
@@ -213,31 +214,82 @@ def _override_freshness_findings(nodes: list[dict[str, Any]], overrides: list[di
     return findings
 
 
-def _json_sync_findings(metadata: dict[str, str], json_index_path: Path | None) -> list[dict[str, Any]]:
-    if json_index_path is None:
-        return []
-
+def _json_sync_findings(
+    metadata: dict[str, str],
+    json_index_path: Path | None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     db_generated = str(metadata.get("generated", "")).strip()
+    db_manifest_raw = metadata.get("scan_manifest")
+    db_manifest_present = isinstance(db_manifest_raw, str) and bool(db_manifest_raw.strip())
+    db_manifest: dict[str, Any] | None = None
+    if db_manifest_present:
+        try:
+            decoded = json.loads(str(db_manifest_raw))
+            if isinstance(decoded, dict):
+                db_manifest = decoded
+            else:
+                raise ValueError("manifest is not an object")
+        except (json.JSONDecodeError, ValueError):
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": str(db_path or ""),
+                    "message": "SQLite scan manifest is invalid; run mdex scan",
+                }
+            )
+
+    if json_index_path is None:
+        if db_manifest_present:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": str(db_path or ""),
+                    "message": "manifest JSON output path is unavailable or unsafe; run mdex scan",
+                }
+            )
+        return findings
     if not json_index_path.exists():
-        return [
+        findings.append(
             {
                 "severity": "warning",
                 "path": str(json_index_path),
                 "message": "scan JSON output is missing; run mdex scan to refresh generated artifacts",
             }
-        ]
+        )
+        return findings
+
+    if json_index_path.is_symlink() or not json_index_path.is_file():
+        findings.append(
+            {
+                "severity": "warning",
+                "path": str(json_index_path),
+                "message": "scan JSON output is not a safe regular file",
+            }
+        )
+        return findings
+    if json_index_path.stat().st_size > 256 * 1024 * 1024:
+        findings.append(
+            {
+                "severity": "warning",
+                "path": str(json_index_path),
+                "message": "scan JSON output exceeds the 256 MiB doctor safety limit",
+            }
+        )
+        return findings
 
     try:
         loaded = json.loads(json_index_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        return [
+        findings.append(
             {
                 "severity": "warning",
                 "path": str(json_index_path),
                 "message": f"scan JSON output could not be read: {exc}",
             }
-        ]
+        )
+        return findings
 
     json_generated = str(loaded.get("generated", "") if isinstance(loaded, dict) else "").strip()
     if db_generated and json_generated and db_generated != json_generated:
@@ -248,6 +300,64 @@ def _json_sync_findings(metadata: dict[str, str], json_index_path: Path | None) 
                 "message": "scan JSON and SQLite generated timestamps differ; run mdex scan",
             }
         )
+    json_manifest_declared = isinstance(loaded, dict) and "scan_manifest" in loaded
+    json_manifest_raw = loaded.get("scan_manifest") if isinstance(loaded, dict) else None
+    json_manifest = json_manifest_raw if isinstance(json_manifest_raw, dict) else None
+    if json_manifest_declared and json_manifest is None:
+        findings.append(
+            {
+                "severity": "warning",
+                "path": str(json_index_path),
+                "message": "JSON scan manifest is invalid; run mdex scan",
+            }
+        )
+    if db_manifest_present != json_manifest_declared:
+        findings.append(
+            {
+                "severity": "warning",
+                "path": str(json_index_path),
+                "message": "scan manifest is missing from one generated output; run mdex scan",
+            }
+        )
+        return findings
+    if (db_manifest_present and db_manifest is None) or (json_manifest_declared and json_manifest is None):
+        return findings
+    if db_manifest is not None and json_manifest is not None:
+        db_scan_id = str(db_manifest.get("scan_id", ""))
+        json_scan_id = str(json_manifest.get("scan_id", ""))
+        if not db_scan_id or not json_scan_id or db_scan_id != json_scan_id:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "path": str(json_index_path),
+                    "message": "scan JSON and SQLite manifest generations differ; run mdex scan",
+                }
+            )
+
+        expected_db = db_path.resolve() if db_path is not None else None
+        expected_json = json_index_path.resolve()
+        for label, manifest in (("SQLite", db_manifest), ("JSON", json_manifest)):
+            output = manifest.get("output")
+            pair_matches = isinstance(output, dict)
+            if pair_matches:
+                try:
+                    pair_matches = (
+                        expected_db is not None
+                        and canonical_path_key(str(output.get("db", "")))
+                        == canonical_path_key(expected_db)
+                        and canonical_path_key(str(output.get("json", "")))
+                        == canonical_path_key(expected_json)
+                    )
+                except (OSError, RuntimeError, ValueError):
+                    pair_matches = False
+            if not pair_matches:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "path": str(json_index_path),
+                        "message": f"{label} scan manifest names a different output pair; run mdex scan",
+                    }
+                )
     return findings
 
 
@@ -411,7 +521,10 @@ def build_doctor_report(
         _check_result("indexed_path_hygiene", _indexed_path_findings(nodes)),
         _check_result("orphan_overrides", _override_findings(nodes, override_ids)),
         _check_result("override_freshness", _override_freshness_findings(nodes, overrides)),
-        _check_result("json_sqlite_sync", _json_sync_findings(metadata, json_index_path)),
+        _check_result(
+            "json_sqlite_sync",
+            _json_sync_findings(metadata, json_index_path, db_path_obj),
+        ),
         _check_result("legacy_artifacts", _legacy_artifact_findings(repo_root, db_path_obj)),
         _check_result("unresolved_links", _unresolved_link_findings(db_path)),
         _check_result("telemetry_health", telemetry_health_findings(repo_root)),

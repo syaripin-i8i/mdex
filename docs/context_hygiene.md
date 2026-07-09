@@ -2,7 +2,7 @@
 type: reference
 project: mdex
 status: active
-updated: 2026-04-30
+updated: 2026-07-10
 ---
 
 # Context Hygiene Policy
@@ -35,6 +35,13 @@ These files can still be valuable. They should usually be read directly, or plac
 - Use `mdex doctor` to detect local/secret files, old/archive paths, fixture/eval/log/dump paths, JSON/SQLite drift, and orphan overrides.
 - Keep examples small when they belong in the main index.
 - Prefer a separate index when the data answers a different question than "where should I start reading?"
+
+## Task History Lane
+
+When completed tasks outnumber current authority documents, exclude `tasks/**` from
+the main scan config and build `.mdex/task_history.db` separately. Query it only when
+past work is relevant, using `--include repo,task`. See `docs/task_index.md` for the
+canonical commands.
 
 ## Why
 
