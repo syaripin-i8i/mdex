@@ -9,7 +9,15 @@ from mdex.builder import build_index
 from mdex.enrich import enrich_node
 from mdex import indexer
 from mdex.indexer import write_sqlite
-from mdex.store import list_edges, list_nodes, list_orphan_nodes, list_stale_nodes, search_nodes, update_node_summary
+from mdex.store import (
+    _search_terms,
+    list_edges,
+    list_nodes,
+    list_orphan_nodes,
+    list_stale_nodes,
+    search_nodes,
+    update_node_summary,
+)
 
 
 def _build_quality_db(quality_repo: Path, quality_config: dict[str, object], db_path: Path) -> None:
@@ -167,6 +175,17 @@ def test_search_nodes_supports_cjk_query_terms(
 
     after = search_nodes(str(db_path), "設計方針", limit=10)
     assert any(row["id"] == "design/root.md" for row in after)
+
+
+def test_search_terms_keep_cjk_multiword_boundaries() -> None:
+    assert _search_terms("リンク グラフ 知識") == [
+        "リンク グラフ 知識",
+        "リンク",
+        "グラフ",
+        "知識",
+    ]
+    assert "クグ" not in _search_terms("リンク グラフ 知識")
+    assert _search_terms("memory link graph") == ["memory link graph", "memory", "link", "graph"]
 
 
 def test_list_stale_nodes_filters_seed_and_age(tmp_path: Path) -> None:

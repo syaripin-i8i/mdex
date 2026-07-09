@@ -389,19 +389,18 @@ def _extract_keywords(query: str) -> list[str]:
                 continue
             seen.add(segment)
             keywords.append(segment)
-        for gram in _cjk_ngrams(lowered):
-            if gram in seen:
-                continue
-            seen.add(gram)
-            keywords.append(gram)
 
     for part in parts:
         if len(part) <= 1:
             continue
-        if part in seen:
-            continue
-        seen.add(part)
-        keywords.append(part)
+        if part not in seen:
+            seen.add(part)
+            keywords.append(part)
+        for segment in _script_segments(part):
+            if segment in seen:
+                continue
+            seen.add(segment)
+            keywords.append(segment)
         for gram in _cjk_ngrams(part):
             if gram in seen:
                 continue
@@ -419,14 +418,15 @@ def _script_segments(text: str) -> list[str]:
 
 
 def _cjk_ngrams(text: str) -> list[str]:
-    compact = "".join(re.findall(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]", text))
-    if len(compact) < 4:
-        return []
     grams: list[str] = []
-    for size in (2, 3, 4):
-        if len(compact) < size:
+    for match in re.finditer(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]+", text):
+        segment = match.group(0)
+        if len(segment) < 4:
             continue
-        grams.extend(compact[index : index + size] for index in range(0, len(compact) - size + 1))
+        for size in (2, 3, 4):
+            if len(segment) < size:
+                continue
+            grams.extend(segment[index : index + size] for index in range(0, len(segment) - size + 1))
     return grams
 
 

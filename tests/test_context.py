@@ -889,6 +889,26 @@ def test_select_context_suggested_rg_uses_args_for_shell_sensitive_terms(tmp_pat
     assert suggestion["paths"] == ["runtime space"]
 
 
+def test_select_context_suggested_rg_keeps_cjk_multiword_boundaries(tmp_path: Path) -> None:
+    repo = tmp_path / "cjk_boundary_repo"
+    repo.mkdir()
+    (repo / "unrelated.md").write_text("# Unrelated\n\nNo matching context here.\n", encoding="utf-8")
+    config = {
+        "include_extensions": [".md"],
+        "exclude_patterns": [],
+        "summary_max_sentences": 3,
+        "summary_max_chars": 200,
+    }
+    db_path = tmp_path / "cjk_boundary.db"
+    _build_db(repo, config, db_path)
+
+    result = select_context("リンク グラフ 知識", str(db_path), budget=4000, limit=3, actionable=True)
+    suggestion = result["actionable_digest"]["suggested_rg"][0]
+
+    assert suggestion["pattern"] == "リンク|グラフ|知識"
+    assert "クグ" not in suggestion["pattern"]
+
+
 def test_resolve_context_scoring_prefers_runtime_config_over_scan_config() -> None:
     scan_config = {
         "context_scoring": {

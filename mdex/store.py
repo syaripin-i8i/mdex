@@ -194,14 +194,15 @@ def _contains_cjk(text: str) -> bool:
 
 
 def _cjk_ngrams(text: str) -> list[str]:
-    compact = "".join(CJK_RE.findall(text))
-    if len(compact) < 4:
-        return []
     grams: list[str] = []
-    for size in (2, 3, 4):
-        if len(compact) < size:
+    for match in re.finditer(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆〤ー]+", text):
+        segment = match.group(0)
+        if len(segment) < 4:
             continue
-        grams.extend(compact[index : index + size] for index in range(0, len(compact) - size + 1))
+        for size in (2, 3, 4):
+            if len(segment) < size:
+                continue
+            grams.extend(segment[index : index + size] for index in range(0, len(segment) - size + 1))
     return grams
 
 
@@ -237,22 +238,17 @@ def _search_terms(query: str) -> list[str]:
             continue
         seen.add(segment)
         terms.append(segment)
-    for gram in _cjk_ngrams(lowered):
-        if gram in seen:
-            continue
-        seen.add(gram)
-        terms.append(gram)
     for token in SEARCH_TOKEN_SPLIT_RE.split(lowered):
         clean = token.strip()
-        if not clean or clean in seen:
+        if not clean:
             continue
         if _contains_cjk(clean):
-            if len(clean) < 2:
-                continue
-        elif len(clean) < 3:
-            continue
-        seen.add(clean)
-        terms.append(clean)
+            add_token = len(clean) >= 2
+        else:
+            add_token = len(clean) >= 3
+        if add_token and clean not in seen:
+            seen.add(clean)
+            terms.append(clean)
         for gram in _cjk_ngrams(clean):
             if gram in seen:
                 continue
