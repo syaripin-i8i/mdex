@@ -107,7 +107,7 @@ flowchart TD
 
 ## Contract Reminders
 
-- 成功出力は stdout JSON、失敗出力は stderr JSON
+- 成功出力は stdout JSON、失敗出力は stderr JSON。例外は `find` の検索済み 0 件で、stdout 契約（json `[]` / table 空出力）を維持したまま stderr に `{"zero_hits": ...}` を 1 行出力する（exit 0 が正本、機械処理で stdout/stderr を merge しない）
 - `finish --dry-run` は DB を更新しない
 - `--db` 省略時の優先順は `README.md` / `docs/design.md` の記載に従う
 

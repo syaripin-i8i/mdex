@@ -1130,6 +1130,7 @@ def test_select_context_zero_hits_disclosure(
     assert "not evidence" in zero_hits["caveat"]
     assert "rg -n" in zero_hits["remediation"]
     assert "qzxunmatchedterm" in zero_hits["remediation"]
+    assert "if cdex is available" in zero_hits["remediation"]
 
 
 def test_select_context_does_not_claim_zero_hits_without_a_searched_zero(
@@ -1190,3 +1191,70 @@ def test_multi_index_context_zero_hits_disclosure(tmp_path: Path) -> None:
     )
     assert matched["nodes"]
     assert "zero_hits" not in matched
+
+
+def test_multi_index_context_budget_trimmed_hit_does_not_claim_zero_hits(tmp_path: Path) -> None:
+    repo = tmp_path / "multi_trim_repo"
+    repo.mkdir()
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir()
+    task_repo = tmp_path / "multi_trim_task_repo"
+    task_repo.mkdir()
+    large_body = "alphaonly probe target\n" + ("filler " * 1200)
+    (repo / "repo.md").write_text(f"# Alphaonly probe target\n\n{large_body}\n", encoding="utf-8")
+    (task_repo / "task.md").write_text("# Unrelated\n\nnothing to see here\n", encoding="utf-8")
+    config = {"include_extensions": [".md"], "exclude_patterns": []}
+    repo_db = mdex_dir / "mdex_index.db"
+    task_db = mdex_dir / "task_history.db"
+    _build_db(repo, config, repo_db)
+    _build_db(task_repo, config, task_db)
+
+    payload = build_multi_context_payload(
+        "alphaonly",
+        {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}},
+        include="repo,task",
+        budget=1,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    # One index bounded a true zero, the other matched but lost everything to
+    # the budget: that is truncation accounting, not a searched zero.
+    assert payload["nodes"] == []
+    assert "zero_hits" in payload["per_index_context"]["task"]
+    assert "zero_hits" not in payload["per_index_context"]["repo"]
+    assert "zero_hits" not in payload
+
+
+def test_multi_index_context_missing_index_does_not_claim_zero_hits(tmp_path: Path) -> None:
+    repo = tmp_path / "multi_missing_repo"
+    repo.mkdir()
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir()
+    (repo / "repo.md").write_text("# Repo\n\nshared term\n", encoding="utf-8")
+    config = {"include_extensions": [".md"], "exclude_patterns": []}
+    repo_db = mdex_dir / "mdex_index.db"
+    _build_db(repo, config, repo_db)
+
+    payload = build_multi_context_payload(
+        "qzxunmatchedterm",
+        {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}},
+        include="repo,task",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+
+    # The task index was requested but never searched, so the zero stays
+    # unbounded and must not be claimed at the top level.
+    assert payload["nodes"] == []
+    assert payload["multi_index"]["indexes"]["task"]["ok"] is False
+    assert "zero_hits" not in payload

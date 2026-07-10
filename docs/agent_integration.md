@@ -21,11 +21,11 @@ Every failure writes a schema-backed JSON object to stderr and returns a non-zer
 
 Do not parse human prose from stderr. Read the JSON `error`, `detail`, and `resolution_attempts` fields when present.
 
-One success case also uses stderr: when `find` matches nothing, stdout stays the contract's empty array and stderr carries one `{"zero_hits": ...}` JSON line with exit `0`. Distinguish it from failures by the exit code and the `zero_hits` key (error payloads carry `error` and `code`).
+One success case also uses stderr: when `find` searches and matches nothing, stdout keeps its contract (`[]` for json, empty output for `--format table`) and stderr carries one `{"zero_hits": ...}` JSON line with exit `0`. The exit code is the source of truth for success; never merge stdout and stderr in machine processing. Distinguish the disclosure from failures by the exit code and the `zero_hits` key (error payloads carry `error` and `code`).
 
 ## Zero Hits Are Not Absence
 
-`find` and `context` match node metadata only (title / tags / summary / search_terms), never full body text — a documented non-goal. When a searched query matches nothing, the payload includes `zero_hits` (`lanes_searched`, `lanes_inactive`, `caveat`, `remediation`; shared vocabulary with cdex). Never conclude from an empty result that a document or wiring does not exist: follow `remediation` — `rg` for body text, `cdex search` for code prior art — or add the term to the document's frontmatter tags to make it findable.
+`find` and `context` match node metadata only (title / tags / summary / search_terms), never full body text — a documented non-goal. When a searched query matches nothing, the payload includes `zero_hits` (`lanes_searched`, `lanes_inactive`, `caveat`, `remediation`; shared vocabulary with cdex). `lanes_inactive` is always present (`{}` when every known lane was searched) and its reason tokens are an open set — do not reject unknown tokens. `remediation` is descriptive prose; executable commands come from the structured argv surfaces (`recommended_next_actions_v2`, `suggested_rg`). Never conclude from an empty result that a document or wiring does not exist: search body text with `rg`, or add the term to the document's frontmatter tags to make it findable (`cdex search` covers code prior art where cdex is available).
 
 ## Exit Codes
 

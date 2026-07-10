@@ -88,6 +88,7 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 
 ## Recent Minor Additions
 
+- `0.5.0` adds the optional `zero_hits` disclosure (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`, shared vocabulary with cdex) to `context`, and the success-case stderr `{"zero_hits": ...}` line for `find` when a searched query matches nothing. `lanes_inactive` is an always-present map with an open reason-token set; consumers must not reject unknown tokens.
 - `0.4.0` adds optional multi-index, discovery lane, score explanation, budget audit, anomaly, suspicion, status, incremental-scan, and agent prompt-pack fields.
 - `scan.schema.json` adds optional `warnings` for per-file parse failures in non-strict scan mode.
 - `start` and `context --actionable` support `--digest minimal|full`. Minimal digest may omit full-only `actionable_digest` members.

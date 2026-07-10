@@ -26,7 +26,7 @@ AI エージェントが作業開始 (`start`) と作業終了 (`finish`) を定
 ## 設計原則
 
 1. CLI は薄く、ロジックは `mdex/` へ分離する。
-2. 全コマンドは JSON を返す（成功: stdout / 失敗: stderr）。
+2. 全コマンドは JSON を返す（成功: stdout / 失敗: stderr）。例外: `find` の検索済み 0 件は stdout 契約を変えずに stderr へ `zero_hits` 開示を 1 行出す（exit 0。成否判定は exit code が正本）。
 3. SQLite を正本とし、`node_overrides` を scan と分離して保持する。
 4. 入口 (`start`) と出口 (`finish`) を最優先で安定化する。
 5. 契約 field 名は README / AGENT / design で表記ゆれさせない。

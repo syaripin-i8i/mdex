@@ -437,7 +437,7 @@
         },
         "lanes_inactive": {
           "type": "object",
-          "description": "Lane name to reason it was not searched, e.g. body_text: documented_non_goal.",
+          "description": "Always present. Lane name to the reason it was not searched (e.g. body_text: documented_non_goal); an empty object means every known lane was searched. Reason tokens are an open set — consumers must not reject unknown tokens.",
           "additionalProperties": {
             "type": "string"
           }

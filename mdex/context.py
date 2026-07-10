@@ -1318,10 +1318,13 @@ def zero_hits_field(query: str) -> dict[str, Any]:
     if terms:
         pattern = "|".join(re.escape(term) for term in terms[:5])
         rg_hint = f'rg -n "{pattern}" .'
+        cdex_terms = " ".join(terms[:5])
     else:
         rg_hint = "rg -n <term> ."
+        cdex_terms = str(query).strip()
     return {
         "lanes_searched": ["metadata"],
+        # Always-present map; {} would mean every known lane was searched.
         "lanes_inactive": {"body_text": "documented_non_goal"},
         "caveat": (
             "zero hits bounds only the metadata lane (title / tags / summary / "
@@ -1329,9 +1332,9 @@ def zero_hits_field(query: str) -> dict[str, Any]:
             "document does not exist"
         ),
         "remediation": (
-            f"for body text run: {rg_hint}; for code prior art run: cdex search; "
-            "to make a document findable here, add the term to its frontmatter tags "
-            "(docs/convention.md)"
+            f"for body text run: {rg_hint}; to make a document findable here, "
+            "add the term to its frontmatter tags (docs/convention.md); "
+            f'if cdex is available, cdex search "{cdex_terms}" covers code prior art'
         ),
     }
 

@@ -359,6 +359,11 @@ def test_find_zero_hits_discloses_on_stderr_and_keeps_stdout_contract(
     assert "not evidence" in zero_hits["caveat"]
     assert "qzxunmatchedterm" in zero_hits["remediation"]
 
+    table_zero = _run_cli("find", "qzxunmatchedterm", "--db", str(db_path), "--format", "table")
+    assert table_zero.returncode == 0
+    assert table_zero.stdout.strip() == ""
+    assert json.loads(table_zero.stderr)["zero_hits"]["lanes_searched"] == ["metadata"]
+
     matched = _run_cli("find", "source", "--db", str(db_path), "--limit", "20")
     assert matched.returncode == 0
     assert matched.stderr.strip() == ""

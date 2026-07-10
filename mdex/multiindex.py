@@ -437,7 +437,16 @@ def build_multi_context_payload(
         "budget": safe_budget,
         "budget_dropped_nodes": merged_dropped[:10],
     }
-    if not output["nodes"] and any("zero_hits" in item for item in contexts):
+    # Claim only when every requested index was actually searched and each
+    # bounded a true zero; a hit trimmed away by the merge budget is
+    # truncation accounting, and an unsearched (missing) index leaves the
+    # zero unbounded — neither may claim zero_hits.
+    if (
+        not output["nodes"]
+        and contexts
+        and len(contexts) == len(specs)
+        and all("zero_hits" in item for item in contexts)
+    ):
         output["zero_hits"] = zero_hits_field(query)
     if actionable:
         output["recommended_read_order"] = _dedupe_sequence(

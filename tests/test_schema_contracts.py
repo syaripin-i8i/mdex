@@ -47,7 +47,7 @@ def _validate_payload(payload: dict[str, object], schema_filename: str) -> None:
 
 def _assert_contract(payload: dict[str, object], command: str) -> None:
     assert payload["contract_schema"] == f"https://github.com/syaripin-i8i/mdex/schemas/{command}.schema.json"
-    assert payload["contract_version"] == "0.4.0"
+    assert payload["contract_version"] == "0.5.0"
 
 
 def test_schema_files_are_valid_draft_2020_12() -> None:
@@ -326,7 +326,7 @@ def test_opt_in_telemetry_jsonl_is_local_schema_shaped_and_redacted(quality_repo
     assert event["event"] == "command_completed"
     assert event["command"] == "start"
     assert event["exit_code"] == 0
-    assert event["contract_version"] == "0.4.0"
+    assert event["contract_version"] == "0.5.0"
     assert isinstance(event["duration_ms"], int)
     assert "confidence" in event
     assert event["suggested_rg_count"] >= 1

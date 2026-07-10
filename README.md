@@ -259,7 +259,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | `list` | utility array / table | node objects, or table rows with `--format table` |
 | `open` | source text | node body text |
 | `query` | utility object | `node`, `outgoing`, `incoming`, `stats` |
-| `find` | utility array / table | matching node objects, or table rows with `--format table`。0 件時は stdout `[]` のまま stderr に `{"zero_hits": ...}` を 1 行出力（exit 0） |
+| `find` | utility array / table | matching node objects, or table rows with `--format table`。検索済み 0 件時の stdout は json で `[]`／table で空出力のまま、stderr に `{"zero_hits": ...}` を 1 行出力（exit 0） |
 | `orphans` | utility array / table | orphan nodes; with `--missing`, unresolved `links_to` targets with `referenced_by` |
 | `stale` | utility array / table | stale node summary rows, or table rows with `--format table` |
 | `first` | utility object | `node`, `prerequisites` |
@@ -297,11 +297,11 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 `find` / `context` が「検索した上で 0 件」のとき、payload に `zero_hits` を開示します。**0 件はメタデータ索引（title / tags / summary / search_terms）の範囲しか束縛せず、文書が存在しない証明ではありません**。field 名は cdex の `zero_hits` と共通語彙です（cdex `51c9ffa` / decisions/0003）。
 
 - `lanes_searched`: 照合したレーンの自己申告（mdex は `["metadata"]`）
-- `lanes_inactive`: 探索していないレーンとその理由（`{"body_text": "documented_non_goal"}` — 本文全文は Non-goals に明記の仕様）
+- `lanes_inactive`: 常在 map。探索していないレーンとその理由（`{"body_text": "documented_non_goal"}` — 本文全文は Non-goals に明記の仕様）。空 `{}` は全既知レーン探索済みの意。理由 token は拡張可能な集合であり、消費者は未知 token を拒否しないこと
 - `caveat`: 0 件が束縛する範囲の明示
-- `remediation`: 本文語は `rg`、コードの prior art は `cdex search`、mdex から見つけたい文書は frontmatter tags へ（`docs/convention.md`）
+- `remediation`: 説明文（実行可能 command の正本は `recommended_next_actions_v2` / `suggested_rg` の構造化 argv 面）。標準は `rg` と frontmatter tags（`docs/convention.md`）で自己完結し、cdex は「利用可能な場合」の任意ヒント
 
-チャネルはコマンドの出力契約に従います: `context` は payload key（schema-backed）、`find` は stdout の生配列契約を維持したまま stderr に `{"zero_hits": ...}` を 1 行出力します（exit 0 のまま。stderr JSON + exit != 0 の失敗契約とは別物）。blank query や budget による全 drop は「検索した上での 0 件」ではないため `zero_hits` を主張しません。
+チャネルはコマンドの出力契約に従います: `context` は payload key（schema-backed）、`find` は stdout の既存契約（json は `[]`、table は空出力）を維持したまま stderr に `{"zero_hits": ...}` を 1 行出力します（exit 0）。成否判定は exit code が正本であり、機械処理で stdout と stderr を merge しないこと。失敗契約（stderr JSON + exit != 0）とは exit code と key（`zero_hits` vs `error` + `code`）で判別します。blank query、budget による全 drop、index DB 欠落を含む未探索 index がある multi-index は「検索した上での 0 件」ではないため `zero_hits` を主張しません。
 
 ### Schema Contracts
 

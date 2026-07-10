@@ -9,7 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Disclose `zero_hits` (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`, shared vocabulary with cdex) when `find` or `context` search the metadata lane and match nothing, so agents stop reading an empty result as proof of absence. `context` carries it as a payload key; `find` keeps its bare-array stdout contract and emits one stderr JSON line with exit `0`.
+- Disclose `zero_hits` (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`, shared vocabulary with cdex) when `find` or `context` search the metadata lane and match nothing, so agents stop reading an empty result as proof of absence. `context` carries it as a payload key; `find` keeps its stdout contract (`[]` for json, empty output for table) and emits one stderr JSON line with exit `0`, which stays the source of truth for success. `lanes_inactive` is an always-present map with an open reason-token set; the standard remediation is self-contained (`rg` plus frontmatter tags) with cdex as an availability-qualified hint; multi-index claims the field only when every requested index was searched and each bounded a true zero. Ratified conditionally by Sol (decision record), effective with these corrections; ships in `0.5.0`, not a `0.4.x` patch.
 
 ### Fixed
 
