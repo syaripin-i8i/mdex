@@ -1310,9 +1310,10 @@ def zero_hits_field(query: str) -> dict[str, Any]:
     """Disclosure for a searched query that matched nothing.
 
     Field names (lanes_searched / lanes_inactive / caveat / remediation) are
-    shared protocol vocabulary with cdex (cdex 51c9ffa, decisions/0003) and
-    must stay aligned across both tools. Zero hits after a search claims this
-    field; a blank query or a budget trim to zero does not.
+    shared protocol vocabulary with cdex (adopted in 51c9ffa / decision 0003,
+    ratification alignment in 676a0eb / decision 0004) and must stay aligned
+    across both tools. Zero hits after a search claims this field; a blank
+    query or a budget trim to zero does not.
     """
     terms = _query_keywords(query)
     if terms:

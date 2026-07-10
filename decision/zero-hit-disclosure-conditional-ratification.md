@@ -16,11 +16,11 @@ relates_to:
 
 # Zero-hit disclosure: conditional ratification
 
-2026-07-10、Sol による批准回答。結論は**条件付き批准 — 本記録に列挙する補正の完了時に発効**。補正は同日の後続コミットで適用済み。提案側の経緯は `tasks/T20260710080029.md`、発端は cdex docs/decisions/0003 (field intake: エージェントが 0 件を「存在しない」と誤読)。
+2026-07-10、Sol による批准回答。結論は**条件付き批准 — 本記録に列挙する補正の完了時に発効**。mdex 側の補正は同日の `70f9e24`、cdex 側の shape 整合は `676a0eb` で実装済み。提案側の経緯は `tasks/T20260710080029.md`、発端は cdex docs/decisions/0003 (field intake: エージェントが 0 件を「存在しない」と誤読)。
 
 ## 決定内容
 
-1. **共通語彙 (条件付き批准)**: `zero_hits` の field 名・型・意味 (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`) を cdex/mdex 共通プロトコル面として確定。`lanes_inactive` は**常在 map** とし、非活性 lane が無ければ `{}`。rename は片側単独では行わず、alias/deprecation を伴う共通 protocol revision による。cdex 側は semantic/hybrid 時に `lanes_inactive` を省略しているため要整合 (cdex レーンへ引き継ぎ済み)。
+1. **共通語彙 (条件付き批准 → 発効)**: `zero_hits` の field 名・型・意味 (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`) を cdex/mdex 共通プロトコル面として確定。`lanes_inactive` は**常在 map** とし、非活性 lane が無ければ `{}`。rename は片側単独では行わず、alias/deprecation を伴う共通 protocol revision による。cdex 側も `676a0eb` で hybrid=`{}`、semantic=`{"lexical": "not_requested"}` に整合し、cdex main へ統合済み。
 2. **`documented_non_goal` (批准)**: activatable な停止理由 (`embeddings_missing` / `not_requested` 等) と by-design-off を区別する stable reason token として承認。理由 token の集合は拡張可能であり、**消費者は未知 token を拒否しない**契約とする。
 3. **`find` のチャネル (条件付き批准)**: stdout の既存契約 (json `[]` / table 空出力) を維持し、検索済み 0 件のみ stderr に compact JSON 1 行 + exit 0。schema object 化は行わない。**成否判定は exit code が正本、機械処理で stdout/stderr を merge しない**ことを契約化。
 4. **remediation (現文言は非批准 → 補正済み)**: cdex は private かつ mdex の依存ではないため無条件案内にしない。標準 remediation は `rg` + frontmatter tags で自己完結し、`cdex search "<terms>"` は「利用可能な場合」の任意ヒント。remediation は説明文であり、実行可能 command の正本は構造化 argv 面 (`recommended_next_actions_v2` / `suggested_rg`)。
@@ -48,4 +48,4 @@ relates_to:
 
 - payload: `context` (single/multi) の optional `zero_hits`、`find` の成功時 stderr 1 行。
 - 契約文書: README Output Contract、`docs/agent_integration.md`、`AGENT.md`、`docs/design.md`、`schemas/context.schema.json`、`docs/schema_versioning.md`。
-- 生態系: cdex `_zero_hits_field` の `lanes_inactive` 常在化が残作業 (cdex レーン)。共通語彙の根拠: cdex `51c9ffa` / cdex docs/decisions/0003、mdex `fdfc6a6` + 本補正コミット。
+- 生態系: cdex `_zero_hits_field` の `lanes_inactive` 常在化は `676a0eb` で実装し、cdex main へ統合済み。共通語彙の根拠: cdex `51c9ffa` + `676a0eb` / cdex docs/decisions/0003・0004、mdex `fdfc6a6` + `70f9e24`。

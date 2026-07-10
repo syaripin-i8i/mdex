@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from mdex import cli
+from mdex import __version__, cli
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -212,6 +212,23 @@ def test_schema_docs_pin_published_retrieval_without_rewriting_logical_ids() -> 
     assert "stable logical identifier" in versioning
     assert "scan_config.schema.json" in versioning
     assert "unreleased checkout" in versioning
+
+
+def test_contract_version_examples_match_package_version() -> None:
+    paths = [README_PATH, DOCS_DIR / "agent_integration.md"]
+    failures: list[str] = []
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        versions = re.findall(r'"contract_version"\s*:\s*"([^"]+)"', text)
+        if not versions:
+            failures.append(f"{path.relative_to(PROJECT_ROOT).as_posix()} has no contract_version example")
+            continue
+        mismatched = sorted({version for version in versions if version != __version__})
+        if mismatched:
+            failures.append(
+                f"{path.relative_to(PROJECT_ROOT).as_posix()} uses {mismatched}; package is {__version__}"
+            )
+    assert not failures, "documented contract versions drifted from the package:\n" + "\n".join(failures)
 
 
 def test_agent_commands_exist_in_cli_parser() -> None:

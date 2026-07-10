@@ -283,7 +283,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/error.schema.json",
-  "contract_version": "0.4.0",
+  "contract_version": "0.5.0",
   "code": "db_not_found",
   "error": "db not found",
   "resolution_attempts": []
@@ -294,7 +294,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 
 #### Zero-hit disclosure（`zero_hits`）
 
-`find` / `context` が「検索した上で 0 件」のとき、payload に `zero_hits` を開示します。**0 件はメタデータ索引（title / tags / summary / search_terms）の範囲しか束縛せず、文書が存在しない証明ではありません**。field 名は cdex の `zero_hits` と共通語彙です（cdex `51c9ffa` / decisions/0003）。
+`find` / `context` が「検索した上で 0 件」のとき、payload に `zero_hits` を開示します。**0 件はメタデータ索引（title / tags / summary / search_terms）の範囲しか束縛せず、文書が存在しない証明ではありません**。field 名は cdex の `zero_hits` と共通語彙です（cdex `51c9ffa`、批准整合 `676a0eb` / decisions/0003・0004）。
 
 - `lanes_searched`: 照合したレーンの自己申告（mdex は `["metadata"]`）
 - `lanes_inactive`: 常在 map。探索していないレーンとその理由（`{"body_text": "documented_non_goal"}` — 本文全文は Non-goals に明記の仕様）。空 `{}` は全既知レーン探索済みの意。理由 token は拡張可能な集合であり、消費者は未知 token を拒否しないこと

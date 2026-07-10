@@ -47,7 +47,7 @@ Schema-backed success and error payloads include:
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/start.schema.json",
-  "contract_version": "0.4.0"
+  "contract_version": "0.5.0"
 }
 ```
 
