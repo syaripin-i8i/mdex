@@ -130,9 +130,11 @@ mdex/
 - repo / task / memory / artifact の multi-index
 - 次段階は golden cases による relevance / latency 評価
 
-### Phase 4（可視化）: 提案段階
+### UI / 可視化: 非スコープ
 
-- 軽量 Web UI / graph 表示は、検索品質評価と API 契約の安定化後に判断する
+- mdex 本体は CLI、構造化出力、SQLite index に責務を限定する
+- Web UI / graph viewer は mdex のロードマップに含めない
+- 可視化が必要な場合は mdex の出力を利用する別プロジェクトとして分離する
 
 ## コマンド設計
 

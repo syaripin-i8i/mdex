@@ -22,7 +22,7 @@ updated: 2026-07-10
 - Phase 1（完了）: Markdownパース + ノード/エッジJSON生成 + 簡易CLI
 - Phase 2（完了）: タスク抽出・逆参照・孤立検出
 - Phase 3（実装・評価中）: 要約override・探索順序制御・discovery・multi-index
-- Phase 4（提案）: 軽量WebUI + ノード可視化。評価基盤とAPI契約の安定後に判断
+- UI / 可視化（非スコープ）: mdex 本体には Web UI や graph viewer を持たせない。必要な場合は構造化出力を利用する別プロジェクトとして扱う
 
 ## 次に見る
 
