@@ -16,6 +16,9 @@ SCHEMAS_DIR = PROJECT_ROOT / "schemas"
 GITIGNORE_PATH = PROJECT_ROOT / ".gitignore"
 SCAN_CONFIG_PATH = PROJECT_ROOT / "control" / "scan_config.json"
 TASKS_DIR = PROJECT_ROOT / "tasks"
+PYPROJECT_PATH = PROJECT_ROOT / "pyproject.toml"
+CHANGELOG_PATH = PROJECT_ROOT / "CHANGELOG.md"
+SECURITY_PATH = PROJECT_ROOT / "SECURITY.md"
 
 
 def _markdown_docs_outside_archive() -> list[Path]:
@@ -229,6 +232,32 @@ def test_contract_version_examples_match_package_version() -> None:
                 f"{path.relative_to(PROJECT_ROOT).as_posix()} uses {mismatched}; package is {__version__}"
             )
     assert not failures, "documented contract versions drifted from the package:\n" + "\n".join(failures)
+
+
+def test_project_and_package_versions_match() -> None:
+    pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
+    match = re.search(r'^version\s*=\s*"([^"]+)"\s*$', pyproject, re.MULTILINE)
+    assert match is not None, "pyproject.toml has no project version"
+    assert match.group(1) == __version__
+
+
+def test_latest_changelog_release_matches_security_support_line() -> None:
+    changelog = CHANGELOG_PATH.read_text(encoding="utf-8")
+    releases = re.findall(r"^## \[(\d+)\.(\d+)\.(\d+)\] - \d{4}-\d{2}-\d{2}\s*$", changelog, re.MULTILINE)
+    assert releases, "CHANGELOG.md has no formal release heading"
+    latest_major, latest_minor, _ = releases[0]
+    expected_supported = f"{latest_major}.{latest_minor}.x"
+
+    supported_rows: list[str] = []
+    for raw_line in SECURITY_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) == 2 and cells[1].casefold() == "yes":
+            supported_rows.append(cells[0])
+
+    assert supported_rows == [expected_supported]
 
 
 def test_agent_commands_exist_in_cli_parser() -> None:

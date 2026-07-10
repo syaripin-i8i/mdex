@@ -3,6 +3,26 @@
 
 **`mdex` は AI エージェント向けの protocol-first CLI です。**
 
+## 導入前に
+
+`mdex` は public preview です。次の条件がそろう repo での利用を想定しています。
+
+- AI コーディングエージェントを実際の開発タスクで継続利用している
+- README、設計書、runbook、ADR など、現行の判断根拠となる文書がある
+- main index を小さく保つため、scan 対象・除外・少量の metadata を管理できる
+- 推薦結果を実タスクで検証し、誤った入口をそのまま採用しない
+
+次を期待する場合は適合しません。
+
+- 文書がほとんどない repo へのゼロ設定導入
+- 全文検索、RAG、knowledge base、人間向け文書閲覧の代替
+- corpus 全体を入れるだけで安定した推薦が得られること
+- index と source-authority 文書を継続的に管理しない運用
+
+導入判断は、まず 1 repo・3〜5 件の実タスクで行ってください。
+0.x minor release では契約が明示的に調整される場合があります。pilot 中は version を固定し、更新前に
+`CHANGELOG.md` を確認してください。
+
 - 標準フロー: `scan -> start -> (context | first | related | impact) -> finish --dry-run`
 - 成功は `stdout`（schema JSON / utility JSON / table / 本文）、失敗は `stderr` JSON（`exit != 0`）
 - field 名は prose より強い契約（別名を導入しない）
@@ -391,13 +411,13 @@ read order と source of truth は同義ではありません。
 ## Setup
 
 ```bash
-python -m pip install mdex-cli
+python -m pip install "mdex-cli==0.5.0"
 ```
 
-GitHub source install:
+Released source install:
 
 ```bash
-python -m pip install git+https://github.com/syaripin-i8i/mdex.git
+python -m pip install git+https://github.com/syaripin-i8i/mdex.git@v0.5.0
 ```
 
 Local checkout install:

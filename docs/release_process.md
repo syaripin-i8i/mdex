@@ -1,7 +1,8 @@
 # Release Process
 
 Releases are intentionally manual-first. PyPI Trusted Publishing is configured and
-was used for the `0.4.0` release. The workflow accepts only a version-matching tag.
+has been used since the `0.4.0` release. The workflow accepts only a version-matching
+tag with matching release metadata.
 
 ## Trusted Publisher Configuration
 
@@ -17,7 +18,8 @@ PyPI Trusted Publisher identity at the same time.
 
 1. Update the version in `pyproject.toml` and `mdex/__init__.py`.
 2. Move the intended entries out of `Unreleased` in `CHANGELOG.md`.
-3. Update `pylock.toml`:
+3. Update the supported-version table in `SECURITY.md` for the latest `0.x` line.
+4. Update `pylock.toml`:
    - `python -m pip lock -e ".[dev]" -o pylock.toml`
    - Regenerate only on an environment that yields the dependency superset
      (historically Windows + a recent supported Python). `pip lock` resolves
@@ -28,9 +30,9 @@ PyPI Trusted Publisher identity at the same time.
    - Without a Windows environment, keep the committed lock and apply
      surgical version bumps, or move to a multi-environment lock generator.
    - `export_release_hashes.py` requires Python >= 3.11 (stdlib `tomllib`).
-4. Update release hash catalog:
+5. Update release hash catalog:
    - `python .github/scripts/export_release_hashes.py --lock pylock.toml --output .github/locks/pypi_release_hashes.json`
-5. Run local verification:
+6. Run local verification:
    - `python -m pytest -q`
    - `python -m build --no-isolation`
    - `python -m twine check dist/*`
@@ -49,7 +51,7 @@ The workflow rejects branch refs and tags that do not equal `v<project.version>`
 
 The workflow performs:
 
-1. tag/package-version validation
+1. tag/package-version and release-metadata validation
 2. lockfile-driven install (`python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .`)
 3. full test suite
 4. build with hash-locked `setuptools` / `wheel` (`python -m build --no-isolation`)

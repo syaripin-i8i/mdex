@@ -7,9 +7,26 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-11
+
 ### Added
 
 - Disclose `zero_hits` (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`, shared vocabulary with cdex) when `find` or `context` search the metadata lane and match nothing, so agents stop reading an empty result as proof of absence. `context` carries it as a payload key; `find` keeps its stdout contract (`[]` for json, empty output for table) and emits one stderr JSON line with exit `0`, which stays the source of truth for success. `lanes_inactive` is an always-present map with an open reason-token set; the standard remediation is self-contained (`rg` plus frontmatter tags) with cdex as an availability-qualified hint; multi-index claims the field only when every requested index was searched and each bounded a true zero. Ratified conditionally by Sol (decision record), effective with these corrections; ships in `0.5.0`, not a `0.4.x` patch.
+- A packaged `scan_config.schema.json` input contract shared by `scan`, `finish --scan`, and the quality evaluator.
+- A manually curated golden retrieval suite with Recall@3, Precision@3, MRR, case/operation baselines, and report-only p50/p95 latency measurements.
+- `scan-artifacts` builds a separate `.mdex/artifacts.db` index for generated observation artifacts without adding `outputs/` to the main repo index.
+- `context` and `start` full actionable digests include `relevant_artifacts`; artifact rows carry metadata/freshness fields such as kind, generated timestamp, age, and stale status.
+- Artifact scans tolerate disappeared files and oversized files as warnings, expose `warning_summary`, and support `max_file_size_bytes` / `max_jsonl_rows_read` controls.
+- Artifact roots may be configured as objects with `id_prefix` and `expose_source_root: false` to keep repository-external local paths out of node ids and metadata.
+- Artifact scans default-exclude `runtime_state/**`, and multi-index output uses repo-relative DB paths when possible.
+- Multi-index artifact context reports `artifacts_index_age` and recommends `scan-artifacts` when the artifact DB is missing or stale.
+
+### Changed
+
+- Clarify the intended adoption conditions, public-preview boundary, and non-fit cases, and recommend a one-repository, 3–5-task pilot with explicit continue and stop criteria.
+- The public main-index config moves completed `tasks/**` into a documented task-history lane.
+- The manual PyPI workflow now requires a version-matching tag, runs the full tests, hash-locks build tools, and publishes only the immutable smoke-tested artifact from an OIDC-isolated job.
+- Security, installation, and release documentation now reflect the `0.5.x` supported line.
 
 ### Fixed
 
@@ -25,23 +42,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Fail scans on root traversal errors instead of replacing an index with a false empty result.
 - Serialize complete SQLite/JSON scan pairs and summary enrichment so concurrent agent updates or output generations are not lost.
 - Confine config/default-generated DB and JSON paths to `.mdex/`; explicit CLI paths remain available for one-shot scans.
-
-### Changed
-
-- The public main-index config moves completed `tasks/**` into a documented task-history lane.
-- The manual PyPI workflow now requires a version-matching tag, runs the full tests, hash-locks build tools, and publishes only the immutable smoke-tested artifact from an OIDC-isolated job.
-- Security, installation, and release documentation now reflect the published `0.4.x` line.
-
-### Added
-
-- A packaged `scan_config.schema.json` input contract shared by `scan`, `finish --scan`, and the quality evaluator.
-- A manually curated golden retrieval suite with Recall@3, Precision@3, MRR, case/operation baselines, and report-only p50/p95 latency measurements.
-- `scan-artifacts` builds a separate `.mdex/artifacts.db` index for generated observation artifacts without adding `outputs/` to the main repo index.
-- `context` and `start` full actionable digests include `relevant_artifacts`; artifact rows carry metadata/freshness fields such as kind, generated timestamp, age, and stale status.
-- Artifact scans tolerate disappeared files and oversized files as warnings, expose `warning_summary`, and support `max_file_size_bytes` / `max_jsonl_rows_read` controls.
-- Artifact roots may be configured as objects with `id_prefix` and `expose_source_root: false` to keep repository-external local paths out of node ids and metadata.
-- Artifact scans default-exclude `runtime_state/**`, and multi-index output uses repo-relative DB paths when possible.
-- Multi-index artifact context reports `artifacts_index_age` and recommends `scan-artifacts` when the artifact DB is missing or stale.
 
 ## [0.4.0] - 2026-06-01
 
