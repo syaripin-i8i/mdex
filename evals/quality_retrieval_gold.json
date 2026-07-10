@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "curation": "manual_exhaustive_judgments",
+  "k": 3,
+  "cases": [
+    {
+      "id": "context-root-graph-budget",
+      "operation": "context",
+      "input": "root alpha decision",
+      "budget": 80,
+      "relevant_ids": [
+        "design/root.md",
+        "spec/b.md"
+      ],
+      "irrelevant_ids": [
+        "decision/a.md",
+        "design/tie.md",
+        "notes/orphan.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Under the 80-token target (96-token soft cap), Root Design is the strongest keyword entrypoint and compact Spec B fills the remaining budget through resolved graph signals; the larger or lower-priority candidates should be deferred."
+    },
+    {
+      "id": "context-spec-prerequisite-budget",
+      "operation": "context",
+      "input": "core specification",
+      "budget": 60,
+      "relevant_ids": [
+        "spec/b.md",
+        "decision/a.md"
+      ],
+      "irrelevant_ids": [
+        "design/root.md",
+        "design/tie.md",
+        "notes/orphan.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Under the 60-token target (72-token soft cap), Spec B is the direct keyword hit and Decision A is its compact resolved graph neighbor; the two larger design candidates do not fit the preferred budget set."
+    },
+    {
+      "id": "find-architecture-decision",
+      "operation": "find",
+      "input": "architecture decision",
+      "relevant_ids": [
+        "decision/a.md",
+        "design/tie.md"
+      ],
+      "irrelevant_ids": [
+        "design/root.md",
+        "notes/orphan.md",
+        "spec/b.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "The decision and tie-break design explicitly discuss architecture decisions; the other documents do not answer this query."
+    },
+    {
+      "id": "find-context-selection",
+      "operation": "find",
+      "input": "context selection",
+      "relevant_ids": [
+        "design/root.md"
+      ],
+      "irrelevant_ids": [
+        "decision/a.md",
+        "design/tie.md",
+        "notes/orphan.md",
+        "spec/b.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Only Root Design describes context selection."
+    },
+    {
+      "id": "find-pending-task",
+      "operation": "find",
+      "input": "pending task",
+      "relevant_ids": [
+        "tasks/pending/T20260101000001.md"
+      ],
+      "irrelevant_ids": [
+        "decision/a.md",
+        "design/root.md",
+        "design/tie.md",
+        "notes/orphan.md",
+        "spec/b.md"
+      ],
+      "rationale": "The pending task is the sole task record and explicitly carries pending status."
+    },
+    {
+      "id": "find-standalone-orphan",
+      "operation": "find",
+      "input": "standalone orphan",
+      "relevant_ids": [
+        "notes/orphan.md"
+      ],
+      "irrelevant_ids": [
+        "decision/a.md",
+        "design/root.md",
+        "design/tie.md",
+        "spec/b.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Only Orphan Note is described and tagged as standalone orphan material."
+    },
+    {
+      "id": "first-root-prerequisites",
+      "operation": "first",
+      "input": "design/root.md",
+      "relevant_ids": [
+        "decision/a.md",
+        "spec/b.md"
+      ],
+      "irrelevant_ids": [
+        "design/tie.md",
+        "notes/orphan.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Root Design directly depends on Decision A, which depends on Spec B; the remaining nodes are not prerequisites."
+    },
+    {
+      "id": "first-tie-prerequisites",
+      "operation": "first",
+      "input": "design/tie.md",
+      "relevant_ids": [
+        "decision/a.md",
+        "spec/b.md"
+      ],
+      "irrelevant_ids": [
+        "design/root.md",
+        "notes/orphan.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Tie Design explicitly depends on Decision A and Spec B."
+    },
+    {
+      "id": "related-root-neighbors",
+      "operation": "related",
+      "input": "design/root.md",
+      "relevant_ids": [
+        "decision/a.md",
+        "spec/b.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "irrelevant_ids": [
+        "design/tie.md",
+        "notes/orphan.md"
+      ],
+      "rationale": "These three nodes have explicit resolved edges with Root Design; Tie Design and Orphan Note do not."
+    },
+    {
+      "id": "related-decision-neighbors",
+      "operation": "related",
+      "input": "decision/a.md",
+      "relevant_ids": [
+        "design/root.md",
+        "design/tie.md",
+        "spec/b.md"
+      ],
+      "irrelevant_ids": [
+        "notes/orphan.md",
+        "tasks/pending/T20260101000001.md"
+      ],
+      "rationale": "Spec B is Decision A's prerequisite and both design documents directly depend on Decision A."
+    }
+  ]
+}

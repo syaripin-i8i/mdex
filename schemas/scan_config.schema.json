@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/scan_config.schema.json",
+  "title": "mdex document scan configuration",
+  "description": "Fail-closed input schema for mdex scan and finish --scan document lanes.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "index_kind": {
+      "type": "string",
+      "enum": ["repo", "task", "memory"]
+    },
+    "scan_roots": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "scan_root": {
+      "$ref": "#/$defs/nonEmptyString",
+      "deprecated": true
+    },
+    "include_extensions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9._+-]*$"
+      }
+    },
+    "exclude_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "use_default_exclude_patterns": {
+      "type": "boolean"
+    },
+    "node_type_map": {
+      "type": "object",
+      "propertyNames": { "pattern": "\\S" },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "summary_max_sentences": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "summary_max_chars": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "context_scoring": { "$ref": "#/$defs/contextScoring" },
+    "synonyms": { "$ref": "#/$defs/synonymMap" },
+    "search_synonyms": { "$ref": "#/$defs/synonymMap" },
+    "output_file": { "$ref": "#/$defs/nonEmptyString" }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "numberMap": {
+      "type": "object",
+      "propertyNames": { "pattern": "\\S" },
+      "additionalProperties": { "type": "number" }
+    },
+    "synonymValue": {
+      "oneOf": [
+        { "$ref": "#/$defs/nonEmptyString" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      ]
+    },
+    "synonymMap": {
+      "type": "object",
+      "propertyNames": { "pattern": "\\S" },
+      "additionalProperties": { "$ref": "#/$defs/synonymValue" }
+    },
+    "contextScoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keyword": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "type": "number" },
+            "summary": { "type": "number" },
+            "tags": { "type": "number" },
+            "search_terms": { "type": "number" },
+            "learning_note": { "type": "number" }
+          }
+        },
+        "type_bonus": { "$ref": "#/$defs/numberMap" },
+        "status_bonus": { "$ref": "#/$defs/numberMap" },
+        "graph_boost_by_edge_type": { "$ref": "#/$defs/numberMap" },
+        "graph_default_boost": { "type": "number", "exclusiveMinimum": 0 },
+        "recency_weight": { "type": "number", "exclusiveMinimum": 0 },
+        "path_symbol_weight": { "type": "number", "exclusiveMinimum": 0 },
+        "primary_keyword_search_multiplier": { "type": "integer", "minimum": 1 },
+        "secondary_keyword_search_multiplier": { "type": "integer", "minimum": 1 },
+        "primary_keyword_search_floor": { "type": "integer", "minimum": 1 },
+        "secondary_keyword_search_floor": { "type": "integer", "minimum": 1 },
+        "soft_budget_multiplier": { "type": "number", "exclusiveMinimum": 0 },
+        "synonyms": { "$ref": "#/$defs/synonymMap" },
+        "search_synonyms": { "$ref": "#/$defs/synonymMap" }
+      }
+    }
+  }
+}

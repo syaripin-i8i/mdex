@@ -41,6 +41,7 @@ from mdex.scan_manifest import (
     normalized_index_kind,
     set_scan_manifest,
 )
+from mdex.scan_config import load_scan_config_with_identity
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
 from mdex.start import build_start_payload
@@ -304,10 +305,24 @@ def _cmd_scan(args: argparse.Namespace) -> int:
                     key="db",
                 )
             )
-        config_path = Path(args.config).resolve() if args.config else resolve_scan_config_path(context)
-        config, config_file_sha256 = _load_json_with_identity(
-            str(config_path),
-            optional=not bool(args.config),
+        cli_scan_config_is_explicit = args.config is not None
+        if cli_scan_config_is_explicit and not str(args.config).strip():
+            raise ValueError("--config must be a non-empty path")
+        runtime_scan_config_is_explicit = (
+            not cli_scan_config_is_explicit and "scan_config" in context.config
+        )
+        if runtime_scan_config_is_explicit:
+            runtime_scan_config = context.config.get("scan_config")
+            if not isinstance(runtime_scan_config, str) or not runtime_scan_config.strip():
+                raise ValueError("runtime config scan_config must be a non-empty string")
+        config_path = (
+            Path(str(args.config)).resolve()
+            if cli_scan_config_is_explicit
+            else resolve_scan_config_path(context)
+        )
+        config, config_file_sha256 = load_scan_config_with_identity(
+            config_path,
+            optional=not cli_scan_config_is_explicit and not runtime_scan_config_is_explicit,
         )
 
         scan_root_warnings: list[str] = []

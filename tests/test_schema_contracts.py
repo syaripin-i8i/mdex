@@ -60,6 +60,7 @@ def test_schema_files_are_valid_draft_2020_12() -> None:
         "impact.schema.json",
         "finish.schema.json",
         "error.schema.json",
+        "scan_config.schema.json",
         "telemetry_event.schema.json",
     ):
         schema = _load_schema(name)
@@ -87,6 +88,29 @@ def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) 
     scan_payload = json.loads(scan.stdout)
     _assert_contract(scan_payload, "scan")
     _validate_payload(scan_payload, "scan.schema.json")
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    (artifact_root / "result.json").write_text(
+        '{"status":"ok","summary":"schema contract smoke"}\n',
+        encoding="utf-8",
+    )
+    artifact_scan = _run_cli(
+        "scan-artifacts",
+        "--root",
+        str(artifact_root),
+        "--db",
+        str(tmp_path / "artifacts.db"),
+        "--output",
+        str(tmp_path / "artifacts.json"),
+        cwd=PROJECT_ROOT,
+    )
+    assert artifact_scan.returncode == 0, artifact_scan.stderr
+    artifact_payload = json.loads(artifact_scan.stdout)
+    _assert_contract(artifact_payload, "scan")
+    assert artifact_payload["index_kind"] == "artifacts"
+    assert artifact_payload["roots"]
+    _validate_payload(artifact_payload, "scan.schema.json")
 
     start = _run_cli("start", "root decision", "--db", str(db_path), cwd=quality_repo)
     assert start.returncode == 0

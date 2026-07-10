@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Make document scan configuration fail closed on unknown keys, invalid types or lanes, non-finite numbers, missing explicitly configured files, and unavailable packaged schemas.
+- Align the documented CLI output boundary with the existing schema-backed JSON, utility JSON, table, and source-text formats without wrapping legacy utility payloads.
+- Pin published schema retrieval guidance to immutable version tags while retaining stable logical schema identifiers in payloads.
 - Reject scan outputs that collide with each other, their lock files, or an indexed source file, and write JSON indexes atomically.
 - Persist a versioned scan manifest and make `finish --scan` fail closed on stale config, scope, lane, output identity, or concurrent rescans.
 - Make `finish --scan` refresh both SQLite and JSON outputs and propagate scan failures.
@@ -27,6 +30,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- A packaged `scan_config.schema.json` input contract shared by `scan`, `finish --scan`, and the quality evaluator.
+- A manually curated golden retrieval suite with Recall@3, Precision@3, MRR, case/operation baselines, and report-only p50/p95 latency measurements.
 - `scan-artifacts` builds a separate `.mdex/artifacts.db` index for generated observation artifacts without adding `outputs/` to the main repo index.
 - `context` and `start` full actionable digests include `relevant_artifacts`; artifact rows carry metadata/freshness fields such as kind, generated timestamp, age, and stale status.
 - Artifact scans tolerate disappeared files and oversized files as warnings, expose `warning_summary`, and support `max_file_size_bytes` / `max_jsonl_rows_read` controls.

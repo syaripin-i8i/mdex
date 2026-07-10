@@ -70,6 +70,18 @@
       },
       "additionalProperties": true
     },
+    "index_kind": {
+      "type": "string",
+      "const": "artifacts",
+      "description": "Present for scan-artifacts output, which shares this schema."
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Artifact roots reported by scan-artifacts."
+    },
     "warnings": {
       "type": "array",
       "items": {

@@ -4,7 +4,7 @@
 **`mdex` は AI エージェント向けの protocol-first CLI です。**
 
 - 標準フロー: `scan -> start -> (context | first | related | impact) -> finish --dry-run`
-- 成功は `stdout` JSON、失敗は `stderr` JSON（`exit != 0`）
+- 成功は `stdout`（schema JSON / utility JSON / table / 本文）、失敗は `stderr` JSON（`exit != 0`）
 - field 名は prose より強い契約（別名を導入しない）
 - primary keys は「Output Contract」表を参照
 
@@ -15,7 +15,7 @@
 - `start` と `context --actionable` の詳細な分岐は `AGENT.md` を正本とする
 - agents should prefer `recommended_next_actions_v2`; `recommended_next_actions` is deprecated but kept for 0.2.x compatibility
 - use `--digest minimal` on `start` / `context --actionable` to reduce context use when the full `actionable_digest` is not needed
-- JSON payloads require `contract_schema` / `contract_version`; error payloads also include machine-readable `code`
+- schema-backed success payloads require `contract_schema` / `contract_version`; utility JSON is intentionally unwrapped, while every error payload is schema-backed and also includes machine-readable `code`
 - opt-in local telemetry is available with `MDEX_TELEMETRY=1` or `.mdex/config.json` `telemetry: true`; it appends redacted events to `.mdex/telemetry.jsonl`
 
 ## For New Adopters
@@ -237,34 +237,41 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 }
 ```
 
-## 全出力は JSON
+## CLI 出力境界
 
 ### Output Contract
 
-成功と失敗の判別ルール: **成功 = stdout JSON（空配列でも成功） / 失敗 = stderr JSON + exit != 0**。
+成功と失敗の判別ルール: **成功 = コマンドごとの stdout 形式（空配列でも成功） / 失敗 = schema-backed stderr JSON + exit != 0**。
 
-| command | primary keys |
-|---|---|
-| `scan` | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
-| `scan-artifacts` | `nodes`, `output.db`, `output.json`, `index_kind`, `roots` |
-| `doctor` | `status`, `summary`, `checks`, `recommended_next_actions` |
-| `status` | `status`, `summary`, `indexes`, `recommended_next_actions` |
-| `list` | array of node objects, or table rows when `--format table` |
-| `open` | node body text |
-| `query` | `node`, `outgoing`, `incoming`, `stats` |
-| `find` | array of matching node objects, or table rows when `--format table` |
-| `orphans` | array of orphan node objects; with `--missing`, unresolved `links_to` targets with `referenced_by` |
-| `stale` | array of stale node summary rows, or table rows when `--format table` |
-| `first` | `node`, `prerequisites` |
-| `related` | `node`, `related` |
-| `start` | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
-| `context` | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
-| `impact` | `inputs`, `warnings`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
-| `finish` | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
-| `enrich` | `id`, `status`, `summary_source`, `summary_updated` |
-| `new task` / `new decision` | `path`, `id`, `kind`, `title` |
-| `stamp` | `status`, `id`, `path`, `updated` |
-| db resolution error | `code`, `error`, `resolution_attempts` |
+| category | commands | contract |
+|---|---|---|
+| schema-backed JSON object | `scan` / `scan-artifacts`, `doctor`, `status`, `start`, `context`, `impact`, `finish` | `contract_schema` / `contract_version` 必須。`scan-artifacts` は `scan.schema.json` を共有 |
+| utility JSON（schema なし） | `list`, `find`, `orphans`, `stale` の生配列、`query`, `first`, `related`, `enrich`, `new task`, `new decision`, `stamp` の生 object | 既存の軽量形式を維持し、contract metadata で wrap しない |
+| table | `list`, `find`, `orphans`, `stale` の `--format table` | 人間向け tab-separated rows。JSON ではない |
+| source text | `open` | indexed node の本文。JSON ではない |
+
+| command | success stdout | primary keys / content |
+|---|---|---|
+| `scan` | schema-backed object | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
+| `scan-artifacts` | schema-backed object (`scan.schema.json`) | `nodes`, `output.db`, `output.json`, `index_kind`, `roots` |
+| `doctor` | schema-backed object | `status`, `summary`, `checks`, `recommended_next_actions` |
+| `status` | schema-backed object | `status`, `summary`, `indexes`, `recommended_next_actions` |
+| `list` | utility array / table | node objects, or table rows with `--format table` |
+| `open` | source text | node body text |
+| `query` | utility object | `node`, `outgoing`, `incoming`, `stats` |
+| `find` | utility array / table | matching node objects, or table rows with `--format table` |
+| `orphans` | utility array / table | orphan nodes; with `--missing`, unresolved `links_to` targets with `referenced_by` |
+| `stale` | utility array / table | stale node summary rows, or table rows with `--format table` |
+| `first` | utility object | `node`, `prerequisites` |
+| `related` | utility object | `node`, `related` |
+| `start` | schema-backed object | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
+| `context` | schema-backed object | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
+| `impact` | schema-backed object | `inputs`, `warnings`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
+| `finish` | schema-backed object | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
+| `enrich` | utility object | `status`, `node_id`, `summary_source` |
+| `new task` / `new decision` | utility object | `status`, `path`, `node_id`, `kind`, `title` |
+| `stamp` | utility object | `status`, `node_id`, `path`, `updated` |
+| all errors | schema-backed stderr object | `code`, `error` |
 
 `finish --dry-run` の成功判定:
 
@@ -283,11 +290,11 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 }
 ```
 
-人間向け整形が必要な場合だけ `--format table` を使用してください。
+自動化は上表の形式をコマンド単位で選択してください。`contract_schema` の有無だけで utility JSON、table、本文を推測しないでください。人間向け整形が必要な場合だけ `--format table` を使用します。
 
 ### Schema Contracts
 
-機械可読契約は `schemas/` を正本とします。
+機械可読契約は `schemas/` を正本とします。schema-backed CLI output:
 
 - `schemas/scan.schema.json`
 - `schemas/start.schema.json`
@@ -297,7 +304,16 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 - `schemas/impact.schema.json`
 - `schemas/finish.schema.json`
 - `schemas/error.schema.json`
+
+CLI input:
+
+- `schemas/scan_config.schema.json`
+
+Local telemetry（CLI stdout/stderr とは別契約）:
+
 - `schemas/telemetry_event.schema.json`
+
+`contract_schema` は stable logical identifier で、`contract_version` と対で解釈します。公開済みリリースの不変スキーマは `https://raw.githubusercontent.com/syaripin-i8i/mdex/v{contract_version}/schemas/{schema_filename}` から取得します。未リリースの入力スキーマは checkout またはインストール済み package を正本とし、存在しない release tag URL に固定しません。
 
 schema 版運用は `docs/schema_versioning.md` を参照してください。
 Agent integration guidance, including safe argv execution for structured actions and `suggested_rg.args`, is in `docs/agent_integration.md`.

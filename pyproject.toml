@@ -13,6 +13,7 @@ maintainers = [
   { name = "syaripin-i8i" },
 ]
 dependencies = [
+  "jsonschema>=4.20",
   "PyYAML>=6.0",
 ]
 
@@ -25,7 +26,6 @@ Security = "https://github.com/syaripin-i8i/mdex/security/policy"
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
-  "jsonschema>=4.20",
   "pip-audit>=2.7",
   "pytest-cov>=5.0",
   "pytest>=8.0",
@@ -48,6 +48,7 @@ schemas = [
   "schemas/finish.schema.json",
   "schemas/impact.schema.json",
   "schemas/scan.schema.json",
+  "schemas/scan_config.schema.json",
   "schemas/start.schema.json",
   "schemas/status.schema.json",
   "schemas/telemetry_event.schema.json",

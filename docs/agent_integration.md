@@ -10,7 +10,14 @@ Use `--db <path>` when the database path is known. If DB resolution fails, run `
 
 ## Stdout and Stderr
 
-Successful commands write JSON to stdout. Failure commands write JSON to stderr and return a non-zero exit code.
+Successful commands write one of four documented formats to stdout:
+
+- schema-backed JSON objects: `scan` / `scan-artifacts`, `doctor`, `status`, `start`, `context`, `impact`, `finish`;
+- unwrapped utility JSON: arrays from `list`, `find`, `orphans`, and `stale`, plus objects from `query`, `first`, `related`, `enrich`, `new`, and `stamp`;
+- tab-separated rows when a supported command uses `--format table`;
+- source text from `open`.
+
+Every failure writes a schema-backed JSON object to stderr and returns a non-zero exit code.
 
 Do not parse human prose from stderr. Read the JSON `error`, `detail`, and `resolution_attempts` fields when present.
 
@@ -27,7 +34,9 @@ Recovery should be command-specific:
 
 ## JSON Parsing
 
-Parse stdout or stderr as JSON before making decisions. New success and error payloads include:
+Select the parser from the command and `--format` before reading stdout. Parse schema-backed and utility JSON as JSON; do not JSON-parse table output or `open` source text. Error stderr is always JSON.
+
+Schema-backed success and error payloads include:
 
 ```json
 {
@@ -36,11 +45,19 @@ Parse stdout or stderr as JSON before making decisions. New success and error pa
 }
 ```
 
-Consumers should ignore unknown fields for forward compatibility.
+Utility JSON intentionally has no `contract_schema` or `contract_version` wrapper. Consumers should ignore unknown object fields for forward compatibility and must not infer the output category merely from metadata absence.
 
 ## Schema Validation
 
-Schemas live in `schemas/`. Use `contract_schema` to select the expected schema. Since 0.3.x, `contract_schema` and `contract_version` are required in success and error schemas.
+Schemas live in `schemas/`. Use `contract_schema` to select the expected schema only for the schema-backed command set above. Since 0.3.x, `contract_schema` and `contract_version` are required by those success schemas and by the error schema. `scan-artifacts` shares `scan.schema.json`.
+
+`contract_schema` is a stable logical identifier, not a mutable-branch download location. Pair it with `contract_version`. For a published release, derive the immutable validation source as:
+
+```text
+https://raw.githubusercontent.com/syaripin-i8i/mdex/v{contract_version}/schemas/{schema_filename}
+```
+
+Only resolve versions that have a published `v{contract_version}` tag. For unreleased checkout changes, validate the local `schemas/` copy; installed scan configuration validation uses the packaged `scan_config.schema.json`.
 
 Error payloads include a machine-readable `code` field. Switch on `code`; display `error` / `detail` to humans.
 

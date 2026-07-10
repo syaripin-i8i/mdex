@@ -100,7 +100,7 @@ mdex/
   tokens.py      トークン見積もり
 ```
 
-## フェーズ状況 (2026-04-13)
+## フェーズ状況 (2026-07-10)
 
 ### Phase 1（索引化）: 完了
 
@@ -123,12 +123,13 @@ mdex/
 - `new` / `stamp`
 - DB 自動解決
 
-### Phase 3（AI最適化）: 実装・評価中
+### Phase 3（AI最適化）: 基盤実装済み・継続評価
 
 - explainable context scoring / discovery candidates
 - actionable digest / agent prompt pack
 - repo / task / memory / artifact の multi-index
-- 次段階は golden cases による relevance / latency 評価
+- 手動の完全判定 gold set と Recall@k / Precision@k / MRR / p95 latency baseline を `evals/` と `tools/evaluate_quality.py` で運用
+- 保留中の Discovery Lane 提案は golden 評価結果を見てから採否判断し、本フェーズ完了のみで自動採用しない
 
 ### UI / 可視化: 非スコープ
 

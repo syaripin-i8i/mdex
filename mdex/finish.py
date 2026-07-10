@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -26,6 +25,10 @@ from mdex.scan_manifest import (
     load_scan_manifest,
     normalized_index_kind,
     set_scan_manifest,
+)
+from mdex.scan_config import (
+    load_scan_config as load_validated_scan_config,
+    load_scan_config_with_identity as load_validated_scan_config_with_identity,
 )
 from mdex.store import get_node, list_index_metadata, list_nodes
 
@@ -146,19 +149,11 @@ def _build_enrich_candidates(
 
 
 def _load_scan_config(path: Path) -> dict[str, Any]:
-    config, _identity = _load_scan_config_with_identity(path)
-    return config
+    return load_validated_scan_config(path, optional=True)
 
 
 def _load_scan_config_with_identity(path: Path) -> tuple[dict[str, Any], str]:
-    if not path.exists():
-        payload = b""
-        return {}, hashlib.sha256(payload).hexdigest()
-    payload = path.read_bytes()
-    loaded = json.loads(payload.decode("utf-8"))
-    if isinstance(loaded, dict):
-        return loaded, hashlib.sha256(payload).hexdigest()
-    return {}, hashlib.sha256(payload).hexdigest()
+    return load_validated_scan_config_with_identity(path, optional=True)
 
 
 def _scan_summary(index: dict[str, Any]) -> dict[str, Any]:

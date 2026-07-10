@@ -2,7 +2,9 @@
 
 ## Scope
 
-This policy covers the machine-readable JSON contracts in `schemas/`:
+This policy covers the machine-readable JSON contracts in `schemas/`.
+
+Schema-backed CLI output:
 
 - `scan.schema.json`
 - `start.schema.json`
@@ -12,7 +14,30 @@ This policy covers the machine-readable JSON contracts in `schemas/`:
 - `impact.schema.json`
 - `finish.schema.json`
 - `error.schema.json` (stderr error payloads)
+
+CLI input:
+
+- `scan_config.schema.json` (document scan configuration)
+
+Other local protocol:
+
 - `telemetry_event.schema.json` (opt-in local JSON Lines events)
+
+The successful utility JSON commands (`list`, `find`, `orphans`, `stale`, `query`, `first`, `related`, `enrich`, `new`, and `stamp`), table output, and `open` text are intentionally outside the schema-backed output set. Their current shapes remain documented in `README.md`.
+
+## Identifier and Release Retrieval Policy
+
+`contract_schema` is a stable logical identifier. Its value stays paired with `contract_version`; consumers must not download a mutable branch and assume it represents that version.
+
+For an already published release, retrieve the immutable schema content from:
+
+```text
+https://raw.githubusercontent.com/syaripin-i8i/mdex/v{contract_version}/schemas/{schema_filename}
+```
+
+The release tag is the version boundary. Release validation must confirm that every emitted schema filename exists under that tag. A schema added only in an unreleased checkout, including a newly introduced input schema, uses the checkout or installed package copy until a release containing it is tagged; documentation must not claim that an older tag contains it.
+
+The `$id` values and emitted `contract_schema` values remain logical identifiers so existing consumers are not broken merely to change transport. Immutability comes from the version-tagged retrieval URL, not from a mutable default branch.
 
 ## Versioning Model
 
@@ -37,7 +62,8 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 - Existing required fields keep name and type within the same MAJOR line.
 - Optional fields may be added in MINOR releases.
 - Consumers should ignore unknown fields for forward compatibility.
-- The same semver/deprecation guarantees apply to both success and error schemas.
+- The same semver/deprecation guarantees apply to schema-backed success and error schemas.
+- Input schema tightening that rejects a configuration accepted by the previous release is contract-impacting and must follow the same release/change process.
 
 ## Deprecation Policy
 
@@ -51,7 +77,8 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 1. Update schema files in `schemas/`.
 2. Update this document if policy assumptions changed.
 3. Add or update tests validating CLI outputs against schemas.
-4. Record contract-impacting changes in `CHANGELOG.md`.
+4. Validate input schemas against every shipped example/configuration and verify that the schema is present in built artifacts.
+5. Record contract-impacting changes in `CHANGELOG.md`.
 
 ## Notification Rules
 
@@ -78,7 +105,7 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 
 ## 0.3.0 Contract Tightening
 
-- Success and error schemas require `contract_schema` and `contract_version`.
+- Schema-backed success and error schemas require `contract_schema` and `contract_version`.
 - Error schemas require machine-readable `code` alongside human-readable `error`.
 - `recommended_next_actions` remains present but deprecated; agents should prefer `recommended_next_actions_v2`.
 - `telemetry_event.schema.json` is versioned independently from command stdout/stderr schemas because telemetry is opt-in observability data.

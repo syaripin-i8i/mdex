@@ -72,21 +72,19 @@ def _gitignore_patterns() -> set[str]:
 
 def _schema_for_contract_command(command_cell: str) -> Path | None:
     normalized = _strip_code_ticks(command_cell)
-    if normalized == "scan":
-        return SCHEMAS_DIR / "scan.schema.json"
-    if normalized == "start":
-        return SCHEMAS_DIR / "start.schema.json"
-    if normalized == "context":
-        return SCHEMAS_DIR / "context.schema.json"
-    if normalized == "doctor":
-        return SCHEMAS_DIR / "doctor.schema.json"
-    if normalized == "impact":
-        return SCHEMAS_DIR / "impact.schema.json"
-    if normalized == "finish":
-        return SCHEMAS_DIR / "finish.schema.json"
-    if normalized == "db resolution error":
-        return SCHEMAS_DIR / "error.schema.json"
-    return None
+    schema_by_command = {
+        "scan": "scan.schema.json",
+        "scan-artifacts": "scan.schema.json",
+        "start": "start.schema.json",
+        "context": "context.schema.json",
+        "doctor": "doctor.schema.json",
+        "status": "status.schema.json",
+        "impact": "impact.schema.json",
+        "finish": "finish.schema.json",
+        "all errors": "error.schema.json",
+    }
+    schema_name = schema_by_command.get(normalized)
+    return SCHEMAS_DIR / schema_name if schema_name is not None else None
 
 
 def _load_schema(path: Path) -> dict[str, object]:
@@ -151,12 +149,16 @@ def test_readme_output_contract_primary_keys_match_schema_properties() -> None:
     readme = _readme_text()
     section = _section(readme, "### Output Contract", "### Schema Contracts")
     rows = _parse_markdown_table(section)
+    header_index = next(index for index, cells in enumerate(rows) if cells[0] == "command")
+    header = rows[header_index]
+    command_index = header.index("command")
+    keys_index = header.index("primary keys / content")
 
     failures: list[str] = []
-    for cells in rows[1:]:
-        if len(cells) < 2:
+    for cells in rows[header_index + 1 :]:
+        if len(cells) <= max(command_index, keys_index):
             continue
-        command_cell, key_cell = cells[0], cells[1]
+        command_cell, key_cell = cells[command_index], cells[keys_index]
         schema_path = _schema_for_contract_command(command_cell)
         if schema_path is None:
             continue
@@ -168,6 +170,48 @@ def test_readme_output_contract_primary_keys_match_schema_properties() -> None:
                     f"{command_cell} -> {key} is not declared in {schema_path.relative_to(PROJECT_ROOT).as_posix()}"
                 )
     assert not failures, "README Output Contract keys drifted from schema definitions:\n" + "\n".join(failures)
+
+
+def test_readme_declares_the_four_actual_stdout_categories() -> None:
+    readme = _readme_text()
+    section = _section(readme, "### Output Contract", "### Schema Contracts")
+    rows = _parse_markdown_table(section)
+    category_rows = {
+        cells[0]: cells
+        for cells in rows
+        if cells and cells[0] in {
+            "schema-backed JSON object",
+            "utility JSON（schema なし）",
+            "table",
+            "source text",
+        }
+    }
+
+    assert set(category_rows) == {
+        "schema-backed JSON object",
+        "utility JSON（schema なし）",
+        "table",
+        "source text",
+    }
+    assert "`scan-artifacts`" in category_rows["schema-backed JSON object"][1]
+    assert "`query`" in category_rows["utility JSON（schema なし）"][1]
+    assert "`open`" in category_rows["source text"][1]
+    assert "all errors" in section
+
+
+def test_schema_docs_pin_published_retrieval_without_rewriting_logical_ids() -> None:
+    versioning = (DOCS_DIR / "schema_versioning.md").read_text(encoding="utf-8")
+    integration = (DOCS_DIR / "agent_integration.md").read_text(encoding="utf-8")
+    release_template = (
+        "https://raw.githubusercontent.com/syaripin-i8i/mdex/"
+        "v{contract_version}/schemas/{schema_filename}"
+    )
+
+    assert release_template in versioning
+    assert release_template in integration
+    assert "stable logical identifier" in versioning
+    assert "scan_config.schema.json" in versioning
+    assert "unreleased checkout" in versioning
 
 
 def test_agent_commands_exist_in_cli_parser() -> None:

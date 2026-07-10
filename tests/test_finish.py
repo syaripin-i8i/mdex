@@ -119,7 +119,8 @@ def test_scan_helpers_handle_missing_and_non_object_config(tmp_path: Path) -> No
 
     bad = tmp_path / "scan.json"
     bad.write_text(json.dumps(["not-object"]), encoding="utf-8")
-    assert finish._load_scan_config(bad) == {}
+    with pytest.raises(ValueError, match="scan config root must be an object"):
+        finish._load_scan_config(bad)
 
     summary = finish._scan_summary({"generated": "now", "nodes": [{"id": "x"}], "edges": [{"a": 1}]})
     assert summary == {"generated": "now", "nodes": 1, "edges": 1}

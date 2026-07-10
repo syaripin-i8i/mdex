@@ -10,7 +10,7 @@ README_PATH = PROJECT_ROOT / "README.md"
 def _quality_repo_section() -> str:
     text = README_PATH.read_text(encoding="utf-8")
     start = text.index("## 再現サンプル（fixtures/quality_repo）")
-    end = text.index("## 全出力は JSON")
+    end = text.index("## CLI 出力境界")
     return text[start:end]
 
 
