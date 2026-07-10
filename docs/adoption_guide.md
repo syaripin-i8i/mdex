@@ -2,7 +2,7 @@
 type: reference
 project: mdex
 status: active
-updated: 2026-04-30
+updated: 2026-07-11
 ---
 
 # Adoption Guide
@@ -17,16 +17,66 @@ The main repo index should answer:
 
 It should not contain every file that might someday be useful.
 
-## Recommended Rollout
+## Fit Check
 
-This guide describes the current GitHub source state. Install with `python -m pip install git+https://github.com/syaripin-i8i/mdex.git` or from a local checkout with `python -m pip install -e .`.
+A pilot is worthwhile when the repository already has maintained source-authority
+documents and the team wants AI agents to choose among them before searching code.
 
-1. Create a narrow scan config.
-2. Index only source-authority documents first.
-3. Run `mdex doctor`.
-4. Try `mdex start "<real task>"`.
-5. Add metadata to the few missing entrypoints.
-6. Keep task history, memory, evals, and raw logs in separate lanes.
+Do not start a pilot merely to compensate for missing or stale documentation. Also
+stop here if the desired product is full-text search, broad semantic recall, or a
+human-facing knowledge base.
+
+## Public-Preview Boundary
+
+`mdex` is in public preview. A `0.x` minor release may tighten documented contracts.
+Pin one version for the pilot, keep the index disposable, and review the changelog
+before upgrading. A successful pilot is evidence for that repository and workflow,
+not a claim of broad production relevance.
+
+## One-Repo Pilot
+
+This guide targets `mdex` 0.5.0. Pin the pilot with
+`python -m pip install "mdex-cli==0.5.0"`. If evaluating a local checkout instead,
+record the commit and do not compare results across different commits.
+
+Choose one repository and 3–5 real, representative tasks. Before running `mdex`,
+record for each task:
+
+- the task statement;
+- the one or two documents expected to guide the first decision;
+- material that must not rank highly;
+- the current way the agent finds its starting context.
+
+Then:
+
+1. Create a narrow Markdown-only scan config.
+2. Index current source-authority documents.
+3. Run `scan` and `doctor`.
+4. Run `start` and `context --actionable` for every recorded task.
+5. Record the first two entries in `recommended_read_order`, harmful noise, disclosed context gaps, and required config or document maintenance.
+6. Make only bounded changes that you would be willing to maintain.
+7. Repeat the same tasks and decide whether to continue.
+
+## Continue Criteria
+
+Continue adoption only when:
+
+- the pre-recorded source-authority documents appear in the first two entries of `recommended_read_order`, or the output clearly discloses why the context is missing;
+- stale, generated, fixture, and unrelated history material does not displace authoritative documents;
+- the result gives the agent a useful next read or a bounded bridge into `rg`;
+- the required config and metadata maintenance stays limited to intentional entrypoints;
+- the team can identify an owner for index hygiene and version upgrades.
+
+## Stop Criteria
+
+Stop or defer adoption when:
+
+- the pilot reveals that current source-authority documents do not exist;
+- repeated tuning within the predeclared maintenance budget still produces misleading entrypoints;
+- useful results require indexing the repository as an undifferentiated warehouse;
+- metadata work expands into annotating most of the corpus;
+- the result adds no useful reading order beyond the team's existing search workflow;
+- the team cannot accept pinned public-preview contracts and reviewed upgrades.
 
 ## What To Put In The Main Repo Index
 

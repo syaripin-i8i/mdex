@@ -31,6 +31,7 @@ jobs:
           expected_ref="refs/tags/v${project_version}"
           test "${project_version}" = "${package_version}"
           test "${GITHUB_REF}" = "${expected_ref}"
+          python .github/scripts/verify_release_metadata.py --version "${project_version}"
 
       - name: Install dependencies from lock
         run: python .github/scripts/install_from_pylock.py --lock pylock.toml --editable .

@@ -2,27 +2,44 @@
 type: reference
 project: mdex
 status: active
-updated: 2026-04-30
+updated: 2026-07-11
 ---
 
 # Getting Started
 
-This guide is the shortest path to seeing whether `mdex` helps your repo.
+This guide checks two things: whether the CLI works in your environment, and whether
+one real task produces a plausible reading entrypoint. It is not evidence that `mdex`
+is ready for broad adoption in your repo.
 
 `mdex` is not a replacement for full-text search. It is a small protocol-first index for choosing what an AI agent should read first.
 
+`mdex` is a public-preview tool. Pin the version during evaluation and review the
+changelog before upgrading across a `0.x` minor release.
+
+## 0. Preflight
+
+Continue if:
+
+- the repo has at least a few current documents that should guide an agent's first decision;
+- you can name a real task and the one or two documents you expect to matter;
+- generated output, fixtures, logs, and old task history can be excluded;
+- someone can own the scan config and the small set of authoritative metadata.
+
+If the expected documents do not exist or are not current, improve the documentation
+first. `mdex` cannot infer missing source authority.
+
 ## 1. Install
 
-From PyPI:
+From PyPI (pin the version during evaluation):
 
 ```bash
-python -m pip install mdex-cli
+python -m pip install "mdex-cli==0.5.0"
 ```
 
-For the current GitHub source version:
+From the released source tag:
 
 ```bash
-python -m pip install git+https://github.com/syaripin-i8i/mdex.git
+python -m pip install git+https://github.com/syaripin-i8i/mdex.git@v0.5.0
 ```
 
 For local development from this checkout:
@@ -34,6 +51,9 @@ python -m pip install -e .
 Supported Python versions are documented in `docs/support_matrix.md`.
 
 ## 2. Try the Fixture Repo
+
+The fixture confirms installation and output shape only; it does not test whether your
+repository is a fit.
 
 From the mdex checkout:
 
@@ -139,3 +159,6 @@ You do not need to annotate every file. Start with README, AGENT-style rules, ac
 - Mark old docs as `status: archived` or move them out of the main index.
 - Add `depends_on` only for true prerequisites.
 - Keep summaries short and current.
+
+A plausible result for one task is only a smoke test. Before adopting `mdex`, run the
+3–5 task pilot in `docs/adoption_guide.md`.
