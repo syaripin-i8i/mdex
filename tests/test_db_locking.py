@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import threading
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -638,7 +639,9 @@ def test_v040_legacy_pair_can_migrate_to_manifest_ownership(tmp_path: Path) -> N
     repo.mkdir()
     db_path = repo / "legacy.db"
     json_path = repo / "legacy.json"
-    with sqlite3.connect(str(db_path)) as connection:
+    # closing(): sqlite3's context manager only ends the transaction, and
+    # Windows cannot os.replace a database that still has an open handle.
+    with closing(sqlite3.connect(str(db_path))) as connection:
         connection.executescript(
             """
             CREATE TABLE nodes (

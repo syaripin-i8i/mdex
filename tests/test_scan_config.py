@@ -184,7 +184,9 @@ def test_runtime_explicit_scan_config_must_exist_before_scan_outputs(
     error = json.loads(captured.err)
     assert error["error"] == "scan failed"
     assert "cannot read scan config" in error["detail"]
-    assert "control/typo.json" in error["detail"]
+    # The detail echoes the resolved path, whose separators are
+    # platform-specific on Windows.
+    assert str(Path("control") / "typo.json") in error["detail"]
     assert not db_path.exists()
     assert not output_path.exists()
 

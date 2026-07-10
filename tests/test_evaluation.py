@@ -328,12 +328,19 @@ def test_latency_and_policy_values_are_finite_and_nonnegative(
 def test_latency_guardrail_is_report_only_unless_explicitly_enforced() -> None:
     report = _uncompared_report()
     baseline = baseline_from_report(report)
+    # Pin p50 alongside p95: the report carries real measured timings, and a
+    # slow runner's p50 can exceed a doctored p95, tripping the internal
+    # p50 <= p95 validation instead of exercising the guardrail.
     for payload in (report["latency_ms"],):
+        payload["p50"] = 10.0
         payload["p95"] = 20.0
         for operation in payload["by_operation"].values():
+            operation["p50"] = 10.0
             operation["p95"] = 20.0
+    baseline["latency_ms"]["p50"] = 0.5
     baseline["latency_ms"]["p95"] = 1.0
     for operation in baseline["latency_ms"]["by_operation"].values():
+        operation["p50"] = 0.5
         operation["p95"] = 1.0
 
     observed = compare_with_baseline(
@@ -387,16 +394,21 @@ def test_evaluation_json_loaders_reject_nonstandard_constants(
 
 @pytest.mark.parametrize("newline", [b"\r\n", b"\r"])
 def test_corpus_hash_normalizes_text_newlines(newline: bytes, tmp_path: Path) -> None:
+    # A Windows checkout may already carry CRLF; normalize to LF before
+    # applying the parametrized newline so the rewrite cannot produce \r\r\n.
+    def _with_newline(data: bytes) -> bytes:
+        return data.replace(b"\r\n", b"\n").replace(b"\n", newline)
+
     fixture_copy = tmp_path / "quality_repo"
     shutil.copytree(FIXTURE_ROOT, fixture_copy)
     for source in fixture_copy.rglob("*"):
         if source.is_file():
-            source.write_bytes(source.read_bytes().replace(b"\n", newline))
+            source.write_bytes(_with_newline(source.read_bytes()))
 
     config_copy = tmp_path / "quality_scan_config.json"
-    config_copy.write_bytes(SCAN_CONFIG.read_bytes().replace(b"\n", newline))
+    config_copy.write_bytes(_with_newline(SCAN_CONFIG.read_bytes()))
     gold_copy = tmp_path / "quality_retrieval_gold.json"
-    gold_copy.write_bytes(GOLD_SET.read_bytes().replace(b"\n", newline))
+    gold_copy.write_bytes(_with_newline(GOLD_SET.read_bytes()))
 
     assert corpus_sha256(fixture_copy, config_copy, gold_copy) == corpus_sha256(
         FIXTURE_ROOT,
