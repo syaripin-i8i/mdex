@@ -259,13 +259,13 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | `list` | utility array / table | node objects, or table rows with `--format table` |
 | `open` | source text | node body text |
 | `query` | utility object | `node`, `outgoing`, `incoming`, `stats` |
-| `find` | utility array / table | matching node objects, or table rows with `--format table` |
+| `find` | utility array / table | matching node objects, or table rows with `--format table`。0 件時は stdout `[]` のまま stderr に `{"zero_hits": ...}` を 1 行出力（exit 0） |
 | `orphans` | utility array / table | orphan nodes; with `--missing`, unresolved `links_to` targets with `referenced_by` |
 | `stale` | utility array / table | stale node summary rows, or table rows with `--format table` |
 | `first` | utility object | `node`, `prerequisites` |
 | `related` | utility object | `node`, `related` |
 | `start` | schema-backed object | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
-| `context` | schema-backed object | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence` |
+| `context` | schema-backed object | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence`, `zero_hits` |
 | `impact` | schema-backed object | `inputs`, `warnings`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
 | `finish` | schema-backed object | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
 | `enrich` | utility object | `status`, `node_id`, `summary_source` |
@@ -291,6 +291,17 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 ```
 
 自動化は上表の形式をコマンド単位で選択してください。`contract_schema` の有無だけで utility JSON、table、本文を推測しないでください。人間向け整形が必要な場合だけ `--format table` を使用します。
+
+#### Zero-hit disclosure（`zero_hits`）
+
+`find` / `context` が「検索した上で 0 件」のとき、payload に `zero_hits` を開示します。**0 件はメタデータ索引（title / tags / summary / search_terms）の範囲しか束縛せず、文書が存在しない証明ではありません**。field 名は cdex の `zero_hits` と共通語彙です（cdex `51c9ffa` / decisions/0003）。
+
+- `lanes_searched`: 照合したレーンの自己申告（mdex は `["metadata"]`）
+- `lanes_inactive`: 探索していないレーンとその理由（`{"body_text": "documented_non_goal"}` — 本文全文は Non-goals に明記の仕様）
+- `caveat`: 0 件が束縛する範囲の明示
+- `remediation`: 本文語は `rg`、コードの prior art は `cdex search`、mdex から見つけたい文書は frontmatter tags へ（`docs/convention.md`）
+
+チャネルはコマンドの出力契約に従います: `context` は payload key（schema-backed）、`find` は stdout の生配列契約を維持したまま stderr に `{"zero_hits": ...}` を 1 行出力します（exit 0 のまま。stderr JSON + exit != 0 の失敗契約とは別物）。blank query や budget による全 drop は「検索した上での 0 件」ではないため `zero_hits` を主張しません。
 
 ### Schema Contracts
 

@@ -92,6 +92,9 @@
     "confidence": {
       "type": "number"
     },
+    "zero_hits": {
+      "$ref": "#/$defs/zeroHits"
+    },
     "why_this_set": {
       "type": "array",
       "items": {
@@ -411,6 +414,38 @@
           }
         },
         "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "zeroHits": {
+      "type": "object",
+      "description": "Present only when the query was searched and matched nothing. States which lanes bounded the zero and what would widen it; zero hits is not evidence that the document does not exist. Field names are shared protocol vocabulary with cdex.",
+      "required": [
+        "lanes_searched",
+        "lanes_inactive",
+        "caveat",
+        "remediation"
+      ],
+      "properties": {
+        "lanes_searched": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lanes_inactive": {
+          "type": "object",
+          "description": "Lane name to reason it was not searched, e.g. body_text: documented_non_goal.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "caveat": {
+          "type": "string"
+        },
+        "remediation": {
           "type": "string"
         }
       },

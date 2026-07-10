@@ -1112,3 +1112,81 @@ def test_select_context_ranking_regression_on_quality_fixture(
     result = select_context("root decision", str(db_path), budget=4000, limit=5)
     ranked = [row["id"] for row in result["nodes"][:3]]
     assert ranked == ["decision/a.md", "design/root.md", "design/tie.md"]
+
+
+def test_select_context_zero_hits_disclosure(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_context_zero_hits.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    result = select_context("qzxunmatchedterm", str(db_path), budget=4000, limit=10)
+    assert result["nodes"] == []
+    zero_hits = result["zero_hits"]
+    assert zero_hits["lanes_searched"] == ["metadata"]
+    assert zero_hits["lanes_inactive"] == {"body_text": "documented_non_goal"}
+    assert "not evidence" in zero_hits["caveat"]
+    assert "rg -n" in zero_hits["remediation"]
+    assert "qzxunmatchedterm" in zero_hits["remediation"]
+
+
+def test_select_context_does_not_claim_zero_hits_without_a_searched_zero(
+    quality_repo: Path,
+    quality_config: dict[str, object],
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality_context_no_zero_hits.db"
+    _build_db(quality_repo, quality_config, db_path)
+
+    assert "zero_hits" not in select_context("", str(db_path), budget=4000, limit=10)
+    assert "zero_hits" not in select_context("root decision", str(db_path), budget=4000, limit=10)
+
+
+def test_multi_index_context_zero_hits_disclosure(tmp_path: Path) -> None:
+    repo = tmp_path / "multi_zero_repo"
+    repo.mkdir()
+    mdex_dir = repo / ".mdex"
+    mdex_dir.mkdir()
+    task_repo = tmp_path / "multi_zero_task_repo"
+    task_repo.mkdir()
+    (repo / "repo.md").write_text("# Repo\n\nshared multi index term\n", encoding="utf-8")
+    (task_repo / "task.md").write_text("# Task\n\nshared multi index term\n", encoding="utf-8")
+    config = {"include_extensions": [".md"], "exclude_patterns": []}
+    repo_db = mdex_dir / "mdex_index.db"
+    task_db = mdex_dir / "task_history.db"
+    _build_db(repo, config, repo_db)
+    _build_db(task_repo, config, task_db)
+    db_info = {"path": str(repo_db), "source": "arg", "repo_root": str(repo), "config": {}}
+
+    unmatched = build_multi_context_payload(
+        "qzxunmatchedterm",
+        db_info,
+        include="repo,task",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+    assert unmatched["nodes"] == []
+    assert unmatched["zero_hits"]["lanes_searched"] == ["metadata"]
+    assert unmatched["zero_hits"]["lanes_inactive"] == {"body_text": "documented_non_goal"}
+
+    matched = build_multi_context_payload(
+        "shared multi index term",
+        db_info,
+        include="repo,task",
+        budget=4000,
+        limit=4,
+        include_content=False,
+        actionable=True,
+        digest="full",
+        scoring_config=None,
+        scoring_config_source="defaults",
+    )
+    assert matched["nodes"]
+    assert "zero_hits" not in matched

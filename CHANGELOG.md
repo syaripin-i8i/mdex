@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Disclose `zero_hits` (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`, shared vocabulary with cdex) when `find` or `context` search the metadata lane and match nothing, so agents stop reading an empty result as proof of absence. `context` carries it as a payload key; `find` keeps its bare-array stdout contract and emits one stderr JSON line with exit `0`.
+
 ### Fixed
 
 - Make document scan configuration fail closed on unknown keys, invalid types or lanes, non-finite numbers, missing explicitly configured files, and unavailable packaged schemas.

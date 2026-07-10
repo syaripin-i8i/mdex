@@ -11,7 +11,7 @@ from typing import Any
 from mdex.artifacts import DEFAULT_ARTIFACT_ROOTS, build_artifacts_index
 from mdex.builder import build_index
 from mdex.contract import with_contract_metadata, with_error_contract
-from mdex.context import build_agent_prompt_pack, resolve_context_scoring_config, select_context
+from mdex.context import build_agent_prompt_pack, resolve_context_scoring_config, select_context, zero_hits_field
 from mdex.dbresolve import (
     DbResolutionError,
     RuntimeContext,
@@ -923,6 +923,10 @@ def _cmd_find(args: argparse.Namespace) -> int:
     db_path = str(Path(str(db_info["path"])))
 
     matched = search_nodes(db_path, args.query, limit=int(args.limit))
+    if not matched and str(args.query).strip():
+        # stdout stays the contract's bare array (empty array is still success);
+        # the disclosure rides stderr with exit 0 so array consumers are untouched.
+        _emit_payload({"zero_hits": zero_hits_field(str(args.query))}, stderr=True)
     _print_nodes(matched, args.format)
     return 0
 

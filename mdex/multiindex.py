@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from mdex.context import project_actionable_digest, select_context
+from mdex.context import project_actionable_digest, select_context, zero_hits_field
 from mdex.start import build_start_payload
 from mdex.store import list_index_metadata
 
@@ -437,6 +437,8 @@ def build_multi_context_payload(
         "budget": safe_budget,
         "budget_dropped_nodes": merged_dropped[:10],
     }
+    if not output["nodes"] and any("zero_hits" in item for item in contexts):
+        output["zero_hits"] = zero_hits_field(query)
     if actionable:
         output["recommended_read_order"] = _dedupe_sequence(
             [row for item in contexts for row in _stamp_rows(list(item.get("recommended_read_order", []) or []), str(item.get("index", "")))],

@@ -1306,6 +1306,36 @@ def _empty_actionable_digest(query: str, reason: str) -> dict[str, Any]:
     }
 
 
+def zero_hits_field(query: str) -> dict[str, Any]:
+    """Disclosure for a searched query that matched nothing.
+
+    Field names (lanes_searched / lanes_inactive / caveat / remediation) are
+    shared protocol vocabulary with cdex (cdex 51c9ffa, decisions/0003) and
+    must stay aligned across both tools. Zero hits after a search claims this
+    field; a blank query or a budget trim to zero does not.
+    """
+    terms = _query_keywords(query)
+    if terms:
+        pattern = "|".join(re.escape(term) for term in terms[:5])
+        rg_hint = f'rg -n "{pattern}" .'
+    else:
+        rg_hint = "rg -n <term> ."
+    return {
+        "lanes_searched": ["metadata"],
+        "lanes_inactive": {"body_text": "documented_non_goal"},
+        "caveat": (
+            "zero hits bounds only the metadata lane (title / tags / summary / "
+            "search_terms) over the indexed corpus — it is not evidence that the "
+            "document does not exist"
+        ),
+        "remediation": (
+            f"for body text run: {rg_hint}; for code prior art run: cdex search; "
+            "to make a document findable here, add the term to its frontmatter tags "
+            "(docs/convention.md)"
+        ),
+    }
+
+
 def project_actionable_digest(payload: dict[str, Any], digest: str) -> dict[str, Any]:
     if str(digest or "full").strip().lower() != "minimal":
         return payload
@@ -1530,6 +1560,7 @@ def select_context(
                 "confidence": 0.0,
                 "why_this_set": [],
                 "budget_dropped_nodes": [],
+            "zero_hits": zero_hits_field(query),
             "actionable_digest": project_actionable_digest(
                 _empty_actionable_digest(
                     query,

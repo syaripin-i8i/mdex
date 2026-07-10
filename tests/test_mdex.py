@@ -340,6 +340,35 @@ def test_find_matches_title_summary_and_tags(
     assert "docs/source.md\tSource Doc\tdesign\tactive" in table_match.stdout
 
 
+def test_find_zero_hits_discloses_on_stderr_and_keeps_stdout_contract(
+    build_config: dict[str, object],
+    fixture_repo: Path,
+    tmp_path: Path,
+) -> None:
+    index = build_index(str(fixture_repo), build_config)
+    db_path = tmp_path / "mdex_find_zero_hits.db"
+    write_sqlite(index, str(db_path))
+
+    no_match = _run_cli("find", "qzxunmatchedterm", "--db", str(db_path))
+    assert no_match.returncode == 0
+    assert json.loads(no_match.stdout) == []
+    disclosure = json.loads(no_match.stderr)
+    zero_hits = disclosure["zero_hits"]
+    assert zero_hits["lanes_searched"] == ["metadata"]
+    assert zero_hits["lanes_inactive"] == {"body_text": "documented_non_goal"}
+    assert "not evidence" in zero_hits["caveat"]
+    assert "qzxunmatchedterm" in zero_hits["remediation"]
+
+    matched = _run_cli("find", "source", "--db", str(db_path), "--limit", "20")
+    assert matched.returncode == 0
+    assert matched.stderr.strip() == ""
+
+    blank = _run_cli("find", "", "--db", str(db_path))
+    assert blank.returncode == 0
+    assert json.loads(blank.stdout) == []
+    assert blank.stderr.strip() == ""
+
+
 def test_orphans_lists_nodes_without_resolved_edges(
     build_config: dict[str, object],
     fixture_repo: Path,

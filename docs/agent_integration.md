@@ -21,6 +21,12 @@ Every failure writes a schema-backed JSON object to stderr and returns a non-zer
 
 Do not parse human prose from stderr. Read the JSON `error`, `detail`, and `resolution_attempts` fields when present.
 
+One success case also uses stderr: when `find` matches nothing, stdout stays the contract's empty array and stderr carries one `{"zero_hits": ...}` JSON line with exit `0`. Distinguish it from failures by the exit code and the `zero_hits` key (error payloads carry `error` and `code`).
+
+## Zero Hits Are Not Absence
+
+`find` and `context` match node metadata only (title / tags / summary / search_terms), never full body text — a documented non-goal. When a searched query matches nothing, the payload includes `zero_hits` (`lanes_searched`, `lanes_inactive`, `caveat`, `remediation`; shared vocabulary with cdex). Never conclude from an empty result that a document or wiring does not exist: follow `remediation` — `rg` for body text, `cdex search` for code prior art — or add the term to the document's frontmatter tags to make it findable.
+
 ## Exit Codes
 
 Treat exit code `0` as success. Treat any non-zero exit code as failure, even if stdout contains text.
@@ -177,6 +183,8 @@ The scan payload includes `warning_summary` so agents can report counts without 
 When `start` returns `index_status.fresh == false`, run `mdex scan`, then rerun `mdex start "<task>"`.
 
 When `confidence < 0.6`, run the structured `mdex find` action if present, or execute `suggested_rg` safely.
+
+When a payload carries `zero_hits`, treat the result as "not indexed under this term", not "does not exist"; follow its `remediation` before concluding anything.
 
 When changed files exist after edits, run `mdex impact --changed-files-from-git`.
 
