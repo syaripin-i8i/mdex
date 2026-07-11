@@ -45,6 +45,7 @@ from mdex.scan_config import load_scan_config_with_identity
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
 from mdex.start import build_start_payload
+from mdex.source_freshness import verify_manifest_source_state
 from mdex.store import (
     get_node,
     get_scan_root,
@@ -228,6 +229,30 @@ def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any]
         _emit_error("db resolution failed", detail=str(exc))
         return None
     return resolved
+
+
+def _context_evidence_identity(db_path: str) -> dict[str, Any]:
+    """Expose a scan generation with a machine-verified source-state result."""
+    try:
+        metadata = list_index_metadata(db_path)
+        manifest = load_scan_manifest(metadata)
+    except (OSError, ValueError, ScanManifestError):
+        return {
+            "status": "unavailable",
+            "reusable": False,
+            "reason": "scan_manifest_unavailable",
+        }
+    source_state = verify_manifest_source_state(manifest, metadata)
+    fresh = source_state["status"] == "fresh"
+    return {
+        "status": "verified" if fresh else "identified",
+        "reusable": fresh,
+        "reason": "source_state_verified" if fresh else str(source_state["reason"]),
+        "scan_id": str(manifest["scan_id"]),
+        "config_hash": str(manifest["config_hash"]),
+        "index_kind": str(manifest["index_kind"]),
+        "source_state": source_state,
+    }
 
 
 def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) -> Path | None:
@@ -1007,6 +1032,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
                 scoring_config=scoring_config,
                 scoring_config_source=scoring_source,
             )
+            result["evidence_identity"] = _context_evidence_identity(db_path)
         else:
             result = build_multi_context_payload(
                 args.query,
@@ -1020,6 +1046,11 @@ def _cmd_context(args: argparse.Namespace) -> int:
                 scoring_config=scoring_config,
                 scoring_config_source=scoring_source,
             )
+            result["evidence_identity"] = {
+                "status": "unavailable",
+                "reusable": False,
+                "reason": "multi_index_identity_not_implemented",
+            }
     except Exception as exc:
         _emit_error("context selection failed", detail=str(exc))
         return 2

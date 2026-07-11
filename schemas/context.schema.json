@@ -106,9 +106,56 @@
     },
     "agent_prompt_pack": {
       "$ref": "#/$defs/agentPromptPack"
+    },
+    "evidence_identity": {
+      "$ref": "#/$defs/evidenceIdentity"
     }
   },
   "$defs": {
+    "evidenceIdentity": {
+      "type": "object",
+      "required": ["status", "reusable", "reason"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["verified", "identified", "unavailable"]
+        },
+        "reusable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scan_id": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "index_kind": {
+          "type": "string"
+        },
+        "source_state": {
+          "$ref": "#/$defs/sourceState"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceState": {
+      "type": "object",
+      "required": ["status", "reason", "scan_id", "config_hash"],
+      "properties": {
+        "status": {"type": "string", "enum": ["fresh", "stale", "unknown"]},
+        "reason": {"type": "string"},
+        "scan_id": {"type": "string"},
+        "config_hash": {"type": "string"},
+        "current_config_hash": {"type": "string"},
+        "stored_fingerprint_hash": {"type": "string"},
+        "current_fingerprint_hash": {"type": "string"},
+        "detail": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
     "agentPromptPack": {
       "type": "object",
       "required": ["role", "query", "instructions", "required_reads", "prompt"],
