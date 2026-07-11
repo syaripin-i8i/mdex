@@ -24,6 +24,29 @@ def _write_config(repo: Path, config: object) -> None:
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
 
+def _make_linked_worktree(
+    tmp_path: Path,
+    name: str = "wt",
+    *,
+    commondir: bool = True,
+) -> tuple[Path, Path]:
+    """Create a main checkout plus a linked-worktree layout like git does.
+
+    The worktree root holds a `.git` FILE with `gitdir: <main>/.git/worktrees/<name>`
+    and that gitdir holds a `commondir` file pointing back at `<main>/.git`.
+    """
+    main = tmp_path / "main"
+    gitdir = main / ".git" / "worktrees" / name
+    gitdir.mkdir(parents=True)
+    if commondir:
+        (gitdir / "commondir").write_text("../..\n", encoding="utf-8")
+
+    worktree = main / ".claude" / "worktrees" / name
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+    return main, worktree
+
+
 def test_detect_repo_root_prefers_mdex_config(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     nested = repo / "a" / "b"
@@ -162,3 +185,193 @@ def test_resolve_db_path_raises_with_resolution_attempts(tmp_path: Path) -> None
     assert payload["error"] == "db not found"
     assert payload["resolution_attempts"]
     assert "mdex scan --root" in payload["hint"]
+
+
+def test_resolve_db_path_plain_repo_has_no_worktree_attempts(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, {})
+    (repo / ".git").mkdir()
+
+    with pytest.raises(DbResolutionError) as caught:
+        resolve_db_path(None, cwd=repo, must_exist=True)
+
+    sources = [attempt["source"] for attempt in caught.value.payload["resolution_attempts"]]
+    assert sources == ["repo_default", "repo_default"]
+
+
+def test_resolve_db_path_worktree_falls_back_to_main_root_db(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    main_db = main / ".mdex" / "mdex_index.db"
+    main_db.write_text("", encoding="utf-8")
+
+    resolved = resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    assert Path(resolved["path"]) == main_db.resolve()
+    assert resolved["source"] == "worktree_common_root"
+    assert Path(resolved["repo_root"]) == worktree.resolve()
+    sources = [attempt["source"] for attempt in resolved["resolution_attempts"]]
+    assert sources == ["repo_default", "repo_default", "worktree_common_root"]
+    assert all(
+        not attempt["exists"]
+        for attempt in resolved["resolution_attempts"]
+        if attempt["source"] == "repo_default"
+    )
+
+
+def test_resolve_db_path_worktree_prefers_local_db(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (main / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+    local_db = worktree / ".mdex" / "mdex_index.db"
+    local_db.write_text("", encoding="utf-8")
+
+    resolved = resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    assert Path(resolved["path"]) == local_db.resolve()
+    assert resolved["source"] == "repo_default"
+
+
+def test_resolve_db_path_worktree_mirrors_config_db_value(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {"db": ".mdex/custom.db"})
+    _write_config(worktree, {"db": ".mdex/custom.db"})
+    main_db = main / ".mdex" / "custom.db"
+    main_db.write_text("", encoding="utf-8")
+
+    resolved = resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    assert Path(resolved["path"]) == main_db.resolve()
+    assert resolved["source"] == "worktree_common_root"
+
+
+def test_resolve_db_path_worktree_fails_closed_when_no_db_anywhere(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+
+    with pytest.raises(DbResolutionError) as caught:
+        resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    payload = caught.value.payload
+    assert payload["error"] == "db not found"
+    attempts = payload["resolution_attempts"]
+    worktree_paths = [
+        attempt["path"] for attempt in attempts if attempt["source"] == "repo_default"
+    ]
+    main_paths = [
+        attempt["path"] for attempt in attempts if attempt["source"] == "worktree_common_root"
+    ]
+    assert worktree_paths
+    assert main_paths
+    assert (worktree / ".mdex" / "mdex_index.db").resolve().as_posix() in worktree_paths
+    assert (main / ".mdex" / "mdex_index.db").resolve().as_posix() in main_paths
+
+
+def test_resolve_db_path_worktree_creates_local_db_when_must_exist_false(
+    tmp_path: Path,
+) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (main / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+
+    resolved = resolve_db_path(None, cwd=worktree, must_exist=False)
+
+    assert Path(resolved["path"]) == (worktree / ".mdex" / "mdex_index.db").resolve()
+    assert resolved["source"] == "repo_default"
+    assert all(
+        attempt["source"] != "worktree_common_root"
+        for attempt in resolved["resolution_attempts"]
+    )
+
+
+def test_resolve_db_path_worktree_fallback_disabled_for_writers(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (main / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+
+    with pytest.raises(DbResolutionError) as caught:
+        resolve_db_path(None, cwd=worktree, must_exist=True, allow_worktree_fallback=False)
+
+    payload = caught.value.payload
+    assert payload["error"] == "db not found"
+    assert all(
+        attempt["source"] != "worktree_common_root"
+        for attempt in payload["resolution_attempts"]
+    )
+
+
+def test_resolve_db_path_worktree_without_commondir_stays_fail_closed(
+    tmp_path: Path,
+) -> None:
+    main, worktree = _make_linked_worktree(tmp_path, commondir=False)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (main / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+
+    with pytest.raises(DbResolutionError) as caught:
+        resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    assert all(
+        attempt["source"] != "worktree_common_root"
+        for attempt in caught.value.payload["resolution_attempts"]
+    )
+
+
+def test_resolve_db_path_worktree_dedupes_mirrored_config_default(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {"db": ".mdex/mdex_index.db"})
+    _write_config(worktree, {"db": ".mdex/mdex_index.db"})
+
+    with pytest.raises(DbResolutionError) as caught:
+        resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    mirrored = [
+        attempt["path"]
+        for attempt in caught.value.payload["resolution_attempts"]
+        if attempt["source"] == "worktree_common_root"
+    ]
+    assert len(mirrored) == len(set(mirrored))
+    assert (main / ".mdex" / "mdex_index.db").resolve().as_posix() in mirrored
+
+
+def test_resolve_db_path_worktree_skips_mirror_escaping_main_root(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(worktree, {})
+    local_db = worktree / ".mdex" / "mdex_index.db"
+    local_db.write_text("", encoding="utf-8")
+    outside = tmp_path / "outside-mdex"
+    outside.mkdir()
+    try:
+        (main / ".mdex").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is not available in this environment")
+
+    resolved = resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    assert Path(resolved["path"]) == local_db.resolve()
+    assert resolved["source"] == "repo_default"
+
+
+def test_resolve_db_path_worktree_keeps_env_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (main / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+    env_db = tmp_path / "env" / "from-env.db"
+    env_db.parent.mkdir(parents=True, exist_ok=True)
+    env_db.write_text("", encoding="utf-8")
+    monkeypatch.setenv("MDEX_DB", str(env_db))
+
+    resolved = resolve_db_path(None, cwd=worktree, must_exist=True)
+
+    assert Path(resolved["path"]) == env_db.resolve()
+    assert resolved["source"] == "env"

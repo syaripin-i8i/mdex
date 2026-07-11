@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve the index DB from linked git worktrees: when the anchored repo root's `.git` is a worktree marker file and the config/default DB candidates are missing locally (tracked `.mdex/config.json` without the untracked DB), the same relative candidates are retried under the main checkout root (derived from the marker's `gitdir:` and its `commondir`, without subprocess) and recorded as `worktree_common_root` in `resolution_attempts`. The fallback is read-only twice over — `must_exist=False` creation never targets the main checkout, and the writing commands `enrich` / `stamp` / `finish` resolve with the fallback disabled, keeping their fail-closed `db not found` behavior. It keeps `--db` / `MDEX_DB` precedence, skips submodules, bare repositories, and stale worktree markers, skips (rather than fails on) mirror candidates escaping the main checkout, and never walks parent directories into an outer repository. `context` on a borrowed DB reports `evidence_identity` as `identified` with reason `worktree_borrowed_index` instead of `verified`/reusable, because freshness is verified against the main checkout's files, not the worktree's checked-out content.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mdex.path_identity import deduplicate_directory_paths
+from mdex.path_identity import canonical_path_key, deduplicate_directory_paths
 
 DEFAULT_CONFIG_RELATIVE = ".mdex/config.json"
 DEFAULT_DB_RELATIVE = ".mdex/mdex_index.db"
@@ -15,6 +15,7 @@ DEFAULT_SCAN_ROOT = "."
 DEFAULT_SCAN_CONFIG = "control/scan_config.json"
 DEFAULT_TASK_DIR = "tasks"
 DEFAULT_DECISION_DIR = "decision"
+WORKTREE_COMMON_ROOT_SOURCE = "worktree_common_root"
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,63 @@ def _walk_parents(start: Path) -> list[Path]:
     parents = [current]
     parents.extend(current.parents)
     return parents
+
+
+def _worktree_gitdir(repo_root: Path) -> Path | None:
+    git_marker = repo_root / ".git"
+    if not git_marker.is_file():
+        return None
+    try:
+        marker_text = git_marker.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in marker_text.splitlines():
+        if not line.startswith("gitdir:"):
+            continue
+        value = line[len("gitdir:") :].strip()
+        if not value:
+            return None
+        gitdir = Path(value)
+        if not gitdir.is_absolute():
+            gitdir = repo_root / gitdir
+        return gitdir.resolve()
+    return None
+
+
+def worktree_common_root(repo_root: Path) -> Path | None:
+    """Return the main checkout root when repo_root is a linked git worktree.
+
+    A linked worktree marks its root with a `.git` FILE pointing at
+    `<main>/.git/worktrees/<name>`. The common git dir is resolved from that
+    gitdir's `commondir` file (git's own indirection, written for every linked
+    worktree). Submodules (`.git/modules/...`, no commondir), bare
+    repositories, and stale markers whose gitdir no longer exists resolve to
+    None so resolution stays fail-closed instead of guessing a main checkout.
+    """
+    gitdir = _worktree_gitdir(repo_root)
+    if gitdir is None:
+        return None
+
+    commondir_file = gitdir / "commondir"
+    if not commondir_file.is_file():
+        return None
+    try:
+        raw_common = commondir_file.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not raw_common:
+        return None
+    common_path = Path(raw_common)
+    if not common_path.is_absolute():
+        common_path = gitdir / common_path
+    common_dir = common_path.resolve()
+
+    if common_dir.name != ".git" or not common_dir.is_dir():
+        return None
+    main_root = common_dir.parent
+    if canonical_path_key(main_root) == canonical_path_key(repo_root):
+        return None
+    return main_root
 
 
 def detect_repo_root(start_dir: str | Path | None = None) -> Path:
@@ -185,6 +243,8 @@ def resolve_scan_config_path(context: RuntimeContext) -> Path:
 def _candidate_rows(
     context: RuntimeContext,
     explicit_db: str | None,
+    *,
+    worktree_fallback: bool,
 ) -> list[tuple[str, Path]]:
     candidates: list[tuple[str, Path]] = []
 
@@ -216,12 +276,34 @@ def _candidate_rows(
             )
         )
 
+    local_rows: list[tuple[str, str]] = []
     config_db = context.config.get("db")
     if isinstance(config_db, str) and config_db.strip():
-        candidates.append(("config", _as_path(context.repo_root, config_db.strip(), key="db")))
+        local_rows.append(("config", config_db.strip()))
+    local_rows.append(("repo_default", DEFAULT_DB_RELATIVE))
+    local_rows.append(("repo_default", FALLBACK_DB_RELATIVE))
+    for source, value in local_rows:
+        candidates.append((source, _as_path(context.repo_root, value, key="db")))
 
-    candidates.append(("repo_default", _as_path(context.repo_root, DEFAULT_DB_RELATIVE, key="db")))
-    candidates.append(("repo_default", _as_path(context.repo_root, FALLBACK_DB_RELATIVE, key="db")))
+    if worktree_fallback:
+        main_root = worktree_common_root(context.repo_root)
+        if main_root is not None:
+            seen_mirrors: set[str] = set()
+            for _, value in local_rows:
+                if Path(value).is_absolute():
+                    continue
+                try:
+                    mirrored = _as_path(main_root, value, key="db")
+                except ValueError:
+                    # A mirror escaping the main checkout (e.g. through a
+                    # symlinked .mdex) is skipped instead of aborting the
+                    # whole resolution.
+                    continue
+                mirror_key = canonical_path_key(mirrored)
+                if mirror_key in seen_mirrors:
+                    continue
+                seen_mirrors.add(mirror_key)
+                candidates.append((WORKTREE_COMMON_ROOT_SOURCE, mirrored))
     return candidates
 
 
@@ -266,9 +348,18 @@ def resolve_db_path(
     *,
     cwd: str | Path | None = None,
     must_exist: bool = True,
+    allow_worktree_fallback: bool = True,
 ) -> dict[str, Any]:
+    # The worktree fallback is read-only: it never applies when the resolved
+    # path may be created (must_exist=False) or when the caller intends to
+    # write (allow_worktree_fallback=False), so a worktree cannot target the
+    # main checkout's db.
     context = load_runtime_context(cwd)
-    candidates = _candidate_rows(context, explicit_db)
+    candidates = _candidate_rows(
+        context,
+        explicit_db,
+        worktree_fallback=must_exist and allow_worktree_fallback,
+    )
     attempts: list[dict[str, Any]] = []
 
     for source, candidate in candidates:

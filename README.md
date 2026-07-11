@@ -358,6 +358,7 @@ Agent integration guidance, including safe argv execution for structured actions
 3. `.mdex/config.json` の `db`
 4. `repo/.mdex/mdex_index.db`
 5. `repo/mdex_index.db`
+6. repo root が linked git worktree（`.git` が file）の場合のみ、3–5 と同じ相対候補を main checkout root 配下で再試行（`resolution_attempts` に `worktree_common_root` として記録）。この fallback は読み取り専用: DB 新規作成先には使わず、書き込み系コマンド（`enrich` / `stamp` / `finish`）には適用されない
 
 ## Public Scan Config
 

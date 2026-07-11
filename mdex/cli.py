@@ -13,6 +13,7 @@ from mdex.builder import build_index
 from mdex.contract import with_contract_metadata, with_error_contract
 from mdex.context import build_agent_prompt_pack, resolve_context_scoring_config, select_context, zero_hits_field
 from mdex.dbresolve import (
+    WORKTREE_COMMON_ROOT_SOURCE,
     DbResolutionError,
     RuntimeContext,
     load_runtime_context,
@@ -218,10 +219,20 @@ def _resolve_context_scoring(
     )
 
 
-def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any] | None:
+def _resolve_db(
+    args: argparse.Namespace,
+    *,
+    must_exist: bool,
+    allow_worktree_fallback: bool = True,
+) -> dict[str, Any] | None:
     explicit = getattr(args, "db", None)
     try:
-        resolved = resolve_db_path(explicit, cwd=Path.cwd(), must_exist=must_exist)
+        resolved = resolve_db_path(
+            explicit,
+            cwd=Path.cwd(),
+            must_exist=must_exist,
+            allow_worktree_fallback=allow_worktree_fallback,
+        )
     except DbResolutionError as exc:
         _emit_error_payload(exc.payload)
         return None
@@ -231,8 +242,13 @@ def _resolve_db(args: argparse.Namespace, *, must_exist: bool) -> dict[str, Any]
     return resolved
 
 
-def _context_evidence_identity(db_path: str) -> dict[str, Any]:
-    """Expose a scan generation with a machine-verified source-state result."""
+def _context_evidence_identity(db_path: str, *, borrowed: bool = False) -> dict[str, Any]:
+    """Expose a scan generation with a machine-verified source-state result.
+
+    A db borrowed from the main checkout (worktree fallback) never counts as
+    verified/reusable: its freshness is measured against the main checkout's
+    files, not the worktree's checked-out content.
+    """
     try:
         metadata = list_index_metadata(db_path)
         manifest = load_scan_manifest(metadata)
@@ -244,10 +260,17 @@ def _context_evidence_identity(db_path: str) -> dict[str, Any]:
         }
     source_state = verify_manifest_source_state(manifest, metadata)
     fresh = source_state["status"] == "fresh"
+    verified = fresh and not borrowed
+    if verified:
+        reason = "source_state_verified"
+    elif fresh:
+        reason = "worktree_borrowed_index"
+    else:
+        reason = str(source_state["reason"])
     return {
-        "status": "verified" if fresh else "identified",
-        "reusable": fresh,
-        "reason": "source_state_verified" if fresh else str(source_state["reason"]),
+        "status": "verified" if verified else "identified",
+        "reusable": verified,
+        "reason": reason,
         "scan_id": str(manifest["scan_id"]),
         "config_hash": str(manifest["config_hash"]),
         "index_kind": str(manifest["index_kind"]),
@@ -1032,7 +1055,10 @@ def _cmd_context(args: argparse.Namespace) -> int:
                 scoring_config=scoring_config,
                 scoring_config_source=scoring_source,
             )
-            result["evidence_identity"] = _context_evidence_identity(db_path)
+            result["evidence_identity"] = _context_evidence_identity(
+                db_path,
+                borrowed=str(db_info.get("source", "")) == WORKTREE_COMMON_ROOT_SOURCE,
+            )
         else:
             result = build_multi_context_payload(
                 args.query,
@@ -1109,7 +1135,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
 
 
 def _cmd_enrich(args: argparse.Namespace) -> int:
-    db_info = _resolve_db(args, must_exist=True)
+    db_info = _resolve_db(args, must_exist=True, allow_worktree_fallback=False)
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
@@ -1196,7 +1222,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
 
 
 def _cmd_finish(args: argparse.Namespace) -> int:
-    db_info = _resolve_db(args, must_exist=True)
+    db_info = _resolve_db(args, must_exist=True, allow_worktree_fallback=False)
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))
@@ -1251,7 +1277,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
 
 def _cmd_stamp(args: argparse.Namespace) -> int:
-    db_info = _resolve_db(args, must_exist=True)
+    db_info = _resolve_db(args, must_exist=True, allow_worktree_fallback=False)
     if db_info is None:
         return 2
     db_path = str(Path(str(db_info["path"])))

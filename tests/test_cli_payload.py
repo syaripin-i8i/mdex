@@ -68,3 +68,9 @@ def test_context_evidence_identity_exposes_verified_generation(monkeypatch) -> N
             "current_fingerprint_hash": "sha256:same",
         },
     }
+
+    borrowed = cli._context_evidence_identity("index.db", borrowed=True)
+    assert borrowed["status"] == "identified"
+    assert borrowed["reusable"] is False
+    assert borrowed["reason"] == "worktree_borrowed_index"
+    assert borrowed["source_state"]["status"] == "fresh"

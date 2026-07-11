@@ -64,7 +64,7 @@
         },
         "source": {
           "type": "string",
-          "description": "Resolution source for db path (arg/env/config/default)."
+          "description": "Resolution source for db path (arg/env/config/repo_default/worktree_common_root)."
         }
       },
       "additionalProperties": true

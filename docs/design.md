@@ -55,6 +55,24 @@ manifest を fail-closed で再検証し、lock 内でも旧 scan ID を照合�
 3. `.mdex/config.json` の `db`
 4. `.mdex/mdex_index.db`
 5. `mdex_index.db`
+6. linked git worktree（repo root の `.git` が `gitdir:` file）の場合、3–5 の相対候補を
+   main checkout root 配下で再試行（source は `worktree_common_root`）
+
+worktree fallback は `.git` file の `gitdir:` と gitdir 内 `commondir` を parse して
+main checkout root を導出する（`git rev-parse --git-common-dir` 相当、subprocess 不使用）。
+tracked config だけが worktree に checkout され untracked DB が main にしか無い場合でも
+読み取り解決が成立する。fallback は読み取り専用で二重に強制する:
+`must_exist=False`（scan 等の生成先）では worktree 候補を列挙せず worktree 内に留め、
+書き込み系コマンド（`enrich` / `stamp` / `finish`）は `allow_worktree_fallback=False` で
+解決するため従来通り `db not found` で fail-closed になる。
+submodule / bare repo / `commondir` を欠く stale worktree marker は fallback 対象外。
+mirror 候補は worktree 側 checked-out config に基づく（main 側 config が分岐して
+別名 DB を指す場合は解決しない）。main root を escape する mirror（symlink 経由等）は
+skip し、解決全体は失敗させない。借用 DB で `context` を実行した場合、
+`evidence_identity` は `verified` / `reusable: true` を主張せず
+`identified` + reason `worktree_borrowed_index` に留める（freshness は main 側
+ファイルに対する検証であり、worktree の checked-out 内容を束縛しないため）。
+親ディレクトリ遡りによる別 repo index の流用は行わない（fail-closed）。
 
 失敗時は `resolution_attempts` を含む JSON エラーを返す。
 
