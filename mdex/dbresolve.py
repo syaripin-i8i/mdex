@@ -120,6 +120,21 @@ def worktree_common_root(repo_root: Path) -> Path | None:
     return main_root
 
 
+def worktree_mirror_candidate(main_root: Path, value: str, *, key: str) -> Path | None:
+    """Mirror a repo-relative candidate under the main checkout root.
+
+    Absolute values are never re-anchored, and a mirror escaping the main
+    checkout (e.g. through a symlinked `.mdex`) returns None so the caller
+    skips the candidate instead of aborting resolution.
+    """
+    if Path(value).is_absolute():
+        return None
+    try:
+        return _as_path(main_root, value, key=key)
+    except ValueError:
+        return None
+
+
 def detect_repo_root(start_dir: str | Path | None = None) -> Path:
     origin = Path(start_dir or Path.cwd()).resolve()
     parents = _walk_parents(origin)
@@ -244,7 +259,7 @@ def _candidate_rows(
     context: RuntimeContext,
     explicit_db: str | None,
     *,
-    worktree_fallback: bool,
+    main_root: Path | None,
 ) -> list[tuple[str, Path]]:
     candidates: list[tuple[str, Path]] = []
 
@@ -285,25 +300,17 @@ def _candidate_rows(
     for source, value in local_rows:
         candidates.append((source, _as_path(context.repo_root, value, key="db")))
 
-    if worktree_fallback:
-        main_root = worktree_common_root(context.repo_root)
-        if main_root is not None:
-            seen_mirrors: set[str] = set()
-            for _, value in local_rows:
-                if Path(value).is_absolute():
-                    continue
-                try:
-                    mirrored = _as_path(main_root, value, key="db")
-                except ValueError:
-                    # A mirror escaping the main checkout (e.g. through a
-                    # symlinked .mdex) is skipped instead of aborting the
-                    # whole resolution.
-                    continue
-                mirror_key = canonical_path_key(mirrored)
-                if mirror_key in seen_mirrors:
-                    continue
-                seen_mirrors.add(mirror_key)
-                candidates.append((WORKTREE_COMMON_ROOT_SOURCE, mirrored))
+    if main_root is not None:
+        seen_mirrors: set[str] = set()
+        for _, value in local_rows:
+            mirrored = worktree_mirror_candidate(main_root, value, key="db")
+            if mirrored is None:
+                continue
+            mirror_key = canonical_path_key(mirrored)
+            if mirror_key in seen_mirrors:
+                continue
+            seen_mirrors.add(mirror_key)
+            candidates.append((WORKTREE_COMMON_ROOT_SOURCE, mirrored))
     return candidates
 
 
@@ -355,50 +362,46 @@ def resolve_db_path(
     # write (allow_worktree_fallback=False), so a worktree cannot target the
     # main checkout's db.
     context = load_runtime_context(cwd)
-    candidates = _candidate_rows(
-        context,
-        explicit_db,
-        worktree_fallback=must_exist and allow_worktree_fallback,
+    main_root = (
+        worktree_common_root(context.repo_root)
+        if must_exist and allow_worktree_fallback
+        else None
     )
+    candidates = _candidate_rows(context, explicit_db, main_root=main_root)
     attempts: list[dict[str, Any]] = []
+
+    def _resolved(source: str, candidate: Path) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "path": _to_display_path(candidate),
+            "source": source,
+            "repo_root": _to_display_path(context.repo_root),
+            "config_path": _to_display_path(context.config_path),
+            "config": context.config,
+            "resolution_attempts": attempts,
+        }
+        if main_root is not None:
+            # Surfaced so downstream resolution (multi-index aliases, manifest
+            # JSON confinement) can reuse the same borrow root without
+            # re-deriving it from the git worktree marker.
+            payload["worktree_common_root"] = _to_display_path(main_root)
+        return payload
 
     for source, candidate in candidates:
         _append_attempt(attempts, source, candidate)
 
         if must_exist:
             if candidate.exists():
-                return {
-                    "path": _to_display_path(candidate),
-                    "source": source,
-                    "repo_root": _to_display_path(context.repo_root),
-                    "config_path": _to_display_path(context.config_path),
-                    "config": context.config,
-                    "resolution_attempts": attempts,
-                }
+                return _resolved(source, candidate)
             continue
 
         if candidate.exists():
-            return {
-                "path": _to_display_path(candidate),
-                "source": source,
-                "repo_root": _to_display_path(context.repo_root),
-                "config_path": _to_display_path(context.config_path),
-                "config": context.config,
-                "resolution_attempts": attempts,
-            }
+            return _resolved(source, candidate)
 
         if source in {"config", "repo_default"}:
             candidate = _ensure_generated_db_path(context.repo_root, candidate, key="db")
 
         if _ensure_parent(candidate):
-            return {
-                "path": _to_display_path(candidate),
-                "source": source,
-                "repo_root": _to_display_path(context.repo_root),
-                "config_path": _to_display_path(context.config_path),
-                "config": context.config,
-                "resolution_attempts": attempts,
-            }
+            return _resolved(source, candidate)
 
     hint_db = _to_display_path(_as_path(context.repo_root, DEFAULT_DB_RELATIVE, key="db"))
     payload = {

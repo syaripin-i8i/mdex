@@ -113,6 +113,7 @@
     },
     "multi_index": {
       "type": "object",
+      "description": "Present when start was merged from multiple index databases. Each indexes.* entry carries a source label (config:<alias>/default:<alias>, suffixed with +worktree_common_root for a db borrowed read-only from a linked worktree's main checkout; borrowed entries also set borrowed and local_path).",
       "additionalProperties": true
     },
     "per_index_start": {

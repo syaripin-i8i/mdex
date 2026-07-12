@@ -360,6 +360,8 @@ Agent integration guidance, including safe argv execution for structured actions
 5. `repo/mdex_index.db`
 6. repo root が linked git worktree（`.git` が file）の場合のみ、3–5 と同じ相対候補を main checkout root 配下で再試行（`resolution_attempts` に `worktree_common_root` として記録）。この fallback は読み取り専用: DB 新規作成先には使わず、書き込み系コマンド（`enrich` / `stamp` / `finish`）には適用されない
 
+multi-index alias（`--include repo,task,artifacts` 等の task / memory / artifacts DB）も同じ規則に従います: worktree 側の相対候補が欠けている場合のみ、実在する main checkout 側 DB を読み取り専用で借用し、`multi_index.indexes.<alias>.source` に `config:<alias>+worktree_common_root` / `default:<alias>+worktree_common_root` として記録します（`borrowed: true` と worktree 側 `local_path` を併記）。借用 DB は scan の生成先・推奨対象にはなりません。
+
 ## Public Scan Config
 
 公開向け既定 config は `control/scan_config.json`。

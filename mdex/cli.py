@@ -287,6 +287,17 @@ def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) 
         return None
 
     repo_root = Path(repo_root_raw)
+    # A db borrowed from the main checkout (worktree fallback) pairs with the
+    # main checkout's generated JSON, so the .mdex confinement anchors there.
+    # The JSON is only read for consistency checks, never created, so the
+    # borrow stays read-only; a borrowed db without a recorded main root
+    # fails closed to "no JSON" instead of guessing.
+    output_root = repo_root
+    if str(db_info.get("source", "")) == WORKTREE_COMMON_ROOT_SOURCE:
+        common_root_raw = str(db_info.get("worktree_common_root", "") or "").strip()
+        if not common_root_raw:
+            return None
+        output_root = Path(common_root_raw)
     db_path = Path(str(db_info.get("path", ""))).resolve()
     try:
         metadata = list_index_metadata(str(db_path))
@@ -299,7 +310,7 @@ def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) 
             if canonical_path_key(str(manifest_output["db"])) != canonical_path_key(db_path):
                 return None
             return configured_generated_output_path(
-                repo_root,
+                output_root,
                 str(manifest_output["json"]),
                 key="scan manifest output.json",
             )
@@ -329,7 +340,7 @@ def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) 
         output_value = ".mdex/mdex_index.json"
     try:
         return configured_generated_output_path(
-            repo_root,
+            output_root,
             output_value,
             key="output_file",
         )

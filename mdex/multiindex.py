@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from mdex.context import project_actionable_digest, select_context, zero_hits_field
+from mdex.dbresolve import WORKTREE_COMMON_ROOT_SOURCE, worktree_mirror_candidate
 from mdex.start import build_start_payload
 from mdex.store import list_index_metadata
 
@@ -63,6 +64,11 @@ def _repo_root_from_db_info(db_info: dict[str, Any]) -> Path:
     return Path(repo_root_raw).resolve() if repo_root_raw else Path.cwd().resolve()
 
 
+def _worktree_common_root_from_db_info(db_info: dict[str, Any]) -> Path | None:
+    raw = str(db_info.get("worktree_common_root", "") or "").strip()
+    return Path(raw).resolve() if raw else None
+
+
 def _display_path(path: str | Path, repo_root: Path) -> str:
     resolved = Path(path).resolve()
     try:
@@ -76,6 +82,8 @@ def _public_index_spec(spec: dict[str, Any], repo_root: Path) -> dict[str, Any]:
     output = dict(spec)
     if "path" in output:
         output["path"] = _display_path(str(output["path"]), repo_root)
+    if "local_path" in output:
+        output["local_path"] = _display_path(str(output["local_path"]), repo_root)
     return output
 
 
@@ -187,7 +195,10 @@ def _with_artifact_index_age(spec: dict[str, Any], repo_root: Path) -> dict[str,
 
 
 def _artifact_scan_action(spec: dict[str, Any], repo_root: Path, *, reason: str) -> tuple[str, dict[str, Any]]:
-    db_path = _display_path(str(spec.get("path", "")), repo_root)
+    # A borrowed index is never a scan target: the recommendation anchors at
+    # the worktree-local path where a fresh index may be created, so a stale
+    # main-checkout db is not pushed as a write target from a worktree.
+    db_path = _display_path(str(spec.get("local_path") or spec.get("path", "")), repo_root)
     legacy = f"run mdex scan-artifacts --db {db_path}"
     structured = {
         "command": "mdex",
@@ -207,10 +218,16 @@ def _configured_indexes(db_info: dict[str, Any]) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _resolve_index_db(alias: str, db_info: dict[str, Any]) -> tuple[Path, str, dict[str, Any]]:
+def _resolve_index_db(alias: str, db_info: dict[str, Any]) -> tuple[Path, str, dict[str, Any], Path | None]:
+    """Resolve one index alias to (path, source, config spec, borrowed-from).
+
+    The fourth element is the worktree-local candidate path when the returned
+    db was borrowed from the main checkout of a linked git worktree, and None
+    otherwise.
+    """
     repo_root = _repo_root_from_db_info(db_info)
     if alias == "repo":
-        return Path(str(db_info["path"])).resolve(), str(db_info.get("source", "unknown")), {}
+        return Path(str(db_info["path"])).resolve(), str(db_info.get("source", "unknown")), {}, None
 
     configured = _configured_indexes(db_info)
     spec = configured.get(alias, {})
@@ -218,28 +235,47 @@ def _resolve_index_db(alias: str, db_info: dict[str, Any]) -> tuple[Path, str, d
         spec = {}
     raw_db = spec.get("db")
     if isinstance(raw_db, str) and raw_db.strip():
-        candidate = Path(raw_db.strip())
-        path = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
-        return path, f"config:{alias}", spec
+        value = raw_db.strip()
+        source = f"config:{alias}"
+    else:
+        value = DEFAULT_INDEX_ALIASES.get(alias, f".mdex/{alias}.db")
+        source = f"default:{alias}"
 
-    default_relative = DEFAULT_INDEX_ALIASES.get(alias, f".mdex/{alias}.db")
-    return (repo_root / default_relative).resolve(), f"default:{alias}", spec
+    candidate = Path(value)
+    path = candidate.resolve() if candidate.is_absolute() else (repo_root / candidate).resolve()
+    if path.exists():
+        return path, source, spec, None
+
+    # Read-only borrow from a linked worktree's main checkout, under the same
+    # fail-closed rules as resolve_db_path: only relative candidates are
+    # mirrored, mirrors escaping the main root are skipped, and only an
+    # existing db is borrowed — the missing worktree-local path stays the
+    # anchor for creation targets and scan recommendations.
+    main_root = _worktree_common_root_from_db_info(db_info)
+    if main_root is not None:
+        mirrored = worktree_mirror_candidate(main_root, value, key=f"indexes.{alias}.db")
+        if mirrored is not None and mirrored.exists():
+            return mirrored, f"{source}+{WORKTREE_COMMON_ROOT_SOURCE}", spec, path
+    return path, source, spec, None
 
 
 def resolve_index_specs(db_info: dict[str, Any], include: str | None) -> list[dict[str, Any]]:
     specs: list[dict[str, Any]] = []
     for alias in _coerce_include(include):
-        path, source, config = _resolve_index_db(alias, db_info)
-        specs.append(
-            {
-                "alias": alias,
-                "kind": alias,
-                "path": str(path),
-                "source": source,
-                "exists": path.exists(),
-                "config": config,
-            }
-        )
+        path, source, config, borrowed_from = _resolve_index_db(alias, db_info)
+        spec: dict[str, Any] = {
+            "alias": alias,
+            "kind": alias,
+            "path": str(path),
+            "source": source,
+            "exists": path.exists(),
+            "config": config,
+        }
+        if borrowed_from is not None or source == WORKTREE_COMMON_ROOT_SOURCE:
+            spec["borrowed"] = True
+        if borrowed_from is not None:
+            spec["local_path"] = str(borrowed_from)
+        specs.append(spec)
     return specs
 
 

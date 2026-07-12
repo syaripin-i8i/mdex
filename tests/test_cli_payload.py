@@ -74,3 +74,16 @@ def test_context_evidence_identity_exposes_verified_generation(monkeypatch) -> N
     assert borrowed["reusable"] is False
     assert borrowed["reason"] == "worktree_borrowed_index"
     assert borrowed["source_state"]["status"] == "fresh"
+
+
+def test_resolve_scan_json_path_fails_closed_for_borrowed_db_without_common_root(tmp_path) -> None:
+    # A borrowed db must never fall back to guessing a JSON confinement root:
+    # without the recorded main checkout root there is no JSON path at all.
+    db_info = {
+        "path": str(tmp_path / "main" / ".mdex" / "mdex_index.db"),
+        "source": "worktree_common_root",
+        "repo_root": str(tmp_path / "worktree"),
+        "config": {},
+    }
+
+    assert cli._resolve_scan_json_path(db_info, None) is None

@@ -358,6 +358,50 @@ def test_resolve_db_path_worktree_skips_mirror_escaping_main_root(tmp_path: Path
     assert resolved["source"] == "repo_default"
 
 
+def test_resolve_db_path_worktree_surfaces_common_root_in_payload(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (main / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+
+    borrowed = resolve_db_path(None, cwd=worktree, must_exist=True)
+    assert Path(borrowed["worktree_common_root"]) == main.resolve()
+
+    # A worktree-local db keeps the key: sibling multi-index aliases may still
+    # borrow from the main checkout even when the repo db resolved locally.
+    local_db = worktree / ".mdex" / "mdex_index.db"
+    local_db.write_text("", encoding="utf-8")
+    local = resolve_db_path(None, cwd=worktree, must_exist=True)
+    assert local["source"] == "repo_default"
+    assert Path(local["worktree_common_root"]) == main.resolve()
+
+    explicit = resolve_db_path(str(local_db), cwd=worktree, must_exist=True)
+    assert explicit["source"] == "arg"
+    assert Path(explicit["worktree_common_root"]) == main.resolve()
+
+
+def test_resolve_db_path_omits_common_root_outside_fallback_scope(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_config(repo, {})
+    (repo / ".git").mkdir()
+    (repo / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+
+    plain = resolve_db_path(None, cwd=repo, must_exist=True)
+    assert "worktree_common_root" not in plain
+
+    main, worktree = _make_linked_worktree(tmp_path)
+    _write_config(main, {})
+    _write_config(worktree, {})
+    (worktree / ".mdex" / "mdex_index.db").write_text("", encoding="utf-8")
+
+    creating = resolve_db_path(None, cwd=worktree, must_exist=False)
+    assert "worktree_common_root" not in creating
+
+    writer = resolve_db_path(None, cwd=worktree, must_exist=True, allow_worktree_fallback=False)
+    assert "worktree_common_root" not in writer
+
+
 def test_resolve_db_path_worktree_keeps_env_precedence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -74,6 +74,18 @@ skip し、解決全体は失敗させない。借用 DB で `context` を実行
 ファイルに対する検証であり、worktree の checked-out 内容を束縛しないため）。
 親ディレクトリ遡りによる別 repo index の流用は行わない（fail-closed）。
 
+fallback が有効な解決では、導出した main checkout root を db_info の
+`worktree_common_root` として一度だけ表面化し、下流は再導出しない。
+multi-index alias（task / memory / artifacts 等）も同じ規則で借用する:
+worktree 相対候補（config の `indexes.<alias>.db` または default）が欠けている場合のみ、
+同じ相対値を main checkout root 配下で再試行し、実在する DB だけを読み取り専用で借用する
+（source は `config:<alias>+worktree_common_root` / `default:<alias>+worktree_common_root`、
+spec には `borrowed: true` と worktree 側の `local_path` を併記）。絶対 path の
+config 値は再 anchor せず、main root を escape する mirror は skip する。借用 DB は
+生成先にならない: 欠損・stale 時の `scan-artifacts` 推奨は常に worktree 側 `local_path`
+を指す。借用した repo DB の doctor / status JSON 照合は、manifest の `output.json` を
+main checkout root の `.mdex` に限定して読むだけで、生成はしない。
+
 失敗時は `resolution_attempts` を含む JSON エラーを返す。
 
 ## Scan Config Contract
