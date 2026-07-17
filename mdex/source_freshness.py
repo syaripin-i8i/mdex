@@ -5,8 +5,17 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from mdex.artifacts import (
+    artifact_root_paths,
+    collect_artifact_source_fingerprints,
+    configured_artifact_scan_config,
+    resolve_artifact_root_items,
+)
 from mdex.builder import collect_source_fingerprints
-from mdex.scan_config import load_scan_config_with_identity
+from mdex.scan_config import (
+    load_json_object_with_identity,
+    load_scan_config_with_identity,
+)
 from mdex.scan_manifest import canonical_config_hash
 
 
@@ -31,7 +40,18 @@ def verify_manifest_source_state(
             raise ValueError("stored fingerprints are not an object")
 
         config_path = Path(str(manifest["config_path"]))
-        config, config_file_sha256 = load_scan_config_with_identity(config_path, optional=False)
+        index_kind = str(manifest.get("index_kind", "repo")).strip().lower()
+        if index_kind == "artifacts":
+            runtime_config, config_file_sha256 = load_json_object_with_identity(
+                config_path,
+                optional=True,
+                description="runtime config",
+            )
+            config = configured_artifact_scan_config(runtime_config)
+        else:
+            config, config_file_sha256 = load_scan_config_with_identity(
+                config_path, optional=False
+            )
         current_config_hash = canonical_config_hash(config)
         if current_config_hash != expected_config_hash:
             return {
@@ -52,16 +72,32 @@ def verify_manifest_source_state(
                 "current_config_hash": current_config_hash,
             }
 
-        scan_roots = [Path(str(value)) for value in manifest["scan_roots"]]
         node_id_root = Path(str(manifest["node_id_root"]))
-        if any(not path.is_dir() for path in [*scan_roots, node_id_root]):
-            return {"status": "stale", "reason": "scan_input_missing", **binding}
-
-        current_fingerprints = collect_source_fingerprints(
-            scan_roots,
-            config,
-            node_id_root=node_id_root,
-        )
+        if index_kind == "artifacts":
+            configured_roots = config.get("roots")
+            raw_roots = (
+                configured_roots
+                if isinstance(configured_roots, list) and configured_roots
+                else manifest["scan_roots"]
+            )
+            root_items = resolve_artifact_root_items(manifest["repo_root"], raw_roots)
+            scan_roots = artifact_root_paths(root_items)
+            if any(not path.is_dir() for path in [*scan_roots, node_id_root]):
+                return {"status": "stale", "reason": "scan_input_missing", **binding}
+            current_fingerprints = collect_artifact_source_fingerprints(
+                root_items,
+                config,
+                node_id_root=node_id_root,
+            )
+        else:
+            scan_roots = [Path(str(value)) for value in manifest["scan_roots"]]
+            if any(not path.is_dir() for path in [*scan_roots, node_id_root]):
+                return {"status": "stale", "reason": "scan_input_missing", **binding}
+            current_fingerprints = collect_source_fingerprints(
+                scan_roots,
+                config,
+                node_id_root=node_id_root,
+            )
         if not isinstance(current_fingerprints, dict):
             raise ValueError("current fingerprints are not an object")
 

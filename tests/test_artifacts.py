@@ -529,3 +529,85 @@ def test_scan_artifacts_cli_accepts_private_root_specs(tmp_path: Path) -> None:
     assert external.as_posix() not in artifact_json
     artifact_metadata = list_index_metadata(str(mdex_dir / "artifacts.db"))
     assert external.as_posix() not in artifact_metadata["scan_manifest"]
+
+
+def test_multi_index_health_resolves_artifact_config_from_runtime_config(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    outputs = repo / "outputs"
+    control = repo / "control"
+    mdex_dir = repo / ".mdex"
+    outputs.mkdir(parents=True)
+    control.mkdir()
+    mdex_dir.mkdir()
+    (repo / "source.md").write_text("# Source\n", encoding="utf-8")
+    artifact_path = outputs / "audit.json"
+    artifact_path.write_text('{"summary":"healthy artifact"}\n', encoding="utf-8")
+    (control / "scan_config.json").write_text(
+        json.dumps(
+            {
+                "include_extensions": [".md"],
+                "exclude_patterns": ["outputs/**"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (mdex_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "project": "fixture",
+                "db": ".mdex/mdex_index.db",
+                "scan_config": "control/scan_config.json",
+                "indexes": {
+                    "artifacts": {
+                        "roots": ["outputs"],
+                        "db": ".mdex/artifacts.db",
+                        "output": ".mdex/artifacts.json",
+                        "include_globs": ["**/*.json"],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo_scan = _run_cli("scan", cwd=repo)
+    artifact_scan = _run_cli("scan-artifacts", cwd=repo)
+    context = _run_cli(
+        "context",
+        "healthy artifact",
+        "--include",
+        "repo,artifacts",
+        "--actionable",
+        cwd=repo,
+    )
+
+    assert repo_scan.returncode == 0, repo_scan.stderr
+    assert artifact_scan.returncode == 0, artifact_scan.stderr
+    assert context.returncode == 0, context.stderr
+    payload = json.loads(context.stdout)
+    artifact_health = payload["health"]["indexes"]["artifacts"]
+    assert artifact_health["status"] == "healthy"
+    assert artifact_health["reusable"] is True
+    assert artifact_health["reason"] == "index_reusable"
+    assert payload["health"]["status"] == "healthy"
+    assert payload["health"]["reusable"] is True
+
+    artifact_path.write_text('{"summary":"changed artifact"}\n', encoding="utf-8")
+    changed = _run_cli(
+        "context",
+        "changed artifact",
+        "--include",
+        "repo,artifacts",
+        "--actionable",
+        cwd=repo,
+    )
+
+    assert changed.returncode == 0, changed.stderr
+    changed_payload = json.loads(changed.stdout)
+    changed_health = changed_payload["health"]["indexes"]["artifacts"]
+    assert changed_health["status"] == "stale"
+    assert changed_health["reusable"] is False
+    assert changed_health["reason"] == "source_fingerprint_mismatch"
+    assert changed_payload["health"]["reason"] == "multi_index_not_reusable"

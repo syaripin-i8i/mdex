@@ -148,6 +148,57 @@ def _resolve_root_paths(root_items: Iterable[Any]) -> list[Path]:
     return deduplicate_directory_paths(resolved)
 
 
+def configured_artifact_scan_config(runtime_config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the canonical artifacts scan subtree from composite config."""
+    for container_name in ("indexes", "multi_index"):
+        container = runtime_config.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        spec = container.get("artifacts")
+        if isinstance(spec, dict):
+            return dict(spec)
+    return {}
+
+
+def resolve_artifact_root_items(
+    repo_root: str | Path,
+    values: Iterable[Any],
+) -> list[Any]:
+    """Anchor artifact root values exactly as scan-artifacts does."""
+    root = Path(repo_root).resolve()
+    resolved: list[Any] = []
+    for item in values:
+        if isinstance(item, dict):
+            raw_path = item.get("path", item.get("root"))
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                continue
+            spec = dict(item)
+            candidate = Path(raw_path.strip())
+            spec["path"] = str(
+                candidate.resolve()
+                if candidate.is_absolute()
+                else (root / candidate).resolve()
+            )
+            spec.pop("root", None)
+            resolved.append(spec)
+            continue
+        text = str(item).strip()
+        if not text:
+            continue
+        candidate = Path(text)
+        resolved.append(
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (root / candidate).resolve()
+        )
+    return resolved
+
+
+def artifact_root_paths(root_items: Iterable[Any]) -> list[Path]:
+    """Return deduplicated filesystem roots from resolved root items."""
+    return _resolve_root_paths(root_items)
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
@@ -543,6 +594,46 @@ def _fingerprint(file_path: Path) -> dict[str, Any]:
         "size": int(stat.st_size),
         "sha256": hashlib.sha256(file_path.read_bytes()).hexdigest(),
     }
+
+
+def collect_artifact_source_fingerprints(
+    roots: Iterable[Any],
+    config: dict[str, Any] | None = None,
+    *,
+    node_id_root: str | Path,
+) -> dict[str, dict[str, Any]]:
+    """Collect scan-equivalent artifact identities without parsing payloads."""
+    active_config = config if isinstance(config, dict) else {}
+    root_values = _normalize_root_items(roots, DEFAULT_ARTIFACT_ROOTS)
+    resolved_roots = _resolve_root_paths(root_values)
+    root_path = Path(node_id_root).resolve()
+    specs = _root_specs(root_values, root_path)
+    include_globs = _normalize_list(
+        active_config.get("include_globs"), DEFAULT_INCLUDE_GLOBS
+    )
+    exclude_globs = _normalize_list(
+        active_config.get("exclude_globs"), DEFAULT_EXCLUDE_GLOBS
+    )
+    max_file_size_bytes = _config_optional_positive_int(
+        active_config.get("max_file_size_bytes"),
+        DEFAULT_MAX_FILE_SIZE_BYTES,
+    )
+
+    fingerprints: dict[str, dict[str, Any]] = {}
+    for file_path in _list_artifact_files(resolved_roots, include_globs, exclude_globs):
+        root_spec = _matching_root_spec(file_path, specs)
+        try:
+            node_id = _node_id_for_artifact(file_path, root_path, root_spec)
+        except ValueError:
+            if root_spec is not None:
+                node_id = _external_id_prefix(Path(root_spec["path"])) + "/" + file_path.name
+            else:
+                node_id = _external_id_prefix(file_path.parent) + "/" + file_path.name
+        stat = file_path.stat()
+        if max_file_size_bytes is not None and int(stat.st_size) > max_file_size_bytes:
+            continue
+        fingerprints[node_id] = _fingerprint(file_path)
+    return fingerprints
 
 
 def _warning(path: str, code: str, error: str, **extra: Any) -> dict[str, Any]:

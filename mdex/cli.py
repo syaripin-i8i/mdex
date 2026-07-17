@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from mdex.artifacts import DEFAULT_ARTIFACT_ROOTS, build_artifacts_index
+from mdex.artifacts import (
+    DEFAULT_ARTIFACT_ROOTS,
+    build_artifacts_index,
+    configured_artifact_scan_config,
+    resolve_artifact_root_items,
+)
 from mdex.builder import build_index
 from mdex.contract import with_contract_metadata, with_error_contract
 from mdex.context import build_agent_prompt_pack, resolve_context_scoring_config, select_context, zero_hits_field
@@ -48,7 +52,7 @@ from mdex.scan_manifest import (
     normalized_index_kind,
     set_scan_manifest,
 )
-from mdex.scan_config import load_scan_config_with_identity
+from mdex.scan_config import load_json_object_with_identity, load_scan_config_with_identity
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
 from mdex.start import build_start_payload
@@ -129,15 +133,7 @@ def _load_json_with_identity(
     *,
     optional: bool = False,
 ) -> tuple[dict[str, Any], str]:
-    source = Path(path)
-    if optional and not source.exists():
-        payload = b""
-        return {}, hashlib.sha256(payload).hexdigest()
-    payload = source.read_bytes()
-    data = json.loads(payload.decode("utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"JSON root must be object: {path}")
-    return data, hashlib.sha256(payload).hexdigest()
+    return load_json_object_with_identity(path, optional=optional)
 
 
 def _node_map_from_rows(nodes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -489,63 +485,26 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     return 0
 
 
-def _configured_index_spec(config: dict[str, Any], alias: str) -> dict[str, Any]:
-    indexes = config.get("indexes")
-    if isinstance(indexes, dict):
-        spec = indexes.get(alias)
-        if isinstance(spec, dict):
-            return spec
-    multi_index = config.get("multi_index")
-    if isinstance(multi_index, dict):
-        spec = multi_index.get(alias)
-        if isinstance(spec, dict):
-            return spec
-    return {}
-
-
-def _repo_path(context: RuntimeContext, value: str) -> Path:
-    candidate = Path(value)
-    if candidate.is_absolute():
-        return candidate.resolve()
-    return (context.repo_root / candidate).resolve()
-
-
-def _artifact_root_item(context: RuntimeContext, item: Any) -> Any:
-    if isinstance(item, dict):
-        raw_path = item.get("path", item.get("root"))
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            return None
-        spec = dict(item)
-        spec["path"] = str(_repo_path(context, raw_path.strip()))
-        spec.pop("root", None)
-        return spec
-    text = str(item).strip()
-    if not text:
-        return None
-    return _repo_path(context, text)
-
-
 def _cmd_scan_artifacts(args: argparse.Namespace) -> int:
     try:
         context = load_runtime_context(Path.cwd())
-        runtime_config, config_file_sha256 = _load_json_with_identity(
-            str(context.config_path),
+        runtime_config, config_file_sha256 = load_json_object_with_identity(
+            context.config_path,
             optional=True,
+            description="runtime config",
         )
-        artifact_config = dict(_configured_index_spec(runtime_config, "artifacts"))
+        artifact_config = configured_artifact_scan_config(runtime_config)
 
         if getattr(args, "root", None):
             roots = [Path(item).resolve() for item in args.root if str(item).strip()]
         else:
             raw_roots = artifact_config.get("roots")
-            if isinstance(raw_roots, list) and raw_roots:
-                roots = [
-                    item
-                    for item in (_artifact_root_item(context, raw_item) for raw_item in raw_roots)
-                    if item is not None
-                ]
-            else:
-                roots = [_repo_path(context, root) for root in DEFAULT_ARTIFACT_ROOTS]
+            roots = resolve_artifact_root_items(
+                context.repo_root,
+                raw_roots
+                if isinstance(raw_roots, list) and raw_roots
+                else DEFAULT_ARTIFACT_ROOTS,
+            )
 
         if not roots:
             raise ValueError("at least one valid artifact scan root is required")

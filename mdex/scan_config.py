@@ -143,24 +143,45 @@ def load_scan_config_with_identity(
     *,
     optional: bool = False,
 ) -> tuple[dict[str, Any], str]:
+    config, identity = load_json_object_with_identity(
+        path,
+        optional=optional,
+        description="scan config",
+    )
+    validate_scan_config(config, source=Path(path))
+    return config, identity
+
+
+def load_json_object_with_identity(
+    path: str | Path,
+    *,
+    optional: bool = False,
+    description: str = "JSON config",
+) -> tuple[dict[str, Any], str]:
+    """Load one bounded JSON object without applying a lane-specific schema.
+
+    Callers must resolve and validate the relevant configuration subtree. This
+    is used for composite runtime configuration whose top-level keys are not a
+    document scan configuration.
+    """
     source = Path(path)
     if optional and not source.exists():
         payload = b""
-        config: dict[str, Any] = {}
-        validate_scan_config(config, source=source)
-        return config, hashlib.sha256(payload).hexdigest()
+        return {}, hashlib.sha256(payload).hexdigest()
     try:
         if source.stat().st_size > MAX_SCAN_CONFIG_BYTES:
             raise ScanConfigError(
-                f"scan config exceeds the {MAX_SCAN_CONFIG_BYTES // (1024 * 1024)} MiB safety limit: {source}"
+                f"{description} exceeds the "
+                f"{MAX_SCAN_CONFIG_BYTES // (1024 * 1024)} MiB safety limit: {source}"
             )
         with source.open("rb") as handle:
             payload = handle.read(MAX_SCAN_CONFIG_BYTES + 1)
     except OSError as exc:
-        raise ScanConfigError(f"cannot read scan config {source}: {exc}") from exc
+        raise ScanConfigError(f"cannot read {description} {source}: {exc}") from exc
     if len(payload) > MAX_SCAN_CONFIG_BYTES:
         raise ScanConfigError(
-            f"scan config exceeds the {MAX_SCAN_CONFIG_BYTES // (1024 * 1024)} MiB safety limit: {source}"
+            f"{description} exceeds the "
+            f"{MAX_SCAN_CONFIG_BYTES // (1024 * 1024)} MiB safety limit: {source}"
         )
     try:
         loaded = json.loads(
@@ -168,10 +189,10 @@ def load_scan_config_with_identity(
             parse_constant=_reject_nonstandard_constant,
         )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ScanConfigError(f"invalid JSON scan config {source}: {exc}") from exc
+        raise ScanConfigError(f"invalid JSON {description} {source}: {exc}") from exc
     if not isinstance(loaded, dict):
-        raise ScanConfigError(f"scan config root must be an object: {source}")
-    validate_scan_config(loaded, source=source)
+        raise ScanConfigError(f"{description} root must be an object: {source}")
+    _reject_non_finite_numbers(loaded, source=source)
     return loaded, hashlib.sha256(payload).hexdigest()
 
 
