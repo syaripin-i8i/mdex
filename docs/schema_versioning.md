@@ -39,6 +39,10 @@ The release tag is the version boundary. Release validation must confirm that ev
 
 The `$id` values and emitted `contract_schema` values remain logical identifiers so existing consumers are not broken merely to change transport. Immutability comes from the version-tagged retrieval URL, not from a mutable default branch.
 
+Cross-schema `$ref` values use those same logical identifiers. Validators must register
+the referenced schema from the same version-tagged release or installed schema bundle;
+they must not resolve a mutable default-branch copy for a versioned payload.
+
 ## Versioning Model
 
 `mdex` uses Semantic Versioning for CLI contract compatibility.
@@ -88,6 +92,7 @@ Before `1.0.0`, `mdex` may ship contract-tightening changes in a `0.x` minor rel
 
 ## Recent Minor Additions
 
+- `0.6.0` requires the canonical `health.schema.json` contract on `doctor`, `status`, `context`, and `start`. Each command schema references that single schema rather than embedding a copy.
 - `0.5.0` adds the optional `zero_hits` disclosure (`lanes_searched` / `lanes_inactive` / `caveat` / `remediation`, shared vocabulary with cdex) to `context`, and the success-case stderr `{"zero_hits": ...}` line for `find` when a searched query matches nothing. `lanes_inactive` is an always-present map with an open reason-token set; consumers must not reject unknown tokens.
 - `0.4.0` adds optional multi-index, discovery lane, score explanation, budget audit, anomaly, suspicion, status, incremental-scan, and agent prompt-pack fields.
 - `scan.schema.json` adds optional `warnings` for per-file parse failures in non-strict scan mode.

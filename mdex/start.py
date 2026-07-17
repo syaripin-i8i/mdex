@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from mdex.context import project_actionable_digest, select_context
-from mdex.store import get_index_metadata
+from mdex.health import evaluate_index_health, evidence_identity_from_health, index_status_from_health
 
 
 def build_start_payload(
@@ -19,9 +18,16 @@ def build_start_payload(
     scoring_config: dict[str, Any] | None = None,
     scoring_config_source: str = "defaults",
     stale_after_hours: int = 24,
+    health: dict[str, Any] | None = None,
+    borrowed: bool = False,
 ) -> dict[str, Any]:
-    generated = str(get_index_metadata(db_path, "generated", "") or "").strip()
-    index_status = _index_status(generated, stale_after_hours=stale_after_hours)
+    official_health = health or evaluate_index_health(
+        db_path,
+        source=db_source,
+        borrowed=borrowed,
+        stale_after_hours=stale_after_hours,
+    )
+    index_status = index_status_from_health(official_health)
 
     context_payload = select_context(
         task,
@@ -37,10 +43,20 @@ def build_start_payload(
     recommended_next_actions = list(context_payload.get("recommended_next_actions", []))
     recommended_next_actions_v2 = list(context_payload.get("recommended_next_actions_v2", []))
 
-    if not bool(index_status.get("fresh", False)):
+    if not bool(official_health.get("reusable", False)):
         _append_scan_action(recommended_next_actions, recommended_next_actions_v2)
 
-    recommended_read_order = context_payload.get("recommended_read_order", [])
+    recommended_read_order = list(context_payload.get("recommended_read_order", []))
+    if not bool(official_health.get("reusable", False)):
+        recommended_read_order = [
+            {
+                **item,
+                "evidence_use": "unverified_non_reusable",
+                "health_reason": str(official_health.get("reason", "health_unavailable")),
+            }
+            for item in recommended_read_order
+            if isinstance(item, dict)
+        ]
     confidence = float(context_payload.get("confidence", 0.0) or 0.0)
     entrypoint_reason = _entrypoint_reason(
         recommended_read_order=recommended_read_order,
@@ -54,6 +70,8 @@ def build_start_payload(
             "path": db_path,
             "source": db_source,
         },
+        "health": official_health,
+        "evidence_identity": evidence_identity_from_health(official_health),
         "index_status": index_status,
         "entrypoint_reason": entrypoint_reason,
         "recommended_read_order": recommended_read_order,
@@ -62,7 +80,12 @@ def build_start_payload(
         "deferred_nodes": context_payload.get("deferred_nodes", []),
         "discovery_candidates": context_payload.get("discovery_candidates", []),
         "confidence": confidence,
-        "why_this_set": context_payload.get("why_this_set", []),
+        "why_this_set": list(context_payload.get("why_this_set", []))
+        + (
+            ["ranked candidates are unverified because index evidence is not reusable"]
+            if not bool(official_health.get("reusable", False))
+            else []
+        ),
         "actionable_digest": context_payload.get("actionable_digest")
         or project_actionable_digest(_fallback_actionable_digest(task), digest),
         "total_tokens": int(context_payload.get("total_tokens", 0) or 0),
@@ -71,49 +94,6 @@ def build_start_payload(
         "nodes": context_payload.get("nodes", []),
     }
     return payload
-
-
-def _parse_utc_timestamp(value: str) -> datetime | None:
-    raw = (value or "").strip()
-    if not raw:
-        return None
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except Exception:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _index_status(generated: str, *, stale_after_hours: int) -> dict[str, Any]:
-    safe_stale_after_hours = max(1, int(stale_after_hours))
-    parsed_generated = _parse_utc_timestamp(generated)
-
-    if parsed_generated is None:
-        return {
-            "ready": True,
-            "generated": generated,
-            "fresh": False,
-            "stale": True,
-            "age_hours": None,
-            "stale_after_hours": safe_stale_after_hours,
-            "reason": "missing_or_invalid_generated_timestamp",
-        }
-
-    age_hours = max(0.0, (datetime.now(timezone.utc) - parsed_generated).total_seconds() / 3600.0)
-    fresh = age_hours <= float(safe_stale_after_hours)
-    return {
-        "ready": True,
-        "generated": generated,
-        "fresh": fresh,
-        "stale": not fresh,
-        "age_hours": round(age_hours, 2),
-        "stale_after_hours": safe_stale_after_hours,
-        "reason": "fresh_index" if fresh else "stale_index",
-    }
 
 
 def _entrypoint_reason(
@@ -126,15 +106,15 @@ def _entrypoint_reason(
     is_stale = not bool(index_status.get("fresh", False))
 
     if not has_read_order and is_stale:
-        return "no_recommended_read_order_and_stale_index"
+        return "no_recommended_read_order_and_index_not_reusable"
     if not has_read_order:
         return "no_recommended_read_order"
     if confidence < 0.6 and is_stale:
-        return "low_confidence_and_stale_index"
+        return "low_confidence_and_index_not_reusable"
     if confidence < 0.6:
         return "low_confidence_candidates"
     if is_stale:
-        return "stale_index_refresh_recommended"
+        return "index_not_reusable"
     return "ranked_entrypoint_available"
 
 
@@ -154,7 +134,7 @@ def _append_scan_action(actions: list[str], actions_v2: list[dict[str, Any]]) ->
         {
             "command": "mdex",
             "args": ["scan"],
-            "reason": "refresh stale index before deciding entrypoint",
+            "reason": "refresh non-reusable index evidence before deciding entrypoint",
         }
     )
 

@@ -35,8 +35,8 @@ not a claim of broad production relevance.
 
 ## One-Repo Pilot
 
-This guide targets `mdex` 0.5.0. Pin the pilot with
-`python -m pip install "mdex-cli==0.5.0"`. If evaluating a local checkout instead,
+This guide targets `mdex` 0.6.0. Pin the pilot with
+`python -m pip install "mdex-cli==0.6.0"`. If evaluating a local checkout instead,
 record the commit and do not compare results across different commits.
 
 Choose one repository and 3–5 real, representative tasks. Before running `mdex`,

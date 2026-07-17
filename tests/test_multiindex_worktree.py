@@ -174,6 +174,45 @@ def test_resolve_index_specs_without_common_root_stays_local(tmp_path: Path) -> 
     assert "borrowed" not in specs["repo"]
 
 
+def test_resolver_discovers_legacy_task_index_name(tmp_path: Path) -> None:
+    repo = tmp_path / "legacy_task_repo"
+    repo.mkdir()
+    repo_db = repo / ".mdex" / "mdex_index.db"
+    _build_db(repo / "docs", repo_db, "repo lane body")
+    legacy_task = repo / ".mdex" / "task_index.db"
+    _build_db(repo / "tasks", legacy_task, "legacy task lane")
+    db_info = {
+        "path": str(repo_db),
+        "source": "arg",
+        "repo_root": str(repo),
+        "config": {},
+    }
+
+    task_spec = resolve_index_specs(db_info, "task")[0]
+    assert task_spec["exists"] is True
+    assert task_spec["source"] == "legacy:task"
+    assert Path(task_spec["path"]) == legacy_task.resolve()
+
+
+def test_status_uses_configured_task_index_instead_of_default_name(tmp_path: Path) -> None:
+    repo = tmp_path / "configured_task_repo"
+    repo.mkdir()
+    _write_config(repo, {"indexes": {"task": {"db": ".mdex/custom_task.db"}}})
+    repo_db = repo / ".mdex" / "mdex_index.db"
+    _build_db(repo / "docs", repo_db, "repo lane body")
+    custom_task = repo / ".mdex" / "custom_task.db"
+    _build_db(repo / "tasks", custom_task, "configured task lane")
+
+    status = _run_cli(
+        "status", "--db", str(repo_db), "--include", "task", cwd=repo
+    )
+    assert status.returncode == 0, status.stderr
+    payload = json.loads(status.stdout)
+    task_report = payload["indexes"]["task"]
+    assert task_report["health"]["reason"] == "scan_manifest_missing"
+    assert task_report["health"]["reason"] != "index_db_missing"
+
+
 def test_resolve_index_specs_missing_everywhere_keeps_local_anchor(tmp_path: Path) -> None:
     main, worktree, db_info = _worktree_db_info(tmp_path)
 
@@ -184,6 +223,24 @@ def test_resolve_index_specs_missing_everywhere_keeps_local_anchor(tmp_path: Pat
     assert task_spec["source"] == "default:task"
     assert Path(task_spec["path"]) == (worktree / ".mdex" / "task_history.db").resolve()
     assert "borrowed" not in task_spec
+
+
+def test_status_missing_task_keeps_legacy_index_health_shape(tmp_path: Path) -> None:
+    repo = tmp_path / "missing_task_repo"
+    repo.mkdir()
+    _write_config(repo, {})
+    repo_db = repo / ".mdex" / "mdex_index.db"
+    _build_db(repo / "docs", repo_db, "repo lane body")
+
+    status = _run_cli(
+        "status", "--db", str(repo_db), "--include", "task", cwd=repo
+    )
+    assert status.returncode == 0, status.stderr
+    report = json.loads(status.stdout)["indexes"]["task"]
+    assert report["health"]["reason"] == "index_db_missing"
+    assert report["index_health"]["ready"] is False
+    assert report["index_health"]["fresh"] is False
+    assert report["index_health"]["stale"] is True
 
 
 def test_multi_context_searches_borrowed_task_index(tmp_path: Path) -> None:
@@ -300,3 +357,28 @@ def test_status_from_worktree_uses_borrowed_indexes_and_main_scan_json(tmp_path:
     assert not any(
         "manifest JSON output path is unavailable" in message for message in repo_messages
     )
+
+
+def test_single_index_start_marks_borrowed_repo_db_non_reusable(tmp_path: Path) -> None:
+    main, worktree = _make_linked_worktree(tmp_path)
+    runtime_config = {"scan_config": "control/scan_config.json"}
+    _write_config(main, runtime_config)
+    _write_config(worktree, runtime_config)
+    (main / "control").mkdir()
+    (main / "control" / "scan_config.json").write_text(
+        json.dumps(_SCAN_CONFIG), encoding="utf-8"
+    )
+    (main / "docs").mkdir(parents=True)
+    (main / "docs" / "doc.md").write_text(
+        "# Doc\n\nborrowed entrypoint\n", encoding="utf-8"
+    )
+    scan = _run_cli("scan", "--root", "docs", cwd=main)
+    assert scan.returncode == 0, scan.stderr
+
+    start = _run_cli("start", "borrowed entrypoint", cwd=worktree)
+    assert start.returncode == 0, start.stderr
+    payload = json.loads(start.stdout)
+    assert payload["health"]["reason"] == "worktree_borrowed_index"
+    assert payload["health"]["reusable"] is False
+    assert payload["index_status"]["fresh"] is False
+    assert payload["entrypoint_reason"] != "ranked_entrypoint_available"

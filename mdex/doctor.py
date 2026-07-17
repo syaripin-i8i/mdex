@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from mdex.health import evaluate_index_health, index_status_from_health
 from mdex.observe import telemetry_health_findings
 from mdex.path_identity import canonical_path_key
 from mdex.store import list_index_metadata, list_missing_links, list_node_override_ids, list_node_overrides, list_nodes
@@ -44,6 +46,35 @@ WAREHOUSE_DIRECTORY_NAMES = {
 
 SEVERITY_RANK = {"ok": 0, "info": 1, "warning": 2, "error": 3}
 
+DEFAULT_DOCTOR_POLICY: dict[str, Any] = {
+    "allowlist_patterns": [],
+    "generated_path_patterns": [
+        ".mdex/**",
+        "**/.mdex/**",
+        ".cache/**",
+        "**/.cache/**",
+        "cache/**",
+        "**/cache/**",
+        "generated/**",
+        "**/generated/**",
+        "output/**",
+        "**/output/**",
+        "outputs/**",
+        "**/outputs/**",
+        "dist/**",
+        "**/dist/**",
+        "build/**",
+        "**/build/**",
+        "coverage/**",
+        "**/coverage/**",
+    ],
+    "text_extensions": [".md", ".markdown", ".txt", ".rst", ".adoc"],
+    "max_text_document_tokens": 20_000,
+    "max_node_tokens": 50_000,
+    "max_index_tokens": 1_000_000,
+    "max_index_files": 10_000,
+}
+
 
 def _to_posix(path_value: str) -> str:
     return path_value.replace("\\", "/")
@@ -62,7 +93,7 @@ def _pattern_variants(pattern: str) -> list[str]:
     return sorted(variants)
 
 
-def _matches_any(path_value: str, patterns: tuple[str, ...]) -> bool:
+def _matches_any(path_value: str, patterns: tuple[str, ...] | list[str]) -> bool:
     path = _to_posix(path_value)
     return any(
         fnmatch.fnmatch(path, variant)
@@ -94,13 +125,314 @@ def _safe_json_list(raw_value: str) -> list[dict[str, Any]]:
 
 
 def _check_result(name: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
+    normalized_findings: list[dict[str, Any]] = []
+    for finding in findings:
+        normalized = dict(finding)
+        normalized.setdefault("check", name)
+        normalized.setdefault("reason", name)
+        normalized.setdefault("path", "")
+        normalized.setdefault("recommended_action", "review mdex doctor finding")
+        normalized_findings.append(normalized)
     status = "ok"
-    if findings:
+    if normalized_findings:
         status = max(
-            (str(item.get("severity", "warning")) for item in findings),
+            (str(item.get("severity", "warning")) for item in normalized_findings),
             key=lambda value: SEVERITY_RANK.get(value, 2),
         )
-    return {"name": name, "status": status, "findings": findings}
+    return {"name": name, "status": status, "findings": normalized_findings}
+
+
+def _positive_policy_int(policy: dict[str, Any], key: str) -> int:
+    default = int(DEFAULT_DOCTOR_POLICY[key])
+    try:
+        value = int(policy.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _load_doctor_policy(
+    metadata: dict[str, str], config_path: Path | None
+) -> tuple[dict[str, Any], list[str]]:
+    policy = dict(DEFAULT_DOCTOR_POLICY)
+    exclude_patterns: list[str] = []
+    candidates: list[Path] = []
+    raw_manifest = str(metadata.get("scan_manifest", "") or "").strip()
+    if raw_manifest:
+        try:
+            manifest = json.loads(raw_manifest)
+        except json.JSONDecodeError:
+            manifest = None
+        if isinstance(manifest, dict) and str(manifest.get("config_path", "")).strip():
+            candidates.append(Path(str(manifest["config_path"])))
+    if config_path is not None:
+        candidates.append(config_path)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.resolve())
+        if key in seen or not candidate.is_file():
+            continue
+        seen.add(key)
+        try:
+            loaded = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(loaded, dict):
+            continue
+        exclude_patterns.extend(
+            str(item).strip()
+            for item in list(loaded.get("exclude_patterns", []) or [])
+            if str(item).strip()
+        )
+        configured = loaded.get("doctor_policy", {})
+        if isinstance(configured, dict):
+            for name in DEFAULT_DOCTOR_POLICY:
+                if name in configured:
+                    policy[name] = configured[name]
+        break
+
+    for key in (
+        "max_text_document_tokens",
+        "max_node_tokens",
+        "max_index_tokens",
+        "max_index_files",
+    ):
+        policy[key] = _positive_policy_int(policy, key)
+    for key in ("allowlist_patterns", "generated_path_patterns", "text_extensions"):
+        raw = policy.get(key, [])
+        policy[key] = [str(item).strip() for item in raw if str(item).strip()] if isinstance(raw, list) else list(DEFAULT_DOCTOR_POLICY[key])
+    return policy, exclude_patterns
+
+
+def _policy_disposition(
+    path: str, policy: dict[str, Any], exclude_patterns: list[str]
+) -> str:
+    if _matches_any(path, list(policy.get("allowlist_patterns", []))):
+        return "allowlisted"
+    if _matches_any(path, exclude_patterns):
+        return "excluded"
+    return "indexed"
+
+
+def _git_index_state(repo_root: Path) -> dict[str, Any]:
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except (OSError, UnicodeError) as exc:
+        return {"status": "unavailable", "detail": str(exc)}
+    if probe.returncode != 0:
+        return {"status": "unavailable", "detail": probe.stderr.strip() or "not a git repository"}
+    git_root = Path(probe.stdout.strip()).resolve()
+    try:
+        repo_prefix = repo_root.resolve().relative_to(git_root).as_posix()
+    except ValueError:
+        return {"status": "unavailable", "detail": "repository root is outside Git top level"}
+
+    def paths(*args: str) -> set[str] | None:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_root), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+        except (OSError, UnicodeError):
+            return None
+        if result.returncode != 0:
+            return None
+        values = {_to_posix(item) for item in result.stdout.split("\0") if item}
+        if repo_prefix in {"", "."}:
+            return values
+        prefix = f"{repo_prefix}/"
+        return {item[len(prefix) :] for item in values if item.startswith(prefix)}
+
+    tracked = paths("ls-files", "-z", "--cached")
+    if tracked is None:
+        return {"status": "unavailable", "detail": "git ls-files failed"}
+    return {"status": "available", "tracked": tracked}
+
+
+def _untracked_file_findings(
+    nodes: list[dict[str, Any]],
+    repo_root: Path | None,
+    node_id_root: Path | None,
+    policy: dict[str, Any],
+    exclude_patterns: list[str],
+) -> list[dict[str, Any]]:
+    if repo_root is None:
+        return [
+            {
+                "severity": "warning",
+                "path": "",
+                "reason": "git_state_unavailable",
+                "message": "Git repository root is unavailable; indexed file tracking state is unknown",
+                "recommended_action": "run mdex doctor from the indexed Git repository",
+                "state": "unavailable",
+            }
+        ]
+    state = _git_index_state(repo_root)
+    if state.get("status") != "available":
+        return [
+            {
+                "severity": "warning",
+                "path": str(repo_root),
+                "reason": "git_state_unavailable",
+                "message": "Git tracking state is unavailable; indexed files may be untracked",
+                "recommended_action": "make Git available and rerun mdex doctor",
+                "state": "unavailable",
+                "detail": str(state.get("detail", "")),
+            }
+        ]
+    tracked = set(state.get("tracked", set()))
+    if node_id_root is not None:
+        try:
+            anchor = node_id_root.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            return [
+                {
+                    "severity": "warning",
+                    "path": str(node_id_root),
+                    "reason": "git_state_unavailable",
+                    "message": "node id root is outside the Git repository; tracking state is unknown",
+                    "recommended_action": "use a node id root within the indexed Git repository",
+                    "state": "unavailable",
+                }
+            ]
+        if anchor not in {"", "."}:
+            prefix = f"{anchor}/"
+            tracked = {item[len(prefix) :] for item in tracked if item.startswith(prefix)}
+    findings: list[dict[str, Any]] = []
+    for node in nodes:
+        node_id = _to_posix(str(node.get("id", "")).strip())
+        if not node_id or node_id in tracked:
+            continue
+        disposition = _policy_disposition(node_id, policy, exclude_patterns)
+        if disposition != "indexed":
+            findings.append(
+                {
+                    "severity": "info",
+                    "path": node_id,
+                    "reason": f"untracked_path_{disposition}",
+                    "message": f"untracked indexed path is explicitly {disposition} by policy",
+                    "recommended_action": "no action required while the policy exemption is intentional",
+                    "policy_disposition": disposition,
+                }
+            )
+            continue
+        findings.append(
+            {
+                "severity": "warning",
+                "path": node_id,
+                "reason": "indexed_file_untracked",
+                "message": "Git-untracked file is present in the repository index",
+                "recommended_action": "track the file or add it to scan exclude_patterns/doctor_policy.allowlist_patterns",
+                "policy_disposition": disposition,
+            }
+        )
+    return findings
+
+
+def _generated_path_findings(
+    nodes: list[dict[str, Any]], policy: dict[str, Any], exclude_patterns: list[str]
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    patterns = list(policy.get("generated_path_patterns", []))
+    for node in nodes:
+        node_id = str(node.get("id", "")).strip()
+        if not node_id or not _matches_any(node_id, patterns):
+            continue
+        disposition = _policy_disposition(node_id, policy, exclude_patterns)
+        severity = "warning" if disposition == "indexed" else "info"
+        findings.append(
+            {
+                "severity": severity,
+                "path": node_id,
+                "reason": "generated_path_indexed" if severity == "warning" else f"generated_path_{disposition}",
+                "message": "generated/cache/output-style path is indexed" if severity == "warning" else f"generated-style path is explicitly {disposition} by policy",
+                "recommended_action": "exclude generated output or add a deliberate doctor allowlist entry" if severity == "warning" else "no action required while the policy exemption is intentional",
+                "policy_disposition": disposition,
+            }
+        )
+    return findings
+
+
+def _surface_budget_findings(
+    nodes: list[dict[str, Any]],
+    policy: dict[str, Any],
+    exclude_patterns: list[str],
+    repo_root: Path | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    text_findings: list[dict[str, Any]] = []
+    node_findings: list[dict[str, Any]] = []
+    total_findings: list[dict[str, Any]] = []
+    text_extensions = {str(item).lower() for item in policy.get("text_extensions", [])}
+    max_text = int(policy["max_text_document_tokens"])
+    max_node = int(policy["max_node_tokens"])
+    for node in nodes:
+        node_id = str(node.get("id", "")).strip()
+        tokens = int(node.get("estimated_tokens", 0) or 0)
+        disposition = _policy_disposition(node_id, policy, exclude_patterns)
+        if disposition != "indexed":
+            continue
+        if Path(node_id).suffix.lower() in text_extensions and tokens > max_text:
+            text_findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "reason": "oversized_text_document",
+                    "message": "Markdown/text document exceeds the configured token threshold",
+                    "recommended_action": "split or exclude the document, or raise doctor_policy.max_text_document_tokens deliberately",
+                    "estimated_tokens": tokens,
+                    "threshold_tokens": max_text,
+                }
+            )
+        if tokens > max_node:
+            node_findings.append(
+                {
+                    "severity": "warning",
+                    "path": node_id,
+                    "reason": "single_node_token_budget_exceeded",
+                    "message": "single indexed node exceeds the configured token budget",
+                    "recommended_action": "split or exclude the node, or raise doctor_policy.max_node_tokens deliberately",
+                    "estimated_tokens": tokens,
+                    "threshold_tokens": max_node,
+                }
+            )
+    total_tokens = sum(int(node.get("estimated_tokens", 0) or 0) for node in nodes)
+    file_count = len(nodes)
+    surface_path = str(repo_root or "")
+    if total_tokens > int(policy["max_index_tokens"]):
+        total_findings.append(
+            {
+                "severity": "warning",
+                "path": surface_path,
+                "reason": "index_token_budget_exceeded",
+                "message": "total index estimated tokens exceed the configured budget",
+                "recommended_action": "narrow scan roots/excludes or raise doctor_policy.max_index_tokens deliberately",
+                "estimated_tokens": total_tokens,
+                "threshold_tokens": int(policy["max_index_tokens"]),
+            }
+        )
+    if file_count > int(policy["max_index_files"]):
+        total_findings.append(
+            {
+                "severity": "warning",
+                "path": surface_path,
+                "reason": "index_file_budget_exceeded",
+                "message": "indexed file count exceeds the configured budget",
+                "recommended_action": "narrow scan roots/excludes or raise doctor_policy.max_index_files deliberately",
+                "indexed_files": file_count,
+                "threshold_files": int(policy["max_index_files"]),
+            }
+        )
+    return text_findings, node_findings, total_findings
 
 
 def _scan_warning_findings(metadata: dict[str, str]) -> list[dict[str, Any]]:
@@ -455,50 +787,18 @@ def index_freshness_status(
     config_path: str = "",
     stale_after_hours: int = 24,
 ) -> dict[str, Any]:
-    db_path_obj = Path(db_path)
-    if not db_path_obj.exists():
-        return {
-            "alias": alias,
-            "db": str(db_path_obj),
-            "source": source,
-            "config_path": config_path,
-            "ready": False,
-            "fresh": False,
-            "stale": True,
-            "reason": "index_db_missing",
-        }
-    metadata = list_index_metadata(str(db_path_obj))
-    generated = str(metadata.get("generated", "")).strip()
-    parsed = _parse_utc_timestamp(generated)
-    safe_stale_after_hours = max(1, int(stale_after_hours))
-    if parsed is None:
-        return {
-            "alias": alias,
-            "db": str(db_path_obj),
-            "source": source,
-            "config_path": config_path,
-            "ready": True,
-            "generated": generated,
-            "fresh": False,
-            "stale": True,
-            "age_hours": None,
-            "stale_after_hours": safe_stale_after_hours,
-            "reason": "missing_or_invalid_generated_timestamp",
-        }
-    age_hours = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0)
-    fresh = age_hours <= float(safe_stale_after_hours)
+    health = evaluate_index_health(
+        db_path,
+        alias=alias,
+        source=source,
+        stale_after_hours=stale_after_hours,
+    )
     return {
         "alias": alias,
-        "db": str(db_path_obj),
+        "db": str(Path(db_path)),
         "source": source,
         "config_path": config_path,
-        "ready": True,
-        "generated": generated,
-        "fresh": fresh,
-        "stale": not fresh,
-        "age_hours": round(age_hours, 2),
-        "stale_after_hours": safe_stale_after_hours,
-        "reason": "fresh_index" if fresh else "stale_index",
+        **index_status_from_health(health),
     }
 
 
@@ -509,16 +809,45 @@ def build_doctor_report(
     json_index_path: Path | None = None,
     config_path: Path | None = None,
     db_source: str = "unknown",
+    alias: str = "repo",
+    borrowed: bool = False,
+    health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     nodes = list_nodes(db_path)
     metadata = list_index_metadata(db_path)
     override_ids = list_node_override_ids(db_path)
     overrides = list_node_overrides(db_path)
     db_path_obj = Path(db_path)
+    node_id_root: Path | None = None
+    try:
+        raw_manifest = json.loads(str(metadata.get("scan_manifest", "") or ""))
+    except json.JSONDecodeError:
+        raw_manifest = None
+    if isinstance(raw_manifest, dict) and str(raw_manifest.get("node_id_root", "")).strip():
+        node_id_root = Path(str(raw_manifest["node_id_root"]))
+    elif str(metadata.get("scan_root", "")).strip():
+        node_id_root = Path(str(metadata["scan_root"]))
+    policy, exclude_patterns = _load_doctor_policy(metadata, config_path)
+    text_findings, node_budget_findings, total_budget_findings = _surface_budget_findings(
+        nodes, policy, exclude_patterns, repo_root
+    )
 
     checks = [
         _check_result("scan_warnings", _scan_warning_findings(metadata)),
         _check_result("indexed_path_hygiene", _indexed_path_findings(nodes)),
+        _check_result(
+            "indexed_untracked_files",
+            _untracked_file_findings(
+                nodes, repo_root, node_id_root, policy, exclude_patterns
+            ),
+        ),
+        _check_result(
+            "generated_paths",
+            _generated_path_findings(nodes, policy, exclude_patterns),
+        ),
+        _check_result("oversized_text_documents", text_findings),
+        _check_result("single_node_token_budget", node_budget_findings),
+        _check_result("index_surface_budget", total_budget_findings),
         _check_result("orphan_overrides", _override_findings(nodes, override_ids)),
         _check_result("override_freshness", _override_freshness_findings(nodes, overrides)),
         _check_result(
@@ -531,19 +860,30 @@ def build_doctor_report(
     ]
     summary = _summary(checks)
     status = _overall_status(checks)
-    freshness = index_freshness_status(
+    official_health = health or evaluate_index_health(
         db_path,
+        alias=alias,
         source=db_source,
-        config_path=str(config_path) if config_path is not None else "",
+        borrowed=borrowed,
     )
+    freshness = {
+        "alias": alias,
+        "db": str(db_path_obj),
+        "source": db_source,
+        "config_path": str(config_path) if config_path is not None else "",
+        **index_status_from_health(official_health),
+    }
     return {
         "status": status,
         "summary": summary,
+        "health": official_health,
         "index_health": freshness,
         "config": {
             "repo_root": str(repo_root) if repo_root is not None else "",
             "config_path": str(config_path) if config_path is not None else "",
             "json_index_path": str(json_index_path) if json_index_path is not None else "",
+            "doctor_policy": policy,
+            "exclude_patterns": exclude_patterns,
         },
         "checks": checks,
         "recommended_next_actions": _recommended_next_actions(summary),

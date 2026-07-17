@@ -47,7 +47,7 @@ Schema-backed success and error payloads include:
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/start.schema.json",
-  "contract_version": "0.5.0"
+  "contract_version": "0.6.0"
 }
 ```
 
@@ -180,7 +180,7 @@ The scan payload includes `warning_summary` so agents can report counts without 
 
 ## Common Recovery Loops
 
-When `start` returns `index_status.fresh == false`, run `mdex scan`, then rerun `mdex start "<task>"`.
+When `start` returns `health.reusable == false`, inspect `health.reason`, run `mdex scan`, then rerun `mdex start "<task>"`. `index_status.fresh` remains as a compatibility projection. Non-reusable read-order candidates and prompt packs are explicitly marked unverified.
 
 When `confidence < 0.6`, run the structured `mdex find` action if present, or execute `suggested_rg` safely.
 

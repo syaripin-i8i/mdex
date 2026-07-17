@@ -33,13 +33,13 @@ first. `mdex` cannot infer missing source authority.
 From PyPI (pin the version during evaluation):
 
 ```bash
-python -m pip install "mdex-cli==0.5.0"
+python -m pip install "mdex-cli==0.6.0"
 ```
 
 From the released source tag:
 
 ```bash
-python -m pip install git+https://github.com/syaripin-i8i/mdex.git@v0.5.0
+python -m pip install git+https://github.com/syaripin-i8i/mdex.git@v0.6.0
 ```
 
 For local development from this checkout:

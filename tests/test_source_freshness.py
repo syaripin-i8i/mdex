@@ -26,7 +26,7 @@ def test_source_state_is_fresh_only_when_config_and_fingerprints_match(monkeypat
     )
     monkeypatch.setattr(source_freshness.Path, "is_dir", lambda _self: True)
     monkeypatch.setattr(
-        source_freshness, "build_index", lambda *_a, **_k: {"fingerprints": fingerprints}
+        source_freshness, "collect_source_fingerprints", lambda *_a, **_k: fingerprints
     )
 
     result = source_freshness.verify_manifest_source_state(
@@ -48,8 +48,8 @@ def test_source_state_is_stale_when_current_source_differs(monkeypatch) -> None:
     monkeypatch.setattr(source_freshness.Path, "is_dir", lambda _self: True)
     monkeypatch.setattr(
         source_freshness,
-        "build_index",
-        lambda *_a, **_k: {"fingerprints": {"docs/a.md": {"sha256": "new"}}},
+        "collect_source_fingerprints",
+        lambda *_a, **_k: {"docs/a.md": {"sha256": "new"}},
     )
 
     result = source_freshness.verify_manifest_source_state(

@@ -1378,16 +1378,29 @@ def build_agent_prompt_pack(query: str, payload: dict[str, Any], role: str) -> d
         for item in discovery[:3]
     ]
     suggested_rg = [item for item in list(digest.get("suggested_rg", []) or []) if isinstance(item, dict)]
+    health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
+    health_line = (
+        f"Index health: status={health.get('status', 'unavailable')} "
+        f"reusable={str(bool(health.get('reusable', False))).lower()} "
+        f"reason={health.get('reason', 'health_unavailable')}"
+    )
     prompt_lines = [
         f"Role: {clean_role}",
         f"Task/query: {query.strip()}",
         role_instructions[clean_role],
+        health_line,
+        (
+            "Treat ranked reads as unverified and run mdex scan before relying on them."
+            if not bool(health.get("reusable", False))
+            else "The indexed evidence is verified and reusable."
+        ),
         "Read the required_reads first, then inspect discovery_candidates only if they can change the decision.",
     ]
     return {
         "role": clean_role,
         "query": query.strip(),
         "instructions": role_instructions[clean_role],
+        "health": health,
         "required_reads": required_reads,
         "discovery_candidates": side_reads,
         "actionable_digest": digest,

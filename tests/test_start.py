@@ -5,6 +5,26 @@ import pytest
 from mdex import start
 
 
+def _stale_health() -> dict[str, object]:
+    return {
+        "status": "stale",
+        "reusable": False,
+        "reason": "index_age_exceeded",
+        "scan_id": "scan-1",
+        "config_hash": "sha256:config",
+        "source_state": {
+            "status": "fresh",
+            "reason": "source_state_matches_scan",
+            "scan_id": "scan-1",
+            "config_hash": "sha256:config",
+        },
+        "generated": "2026-04-19T00:00:00Z",
+        "age_hours": 48.0,
+        "stale_after_hours": 24,
+        "index_kind": "repo",
+    }
+
+
 def test_build_start_payload_uses_context_and_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         start,
@@ -32,7 +52,7 @@ def test_build_start_payload_uses_context_and_metadata(monkeypatch: pytest.Monke
             "nodes": [{"id": "design/root.md"}],
         },
     )
-    monkeypatch.setattr(start, "get_index_metadata", lambda *_args, **_kwargs: "2026-04-19T00:00:00Z")
+    monkeypatch.setattr(start, "evaluate_index_health", lambda *_args, **_kwargs: _stale_health())
 
     payload = start.build_start_payload(
         "root decision",
@@ -48,7 +68,7 @@ def test_build_start_payload_uses_context_and_metadata(monkeypatch: pytest.Monke
     assert payload["index_status"]["ready"] is True
     assert payload["index_status"]["generated"] == "2026-04-19T00:00:00Z"
     assert payload["index_status"]["fresh"] is False
-    assert payload["entrypoint_reason"] == "stale_index_refresh_recommended"
+    assert payload["entrypoint_reason"] == "index_not_reusable"
     assert payload["recommended_read_order"][0]["id"] == "design/root.md"
     assert payload["recommended_next_actions_v2"][0]["command"] == "open"
     assert "run mdex scan" in payload["recommended_next_actions"]
@@ -73,7 +93,7 @@ def test_build_start_payload_fallback_digest_is_schema_shaped(monkeypatch: pytes
             "nodes": [],
         },
     )
-    monkeypatch.setattr(start, "get_index_metadata", lambda *_args, **_kwargs: "2026-04-19T00:00:00Z")
+    monkeypatch.setattr(start, "evaluate_index_health", lambda *_args, **_kwargs: _stale_health())
 
     payload = start.build_start_payload(
         "root decision",

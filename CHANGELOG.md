@@ -7,9 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-17
+
+### Added
+
+- Add one schema-backed `health` contract shared by `doctor`, `status`, `context`, and `start`, with source fingerprint validity taking precedence over timestamp age. `start` now propagates health into agent prompt packs, recommends `mdex scan` for non-reusable evidence, and marks returned candidates unverified. Doctor adds configurable untracked/generated/oversized text/single-node/total-index surface checks while keeping hygiene warnings separate from evidence reuse.
+
+### Changed
+
+- Advance the package and emitted contract version to `0.6.0` for the required `health` field, and make all four command schemas reference the canonical `health.schema.json` contract instead of embedding divergent copies.
+
 ### Fixed
 
 - Generalize the linked-worktree fallback to multi-index aliases: `status` / `context` / `start` with `--include repo,task,...` no longer report task / memory / artifacts indexes as `index_db_missing` from a linked worktree when the db exists under the main checkout. A missing worktree-relative alias candidate (config `indexes.<alias>.db` or the default) is retried under the main checkout root — surfaced once as `worktree_common_root` in the resolved db info — borrowing only an existing db read-only with the auditable source labels `config:<alias>+worktree_common_root` / `default:<alias>+worktree_common_root` (plus `borrowed: true` and the worktree-side `local_path` in the index spec). The same fail-closed rules apply as for the repo db: absolute config values are never re-anchored, mirrors escaping the main checkout are skipped, and a borrowed db is never a creation target — missing/stale `scan-artifacts` recommendations keep pointing at the worktree-local path. `doctor` / `status` on a borrowed repo db now anchor the scan manifest's JSON confinement at the main checkout root instead of returning no JSON path, removing the misleading "manifest JSON output path is unavailable or unsafe; run mdex scan" warning for consistent borrowed generations.
+- Resolve configured task indexes through the shared resolver and recognize an existing `.mdex/task_index.db` as an explicit legacy candidate, preventing false `index_db_missing` reports when the task DB exists under a supported configured or legacy name.
 - Resolve the index DB from linked git worktrees: when the anchored repo root's `.git` is a worktree marker file and the config/default DB candidates are missing locally (tracked `.mdex/config.json` without the untracked DB), the same relative candidates are retried under the main checkout root (derived from the marker's `gitdir:` and its `commondir`, without subprocess) and recorded as `worktree_common_root` in `resolution_attempts`. The fallback is read-only twice over — `must_exist=False` creation never targets the main checkout, and the writing commands `enrich` / `stamp` / `finish` resolve with the fallback disabled, keeping their fail-closed `db not found` behavior. It keeps `--db` / `MDEX_DB` precedence, skips submodules, bare repositories, and stale worktree markers, skips (rather than fails on) mirror candidates escaping the main checkout, and never walks parent directories into an outer repository. `context` on a borrowed DB reports `evidence_identity` as `identified` with reason `worktree_borrowed_index` instead of `verified`/reusable, because freshness is verified against the main checkout's files, not the worktree's checked-out content.
 
 ## [0.5.0] - 2026-07-11

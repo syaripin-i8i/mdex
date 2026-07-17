@@ -25,6 +25,12 @@ from mdex.doctor import build_doctor_report
 from mdex.enrich import enrich_node, resolve_node_id
 from mdex.finish import FinishError, run_finish
 from mdex.gittools import GitError, collect_changed_files
+from mdex.health import (
+    combine_health,
+    evaluate_index_health,
+    evidence_identity_from_health,
+    index_status_from_health,
+)
 from mdex.impact import build_impact_report
 from mdex.indexer import snapshot_database_state, write_scan_outputs
 from mdex.multiindex import build_multi_context_payload, build_multi_start_payload, resolve_index_specs
@@ -46,7 +52,6 @@ from mdex.scan_config import load_scan_config_with_identity
 from mdex.reader import NodePathError, read_node_text, validate_node_id
 from mdex.scaffold import create_decision_file, create_task_file, stamp_updated
 from mdex.start import build_start_payload
-from mdex.source_freshness import verify_manifest_source_state
 from mdex.store import (
     get_node,
     get_scan_root,
@@ -243,39 +248,10 @@ def _resolve_db(
 
 
 def _context_evidence_identity(db_path: str, *, borrowed: bool = False) -> dict[str, Any]:
-    """Expose a scan generation with a machine-verified source-state result.
-
-    A db borrowed from the main checkout (worktree fallback) never counts as
-    verified/reusable: its freshness is measured against the main checkout's
-    files, not the worktree's checked-out content.
-    """
-    try:
-        metadata = list_index_metadata(db_path)
-        manifest = load_scan_manifest(metadata)
-    except (OSError, ValueError, ScanManifestError):
-        return {
-            "status": "unavailable",
-            "reusable": False,
-            "reason": "scan_manifest_unavailable",
-        }
-    source_state = verify_manifest_source_state(manifest, metadata)
-    fresh = source_state["status"] == "fresh"
-    verified = fresh and not borrowed
-    if verified:
-        reason = "source_state_verified"
-    elif fresh:
-        reason = "worktree_borrowed_index"
-    else:
-        reason = str(source_state["reason"])
-    return {
-        "status": "verified" if verified else "identified",
-        "reusable": verified,
-        "reason": reason,
-        "scan_id": str(manifest["scan_id"]),
-        "config_hash": str(manifest["config_hash"]),
-        "index_kind": str(manifest["index_kind"]),
-        "source_state": source_state,
-    }
+    """Compatibility projection; official authority is mdex.health."""
+    return evidence_identity_from_health(
+        evaluate_index_health(db_path, borrowed=borrowed)
+    )
 
 
 def _resolve_scan_json_path(db_info: dict[str, Any], explicit_json: str | None) -> Path | None:
@@ -679,6 +655,12 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     config_path_raw = str(db_info.get("config_path", "") or "").strip()
     config_path = Path(config_path_raw) if config_path_raw else None
     json_index_path = _resolve_scan_json_path(db_info, getattr(args, "json_index", None))
+    borrowed = str(db_info.get("source", "")) == WORKTREE_COMMON_ROOT_SOURCE
+    health = evaluate_index_health(
+        db_path,
+        source=str(db_info.get("source", "unknown")),
+        borrowed=borrowed,
+    )
 
     try:
         payload = build_doctor_report(
@@ -687,6 +669,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             json_index_path=json_index_path,
             config_path=config_path,
             db_source=str(db_info.get("source", "unknown")),
+            borrowed=borrowed,
+            health=health,
         )
     except Exception as exc:
         _emit_error("doctor failed", detail=str(exc))
@@ -707,32 +691,55 @@ def _cmd_status(args: argparse.Namespace) -> int:
     json_index_path = _resolve_scan_json_path(db_info, getattr(args, "json_index", None))
 
     reports: dict[str, Any] = {}
+    index_healths: list[dict[str, Any]] = []
     for spec in resolve_index_specs(db_info, getattr(args, "include", "repo")):
         alias = str(spec["alias"])
+        health = evaluate_index_health(
+            str(spec["path"]),
+            alias=alias,
+            source=str(spec.get("source", "unknown")),
+            borrowed=bool(spec.get("borrowed", False)),
+        )
+        index_healths.append(health)
         if not bool(spec.get("exists", False)):
             reports[alias] = {
                 "status": "warning",
+                "health": health,
                 "index_health": {
                     "alias": alias,
                     "db": str(spec.get("path", "")),
                     "source": str(spec.get("source", "")),
                     "config_path": str(config_path) if config_path is not None else "",
-                    "ready": False,
-                    "fresh": False,
-                    "stale": True,
-                    "reason": "index_db_missing",
+                    **index_status_from_health(health),
                 },
                 "checks": [],
                 "summary": {"error": 0, "warning": 1, "info": 0},
                 "recommended_next_actions": ["run mdex scan for missing index"],
             }
             continue
+        spec_db_info = {
+            **db_info,
+            "path": str(spec["path"]),
+            "source": (
+                WORKTREE_COMMON_ROOT_SOURCE
+                if bool(spec.get("borrowed", False))
+                else str(spec.get("source", "unknown"))
+            ),
+        }
+        spec_json_index_path = (
+            json_index_path
+            if alias == "repo"
+            else _resolve_scan_json_path(spec_db_info, None)
+        )
         reports[alias] = build_doctor_report(
             str(spec["path"]),
             repo_root=repo_root,
-            json_index_path=json_index_path if alias == "repo" else None,
+            json_index_path=spec_json_index_path,
             config_path=config_path,
             db_source=str(spec.get("source", "unknown")),
+            alias=alias,
+            borrowed=bool(spec.get("borrowed", False)),
+            health=health,
         )
 
     status = "ok"
@@ -743,6 +750,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
     payload = {
         "status": status,
+        "health": combine_health(index_healths, alias="multi"),
         "summary": {
             "error": sum(int(report.get("summary", {}).get("error", 0) or 0) for report in reports.values() if isinstance(report, dict)),
             "warning": sum(int(report.get("summary", {}).get("warning", 0) or 0) for report in reports.values() if isinstance(report, dict)),
@@ -1066,10 +1074,13 @@ def _cmd_context(args: argparse.Namespace) -> int:
                 scoring_config=scoring_config,
                 scoring_config_source=scoring_source,
             )
-            result["evidence_identity"] = _context_evidence_identity(
+            health = evaluate_index_health(
                 db_path,
+                source=str(db_info.get("source", "unknown")),
                 borrowed=str(db_info.get("source", "")) == WORKTREE_COMMON_ROOT_SOURCE,
             )
+            result["health"] = health
+            result["evidence_identity"] = evidence_identity_from_health(health)
         else:
             result = build_multi_context_payload(
                 args.query,
@@ -1083,11 +1094,6 @@ def _cmd_context(args: argparse.Namespace) -> int:
                 scoring_config=scoring_config,
                 scoring_config_source=scoring_source,
             )
-            result["evidence_identity"] = {
-                "status": "unavailable",
-                "reusable": False,
-                "reason": "multi_index_identity_not_implemented",
-            }
     except Exception as exc:
         _emit_error("context selection failed", detail=str(exc))
         return 2
@@ -1114,6 +1120,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
                 args.task,
                 db_path,
                 db_source=str(db_info.get("source", "unknown")),
+                borrowed=str(db_info.get("source", "")) == WORKTREE_COMMON_ROOT_SOURCE,
                 budget=int(args.budget),
                 limit=int(args.limit),
                 include_content=bool(args.include_content),

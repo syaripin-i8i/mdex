@@ -7,6 +7,7 @@
   "required": [
     "contract_schema",
     "contract_version",
+    "health",
     "status",
     "summary",
     "checks",
@@ -21,6 +22,7 @@
       "type": "string",
       "description": "mdex contract version for this payload."
     },
+    "health": { "$ref": "https://github.com/syaripin-i8i/mdex/schemas/health.schema.json" },
     "status": {
       "type": "string",
       "enum": ["ok", "warning", "error"]
@@ -47,11 +49,14 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["severity", "message"],
+              "required": ["check", "severity", "reason", "path", "message", "recommended_action"],
               "properties": {
+                "check": { "type": "string", "minLength": 1 },
                 "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+                "reason": { "type": "string", "minLength": 1 },
                 "path": { "type": "string" },
-                "message": { "type": "string", "minLength": 1 }
+                "message": { "type": "string", "minLength": 1 },
+                "recommended_action": { "type": "string", "minLength": 1 }
               },
               "additionalProperties": true
             }

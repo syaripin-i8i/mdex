@@ -26,36 +26,31 @@ def test_emit_payload_supports_stderr(capsys) -> None:
 def test_context_evidence_identity_exposes_verified_generation(monkeypatch) -> None:
     monkeypatch.setattr(
         cli,
-        "list_index_metadata",
-        lambda _path: {
-            "scan_manifest": (
-                '{"manifest_version":1,"scan_id":"generation-1",'
-                '"repo_root":"/repo","scan_roots":["/repo"],"node_id_root":"/repo",'
-                '"config_path":"/repo/.mdex/config.json","config_hash":"config-1",'
-                '"config_identity":{"path":"/repo/.mdex/config.json","sha256":"abc"},'
-                '"output_json":"/repo/.mdex/index.json",'
-                '"output":{"db":"/repo/.mdex/index.db","json":"/repo/.mdex/index.json"},'
-                '"output_origin":"config","index_kind":"repo","strict":false}'
-            )
-        },
-    )
-    monkeypatch.setattr(
-        cli,
-        "verify_manifest_source_state",
-        lambda manifest, _metadata: {
-            "status": "fresh",
-            "reason": "source_state_matches_scan",
-            "scan_id": manifest["scan_id"],
-            "config_hash": manifest["config_hash"],
-            "stored_fingerprint_hash": "sha256:same",
-            "current_fingerprint_hash": "sha256:same",
+        "evaluate_index_health",
+        lambda _path, **kwargs: {
+            "status": "stale" if kwargs.get("borrowed") else "healthy",
+            "reusable": not kwargs.get("borrowed", False),
+            "reason": "worktree_borrowed_index" if kwargs.get("borrowed") else "index_reusable",
+            "scan_id": "generation-1",
+            "config_hash": "config-1",
+            "index_kind": "repo",
+            "source_state": {
+                "status": "fresh",
+                "reason": "source_state_matches_scan",
+                "scan_id": "generation-1",
+                "config_hash": "config-1",
+                "stored_fingerprint_hash": "sha256:same",
+                "current_fingerprint_hash": "sha256:same",
+            },
+            "generated": "2026-07-17T00:00:00+00:00",
+            "age_hours": 1.0,
         },
     )
     identity = cli._context_evidence_identity("index.db")
     assert identity == {
         "status": "verified",
         "reusable": True,
-        "reason": "source_state_verified",
+        "reason": "index_reusable",
         "scan_id": "generation-1",
         "config_hash": "config-1",
         "index_kind": "repo",

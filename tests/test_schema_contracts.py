@@ -6,7 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, validate
+import pytest
+from jsonschema import Draft202012Validator, ValidationError, validate
+from referencing import Registry, Resource
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,19 +41,28 @@ def _load_schema(schema_filename: str) -> dict[str, object]:
     return loaded
 
 
+def _schema_registry() -> Registry:
+    health_schema = _load_schema("health.schema.json")
+    health_id = str(health_schema["$id"])
+    return Registry().with_resource(
+        health_id, Resource.from_contents(health_schema)
+    )
+
+
 def _validate_payload(payload: dict[str, object], schema_filename: str) -> None:
     schema = _load_schema(schema_filename)
     Draft202012Validator.check_schema(schema)
-    validate(instance=payload, schema=schema)
+    Draft202012Validator(schema, registry=_schema_registry()).validate(payload)
 
 
 def _assert_contract(payload: dict[str, object], command: str) -> None:
     assert payload["contract_schema"] == f"https://github.com/syaripin-i8i/mdex/schemas/{command}.schema.json"
-    assert payload["contract_version"] == "0.5.0"
+    assert payload["contract_version"] == "0.6.0"
 
 
 def test_schema_files_are_valid_draft_2020_12() -> None:
     for name in (
+        "health.schema.json",
         "scan.schema.json",
         "start.schema.json",
         "context.schema.json",
@@ -65,6 +76,37 @@ def test_schema_files_are_valid_draft_2020_12() -> None:
     ):
         schema = _load_schema(name)
         Draft202012Validator.check_schema(schema)
+
+
+def test_command_schemas_reference_canonical_health_contract() -> None:
+    health_schema = _load_schema("health.schema.json")
+    health_id = str(health_schema["$id"])
+    registry = _schema_registry()
+    invalid_health = {
+        "status": "healthy",
+        "reusable": True,
+        "reason": "index_reusable",
+        "scan_id": "scan-1",
+        "config_hash": "sha256:config",
+        # Canonical source_state requires status/reason/scan_id/config_hash.
+        "source_state": {"status": "fresh"},
+        "generated": "2026-07-17T00:00:00+00:00",
+        "age_hours": 1.0,
+    }
+    for name in (
+        "doctor.schema.json",
+        "status.schema.json",
+        "context.schema.json",
+        "start.schema.json",
+    ):
+        schema = _load_schema(name)
+        assert schema["properties"]["health"] == {"$ref": health_id}
+        assert "health" not in schema.get("$defs", {})
+        validator = Draft202012Validator(
+            schema["properties"]["health"], registry=registry
+        )
+        with pytest.raises(ValidationError):
+            validator.validate(invalid_health)
 
 
 def test_cli_outputs_match_contract_schemas(quality_repo: Path, tmp_path: Path) -> None:
@@ -326,7 +368,7 @@ def test_opt_in_telemetry_jsonl_is_local_schema_shaped_and_redacted(quality_repo
     assert event["event"] == "command_completed"
     assert event["command"] == "start"
     assert event["exit_code"] == 0
-    assert event["contract_version"] == "0.5.0"
+    assert event["contract_version"] == "0.6.0"
     assert isinstance(event["duration_ms"], int)
     assert "confidence" in event
     assert event["suggested_rg_count"] >= 1

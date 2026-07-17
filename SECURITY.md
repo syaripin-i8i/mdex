@@ -6,8 +6,8 @@ Security fixes are provided for the latest `0.x` line on a best-effort basis.
 
 | Version | Supported |
 |---|---|
-| 0.5.x | Yes |
-| <= 0.4.x | No |
+| 0.6.x | Yes |
+| <= 0.5.x | No |
 
 ## Reporting a Vulnerability
 

@@ -6,6 +6,12 @@ from typing import Any
 
 from mdex.context import project_actionable_digest, select_context, zero_hits_field
 from mdex.dbresolve import WORKTREE_COMMON_ROOT_SOURCE, worktree_mirror_candidate
+from mdex.health import (
+    combine_health,
+    evaluate_index_health,
+    evidence_identity_from_health,
+    index_status_from_health,
+)
 from mdex.start import build_start_payload
 from mdex.store import list_index_metadata
 
@@ -19,6 +25,10 @@ DEFAULT_INDEX_ALIASES = {
     "memory": ".mdex/memory.db",
     "artifact": ".mdex/artifacts.db",
     "artifacts": ".mdex/artifacts.db",
+}
+
+LEGACY_INDEX_ALIASES = {
+    "task": (".mdex/task_index.db",),
 }
 
 
@@ -95,6 +105,23 @@ def _public_start_payload(payload: dict[str, Any], repo_root: Path) -> dict[str,
         if "path" in public_db:
             public_db["path"] = _display_path(str(public_db["path"]), repo_root)
         output["db"] = public_db
+    health = output.get("health")
+    if isinstance(health, dict):
+        output["health"] = _public_health(health, repo_root)
+    return output
+
+
+def _public_health(health: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+    output = dict(health)
+    if str(output.get("db", "")).strip():
+        output["db"] = _display_path(str(output["db"]), repo_root)
+    nested = output.get("indexes")
+    if isinstance(nested, dict):
+        output["indexes"] = {
+            str(alias): _public_health(item, repo_root)
+            for alias, item in nested.items()
+            if isinstance(item, dict)
+        }
     return output
 
 
@@ -246,6 +273,14 @@ def _resolve_index_db(alias: str, db_info: dict[str, Any]) -> tuple[Path, str, d
     if path.exists():
         return path, source, spec, None
 
+    # Legacy names are compatibility candidates owned by this resolver. They
+    # are considered only when no explicit indexes.<alias>.db was configured.
+    if source.startswith("default:"):
+        for legacy_value in LEGACY_INDEX_ALIASES.get(alias, ()):
+            legacy_path = (repo_root / legacy_value).resolve()
+            if legacy_path.exists():
+                return legacy_path, f"legacy:{alias}", spec, None
+
     # Read-only borrow from a linked worktree's main checkout, under the same
     # fail-closed rules as resolve_db_path: only relative candidates are
     # mirrored, mirrors escaping the main root are skipped, and only an
@@ -256,6 +291,19 @@ def _resolve_index_db(alias: str, db_info: dict[str, Any]) -> tuple[Path, str, d
         mirrored = worktree_mirror_candidate(main_root, value, key=f"indexes.{alias}.db")
         if mirrored is not None and mirrored.exists():
             return mirrored, f"{source}+{WORKTREE_COMMON_ROOT_SOURCE}", spec, path
+        if source.startswith("default:"):
+            for legacy_value in LEGACY_INDEX_ALIASES.get(alias, ()):
+                legacy_mirror = worktree_mirror_candidate(
+                    main_root, legacy_value, key=f"indexes.{alias}.db"
+                )
+                if legacy_mirror is not None and legacy_mirror.exists():
+                    local_legacy = (repo_root / legacy_value).resolve()
+                    return (
+                        legacy_mirror,
+                        f"legacy:{alias}+{WORKTREE_COMMON_ROOT_SOURCE}",
+                        spec,
+                        local_legacy,
+                    )
     return path, source, spec, None
 
 
@@ -398,6 +446,7 @@ def build_multi_context_payload(
     digest: str,
     scoring_config: dict[str, Any] | None,
     scoring_config_source: str,
+    health_by_alias: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     specs = resolve_index_specs(db_info, include)
     repo_root = _repo_root_from_db_info(db_info)
@@ -410,11 +459,28 @@ def build_multi_context_payload(
     shared_limit = max(1, safe_limit // max(1, len(existing_specs)))
     index_actions: list[str] = []
     index_actions_v2: list[dict[str, Any]] = []
+    health_rows: list[dict[str, Any]] = []
     for spec in specs:
         alias = str(spec["alias"])
         public_spec = _with_artifact_index_age(spec, repo_root)
+        health = (
+            dict(health_by_alias[alias])
+            if health_by_alias is not None and alias in health_by_alias
+            else evaluate_index_health(
+                str(spec["path"]),
+                alias=alias,
+                source=str(spec.get("source", "unknown")),
+                borrowed=bool(spec.get("borrowed", False)),
+            )
+        )
+        health_rows.append(health)
         if not bool(spec.get("exists", False)):
-            per_index[alias] = {"ok": False, **public_spec, "reason": "index_db_missing"}
+            per_index[alias] = {
+                "ok": False,
+                **public_spec,
+                "health": _public_health(health, repo_root),
+                "reason": "index_db_missing",
+            }
             if _is_artifact_alias(alias):
                 legacy, structured = _artifact_scan_action(
                     spec,
@@ -441,6 +507,7 @@ def build_multi_context_payload(
         per_index[alias] = {
             "ok": True,
             **public_spec,
+            "health": _public_health(health, repo_root),
             "summary": {
                 "nodes": len(payload.get("nodes", [])),
                 "total_tokens": int(payload.get("total_tokens", 0) or 0),
@@ -466,6 +533,8 @@ def build_multi_context_payload(
     budgeted_nodes, merged_total_tokens, merged_dropped = _budgeted_merged_nodes(merged_nodes, safe_budget)
     output: dict[str, Any] = {
         "query": query,
+        "health": _public_health(combine_health(health_rows), repo_root),
+        "evidence_identity": evidence_identity_from_health(combine_health(health_rows)),
         "multi_index": {"include": [spec["alias"] for spec in specs], "indexes": per_index},
         "per_index_context": {str(item.get("index", "")): item for item in contexts},
         "nodes": budgeted_nodes[:safe_limit],
@@ -537,11 +606,24 @@ def build_multi_start_payload(
     existing_specs = [spec for spec in specs if bool(spec.get("exists", False))]
     shared_budget = max(1, safe_budget // max(1, len(existing_specs)))
     shared_limit = max(1, safe_limit // max(1, len(existing_specs)))
+    health_rows: list[dict[str, Any]] = []
     for spec in specs:
         alias = str(spec["alias"])
         public_spec = _with_artifact_index_age(spec, repo_root)
+        health = evaluate_index_health(
+            str(spec["path"]),
+            alias=alias,
+            source=str(spec.get("source", "unknown")),
+            borrowed=bool(spec.get("borrowed", False)),
+        )
+        health_rows.append(health)
         if not bool(spec.get("exists", False)):
-            per_index[alias] = {"ok": False, **public_spec, "reason": "index_db_missing"}
+            per_index[alias] = {
+                "ok": False,
+                **public_spec,
+                "health": _public_health(health, repo_root),
+                "reason": "index_db_missing",
+            }
             continue
         payload = build_start_payload(
             task,
@@ -553,11 +635,18 @@ def build_multi_start_payload(
             digest=digest,
             scoring_config=scoring_config,
             scoring_config_source=scoring_config_source,
+            health=health,
+            borrowed=bool(spec.get("borrowed", False)),
         )
         _stamp_digest(payload, alias)
         payload["index"] = alias
         starts.append(payload)
-        per_index[alias] = {"ok": True, **public_spec, "index_status": payload.get("index_status", {})}
+        per_index[alias] = {
+            "ok": True,
+            **public_spec,
+            "health": _public_health(health, repo_root),
+            "index_status": payload.get("index_status", {}),
+        }
 
     contextish = build_multi_context_payload(
         task,
@@ -570,7 +659,41 @@ def build_multi_start_payload(
         digest=digest,
         scoring_config=scoring_config,
         scoring_config_source=scoring_config_source,
+        health_by_alias={str(item.get("alias", "")): item for item in health_rows},
     )
+    combined_health = combine_health(health_rows)
+    if not bool(combined_health.get("reusable", False)):
+        contextish["recommended_read_order"] = [
+            {
+                **item,
+                "evidence_use": "unverified_non_reusable",
+                "health_reason": str(combined_health.get("reason", "health_unavailable")),
+            }
+            for item in list(contextish.get("recommended_read_order", []) or [])
+            if isinstance(item, dict)
+        ]
+        why = list(contextish.get("why_this_set", []) or [])
+        why.append("ranked candidates are unverified because index evidence is not reusable")
+        contextish["why_this_set"] = _dedupe_sequence(why, key_fields=())
+        actions = list(contextish.get("recommended_next_actions", []) or [])
+        if "run mdex scan" not in actions:
+            actions.append("run mdex scan")
+        contextish["recommended_next_actions"] = actions
+        actions_v2 = list(contextish.get("recommended_next_actions_v2", []) or [])
+        if not any(
+            isinstance(item, dict)
+            and item.get("command") == "mdex"
+            and list(item.get("args", []))[:1] == ["scan"]
+            for item in actions_v2
+        ):
+            actions_v2.append(
+                {
+                    "command": "mdex",
+                    "args": ["scan"],
+                    "reason": "refresh non-reusable index evidence before deciding entrypoint",
+                }
+            )
+        contextish["recommended_next_actions_v2"] = actions_v2
     return {
         "task": task,
         "db": {
@@ -582,13 +705,27 @@ def build_multi_start_payload(
             str(item.get("index", "")): _public_start_payload(item, repo_root)
             for item in starts
         },
+        "health": _public_health(combined_health, repo_root),
+        "evidence_identity": evidence_identity_from_health(combined_health),
         "index_status": {
-            "ready": bool(starts) and len(starts) == len(specs),
-            "fresh": bool(starts)
-            and len(starts) == len(specs)
-            and all(bool(item.get("index_status", {}).get("fresh", False)) for item in starts),
+            **index_status_from_health(combined_health),
             "missing": [str(spec["alias"]) for spec in specs if not bool(spec.get("exists", False))],
         },
-        "entrypoint_reason": "multi_index_ranked_entrypoint_available" if starts else "no_available_indexes",
-        **{key: value for key, value in contextish.items() if key not in {"query", "multi_index", "per_index_context"}},
+        "entrypoint_reason": (
+            "multi_index_ranked_entrypoint_available"
+            if bool(combined_health.get("reusable", False))
+            else ("no_available_indexes" if not starts else "multi_index_not_reusable")
+        ),
+        **{
+            key: value
+            for key, value in contextish.items()
+            if key
+            not in {
+                "query",
+                "health",
+                "evidence_identity",
+                "multi_index",
+                "per_index_context",
+            }
+        },
     }

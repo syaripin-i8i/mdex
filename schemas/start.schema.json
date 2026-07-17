@@ -9,6 +9,8 @@
     "contract_version",
     "task",
     "db",
+    "health",
+    "evidence_identity",
     "index_status",
     "entrypoint_reason",
     "recommended_read_order",
@@ -52,6 +54,7 @@
       },
       "additionalProperties": true
     },
+    "health": { "$ref": "https://github.com/syaripin-i8i/mdex/schemas/health.schema.json" },
     "index_status": {
       "type": "object",
       "required": [
@@ -148,6 +151,11 @@
     },
     "agent_prompt_pack": {
       "$ref": "#/$defs/agentPromptPack"
+    },
+    "evidence_identity": {
+      "type": "object",
+      "required": ["status", "reusable", "reason"],
+      "additionalProperties": true
     }
   },
   "$defs": {

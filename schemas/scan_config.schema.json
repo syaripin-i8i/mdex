@@ -54,6 +54,7 @@
     "context_scoring": { "$ref": "#/$defs/contextScoring" },
     "synonyms": { "$ref": "#/$defs/synonymMap" },
     "search_synonyms": { "$ref": "#/$defs/synonymMap" },
+    "doctor_policy": { "$ref": "#/$defs/doctorPolicy" },
     "output_file": { "$ref": "#/$defs/nonEmptyString" }
   },
   "$defs": {
@@ -109,6 +110,28 @@
         "soft_budget_multiplier": { "type": "number", "exclusiveMinimum": 0 },
         "synonyms": { "$ref": "#/$defs/synonymMap" },
         "search_synonyms": { "$ref": "#/$defs/synonymMap" }
+      }
+    },
+    "doctorPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowlist_patterns": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "generated_path_patterns": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "text_extensions": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^\\.[A-Za-z0-9][A-Za-z0-9._+-]*$" }
+        },
+        "max_text_document_tokens": { "type": "integer", "minimum": 1 },
+        "max_node_tokens": { "type": "integer", "minimum": 1 },
+        "max_index_tokens": { "type": "integer", "minimum": 1 },
+        "max_index_files": { "type": "integer", "minimum": 1 }
       }
     }
   }

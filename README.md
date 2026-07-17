@@ -274,8 +274,8 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 |---|---|---|
 | `scan` | schema-backed object | `nodes`, `edges.total`, `edges.resolved`, `edges.unresolved`, `edges.resolution_rate` |
 | `scan-artifacts` | schema-backed object (`scan.schema.json`) | `nodes`, `output.db`, `output.json`, `index_kind`, `roots` |
-| `doctor` | schema-backed object | `status`, `summary`, `checks`, `recommended_next_actions` |
-| `status` | schema-backed object | `status`, `summary`, `indexes`, `recommended_next_actions` |
+| `doctor` | schema-backed object | `health`, `status`, `summary`, `checks`, `recommended_next_actions` |
+| `status` | schema-backed object | `health`, `status`, `summary`, `indexes`, `recommended_next_actions` |
 | `list` | utility array / table | node objects, or table rows with `--format table` |
 | `open` | source text | node body text |
 | `query` | utility object | `node`, `outgoing`, `incoming`, `stats` |
@@ -284,8 +284,8 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 | `stale` | utility array / table | stale node summary rows, or table rows with `--format table` |
 | `first` | utility object | `node`, `prerequisites` |
 | `related` | utility object | `node`, `related` |
-| `start` | schema-backed object | `task`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
-| `context` | schema-backed object | `query`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence`, `zero_hits` |
+| `start` | schema-backed object | `task`, `health`, `evidence_identity`, `index_status`, `entrypoint_reason`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `confidence` |
+| `context` | schema-backed object | `query`, `health`, `evidence_identity`, `recommended_read_order`, `recommended_next_actions`, `recommended_next_actions_v2`, `actionable_digest`, `deferred_nodes`, `confidence`, `zero_hits` |
 | `impact` | schema-backed object | `inputs`, `warnings`, `read_first`, `related_tasks`, `decision_records`, `stale_watch` |
 | `finish` | schema-backed object | `status`, `task`, `dry_run`, `noop`, `noop_reason`, `changed_files`, `enrich_candidates`, `requires_manual_targeting` |
 | `enrich` | utility object | `status`, `node_id`, `summary_source` |
@@ -303,7 +303,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 ```json
 {
   "contract_schema": "https://github.com/syaripin-i8i/mdex/schemas/error.schema.json",
-  "contract_version": "0.5.0",
+  "contract_version": "0.6.0",
   "code": "db_not_found",
   "error": "db not found",
   "resolution_attempts": []
@@ -311,6 +311,21 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 ```
 
 自動化は上表の形式をコマンド単位で選択してください。`contract_schema` の有無だけで utility JSON、table、本文を推測しないでください。人間向け整形が必要な場合だけ `--format table` を使用します。
+
+#### Unified index health
+
+`doctor` / `status` / `context` / `start` の `health` は `mdex.health.evaluate_index_health` の同じ結果です。`schemas/health.schema.json` が正本で、必須 field は `status`, `reusable`, `reason`, `scan_id`, `config_hash`, `source_state`, `generated`, `age_hours` です。
+
+- `status`: `healthy | warning | stale | unavailable`
+- `reusable`: ranked evidenceを現在のsourceへ再利用できる場合だけ`true`
+- source validityをageより先に評価するため、24時間以内でもfingerprint不一致は`stale / false / source_fingerprint_mismatch`
+- sourceが一致してもage閾値超過は`stale / false / index_age_exceeded`
+- manifest欠損・invalid、source検証不能、DB欠損は`unavailable`で楽観判定しない
+- linked worktreeから借用したDBは`worktree_borrowed_index`で再利用不可
+
+安定reason codeは `index_reusable`, `source_fingerprint_mismatch`, `config_hash_mismatch`, `config_file_identity_mismatch`, `scan_input_missing`, `source_state_verification_failed`, `index_age_exceeded`, `worktree_borrowed_index`, `missing_or_invalid_generated_timestamp`, `scan_manifest_missing`, `scan_manifest_invalid`, `index_db_missing`, `index_metadata_unavailable` です。multi-index aggregateは `multi_index_reusable`, `multi_index_not_reusable`, `multi_index_unavailable` を使い、`blocking_reasons`にlane別reasonを保持します。
+
+`index_status` と `evidence_identity` は後方互換fieldとして残りますが、いずれも`health`から生成されます。通常モードのexit codeは変更していません。`health.reusable == false` の`start`は`mdex scan`を推奨し、read orderを`evidence_use: unverified_non_reusable`として返します。
 
 #### Zero-hit disclosure（`zero_hits`）
 
@@ -328,6 +343,7 @@ mdex finish --task "root fix" --db .mdex/quality_example.db --dry-run
 機械可読契約は `schemas/` を正本とします。schema-backed CLI output:
 
 - `schemas/scan.schema.json`
+- `schemas/health.schema.json`
 - `schemas/start.schema.json`
 - `schemas/context.schema.json`
 - `schemas/doctor.schema.json`
@@ -362,6 +378,8 @@ Agent integration guidance, including safe argv execution for structured actions
 
 multi-index alias（`--include repo,task,artifacts` 等の task / memory / artifacts DB）も同じ規則に従います: worktree 側の相対候補が欠けている場合のみ、実在する main checkout 側 DB を読み取り専用で借用し、`multi_index.indexes.<alias>.source` に `config:<alias>+worktree_common_root` / `default:<alias>+worktree_common_root` として記録します（`borrowed: true` と worktree 側 `local_path` を併記）。借用 DB は scan の生成先・推奨対象にはなりません。
 
+task aliasは`.mdex/config.json`の`indexes.task.db`を最優先し、未設定時は正式resolverが`.mdex/task_history.db`を使います。互換目的で実在する`.mdex/task_index.db`もresolver内だけでlegacy候補として発見し、sourceを`legacy:task`と明示します。各コマンドがtask DB名を個別推測することはありません。
+
 ## Public Scan Config
 
 公開向け既定 config は `control/scan_config.json`。
@@ -372,6 +390,8 @@ multi-index alias（`--include repo,task,artifacts` 等の task / memory / artif
 - virtualenv / build cache は既定で scan 対象外
 - この repo の完了済み `tasks/**` は main index から外し、task-history index に分離
 - fixtures / evals / logs / dumps / archive は通常の repo index から除外し、必要時に直接読むか専用 index を使う
+
+`doctor_policy` で `allowlist_patterns`, `generated_path_patterns`, `text_extensions`, `max_text_document_tokens`, `max_node_tokens`, `max_index_tokens`, `max_index_files` を設定できます。doctorはuntracked/generated path、oversized text、単一nodeおよびindex全体のtoken/file budgetを別checkとして返します。Git状態を取得できない場合は`git_state_unavailable` warningになり、healthyとは見なしません。ただしdoctorのhygiene warningは`health.reusable`を自動的にfalseにしません。
 
 ```bash
 mdex scan --root . --config control/scan_config.json
@@ -414,13 +434,13 @@ read order と source of truth は同義ではありません。
 ## Setup
 
 ```bash
-python -m pip install "mdex-cli==0.5.0"
+python -m pip install "mdex-cli==0.6.0"
 ```
 
 Released source install:
 
 ```bash
-python -m pip install git+https://github.com/syaripin-i8i/mdex.git@v0.5.0
+python -m pip install git+https://github.com/syaripin-i8i/mdex.git@v0.6.0
 ```
 
 Local checkout install:

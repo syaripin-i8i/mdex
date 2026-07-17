@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/syaripin-i8i/mdex/schemas/health.schema.json",
+  "title": "mdex index health",
+  "description": "Authoritative evidence-reuse health shared by doctor, status, context, and start.",
+  "type": "object",
+  "required": [
+    "status",
+    "reusable",
+    "reason",
+    "scan_id",
+    "config_hash",
+    "source_state",
+    "generated",
+    "age_hours"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["healthy", "warning", "stale", "unavailable"]
+    },
+    "reusable": { "type": "boolean" },
+    "reason": {
+      "type": "string",
+      "enum": ["index_reusable", "source_fingerprint_mismatch", "config_hash_mismatch", "config_file_identity_mismatch", "scan_input_missing", "source_state_verification_failed", "index_age_exceeded", "worktree_borrowed_index", "missing_or_invalid_generated_timestamp", "scan_manifest_missing", "scan_manifest_invalid", "index_db_missing", "index_metadata_unavailable", "multi_index_reusable", "multi_index_not_reusable", "multi_index_unavailable"]
+    },
+    "scan_id": { "type": "string" },
+    "config_hash": { "type": "string" },
+    "source_state": {
+      "type": "object",
+      "required": ["status", "reason", "scan_id", "config_hash"],
+      "properties": {
+        "status": { "type": "string", "enum": ["fresh", "stale", "unknown"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "scan_id": { "type": "string" },
+        "config_hash": { "type": "string" },
+        "current_config_hash": { "type": "string" },
+        "stored_fingerprint_hash": { "type": "string" },
+        "current_fingerprint_hash": { "type": "string" },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "generated": { "type": "string" },
+    "age_hours": { "type": ["number", "null"], "minimum": 0 },
+    "stale_after_hours": { "type": "integer", "minimum": 1 },
+    "index_kind": { "type": "string" },
+    "alias": { "type": "string" },
+    "db": { "type": "string" },
+    "source": { "type": "string" },
+    "blocking_reasons": { "type": "array" },
+    "indexes": { "type": "object" }
+  },
+  "additionalProperties": true
+}

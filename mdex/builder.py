@@ -221,6 +221,40 @@ def _fingerprint(file_path: Path) -> dict[str, Any]:
     }
 
 
+def collect_source_fingerprints(
+    root: str | Path | Iterable[str | Path],
+    config: dict[str, Any],
+    *,
+    node_id_root: str | Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Collect scan-equivalent source identities without parsing documents."""
+    root_path, scan_roots = _normalize_root_inputs(root)
+    if node_id_root is not None:
+        root_path = Path(node_id_root).resolve()
+    exclude_patterns = _normalize_str_list(config.get("exclude_patterns"))
+    include_extensions = _normalize_extensions(config.get("include_extensions"))
+    use_default_exclude_patterns = _config_bool(
+        config.get("use_default_exclude_patterns"), default=True
+    )
+    indexed_paths = list_indexable_files(
+        scan_roots,
+        include_extensions,
+        exclude_patterns,
+        use_default_exclude_patterns=use_default_exclude_patterns,
+    )
+    indexed_files = _resolve_indexed_files(root_path, indexed_paths)
+    fingerprints: dict[str, dict[str, Any]] = {}
+    for file_path in indexed_files:
+        try:
+            node_id = _node_id_for_path(file_path, root_path)
+        except ValueError:
+            continue
+        if node_id in fingerprints:
+            raise ValueError(f"node_id collision detected across scan roots: {node_id}")
+        fingerprints[node_id] = _fingerprint(file_path)
+    return fingerprints
+
+
 def _is_noise_target(value: str) -> bool:
     target = value.strip()
     if not target:

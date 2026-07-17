@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from mdex.builder import build_index
+from mdex.builder import collect_source_fingerprints
 from mdex.scan_config import load_scan_config_with_identity
 from mdex.scan_manifest import canonical_config_hash
 
@@ -57,13 +57,11 @@ def verify_manifest_source_state(
         if any(not path.is_dir() for path in [*scan_roots, node_id_root]):
             return {"status": "stale", "reason": "scan_input_missing", **binding}
 
-        current_index = build_index(
+        current_fingerprints = collect_source_fingerprints(
             scan_roots,
             config,
-            strict=bool(manifest["strict"]),
             node_id_root=node_id_root,
         )
-        current_fingerprints = current_index.get("fingerprints")
         if not isinstance(current_fingerprints, dict):
             raise ValueError("current fingerprints are not an object")
 

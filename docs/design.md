@@ -30,6 +30,7 @@ AI エージェントが作業開始 (`start`) と作業終了 (`finish`) を定
 3. SQLite を正本とし、`node_overrides` を scan と分離して保持する。
 4. 入口 (`start`) と出口 (`finish`) を最優先で安定化する。
 5. 契約 field 名は README / AGENT / design で表記ゆれさせない。
+6. index evidenceの健康判定は`health.py`だけが権威を持ち、command別にfreshnessを再計算しない。
 
 ## 永続化モデル
 
@@ -114,6 +115,7 @@ mdex/
   output_paths.py scan output の境界・衝突検証
   path_identity.py path alias / root identity 検証
   scan_manifest.py scan generation / scope / config identity
+  health.py      manifest/source fingerprint/age/borrowed状態の統一health evaluator
   store.py       SQLite API
   resolver.py    first / related
   context.py     context 選別（actionable digest 出力あり）
